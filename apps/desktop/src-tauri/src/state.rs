@@ -10,13 +10,12 @@ pub struct AppState {
     pub db: Mutex<Connection>,
     pub app_data_dir: PathBuf,
     pub vault_root: PathBuf,
-    pub fixtures_root: PathBuf,
     pub is_indexing: AtomicBool,
     pub chat_cancel: AtomicBool,
 }
 
 impl AppState {
-    pub fn new(app_data_dir: PathBuf, fixtures_root: PathBuf) -> AppResult<Self> {
+    pub fn new(app_data_dir: PathBuf) -> AppResult<Self> {
         vault::ensure_dir(&app_data_dir)?;
         let vault_root = vault::vault_root(&app_data_dir);
         vault::ensure_dir(&vault_root)?;
@@ -26,7 +25,6 @@ impl AppState {
             db: Mutex::new(db),
             app_data_dir,
             vault_root,
-            fixtures_root,
             is_indexing: AtomicBool::new(false),
             chat_cancel: AtomicBool::new(false),
         })

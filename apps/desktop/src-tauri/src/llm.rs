@@ -36,5 +36,5 @@ pub async fn test_connection(settings: &AppSettings) -> AppResult<String> {
             "Connection test failed ({status}): {body}"
         )));
     }
-    Ok("Connection OK".into())
+    Ok("LLM connection OK".into())
 }

@@ -29,18 +29,38 @@ pub fn settings_get(state: State<'_, SharedState>) -> AppResult<AppSettings> {
 }
 
 #[tauri::command]
-pub fn settings_set(state: State<'_, SharedState>, settings: AppSettings) -> AppResult<()> {
+pub fn settings_set(state: State<'_, SharedState>, mut settings: AppSettings) -> AppResult<()> {
+    // Embedding model is fixed locally — not user-configurable.
+    settings.embedding_model = embeddings::DEFAULT_EMBEDDING_MODEL.into();
     let conn = state.db.lock();
     db::save_settings(&conn, &settings)
 }
 
 #[tauri::command]
-pub async fn settings_test_connection(state: State<'_, SharedState>) -> AppResult<String> {
+pub async fn settings_test_llm(state: State<'_, SharedState>) -> AppResult<String> {
     let settings = {
         let conn = state.db.lock();
         db::get_settings(&conn)?
     };
     llm::test_connection(&settings).await
+}
+
+#[tauri::command]
+pub async fn settings_test_hub(state: State<'_, SharedState>) -> AppResult<String> {
+    let settings = {
+        let conn = state.db.lock();
+        db::get_settings(&conn)?
+    };
+    let status = hub::check_hub_status(&settings.hub_base_url).await;
+    if status.online {
+        Ok(format!("Knowledge Hub OK ({})", status.hub_base_url))
+    } else {
+        Err(AppError::msg(
+            status
+                .message
+                .unwrap_or_else(|| "Knowledge Hub is not accessible".into()),
+        ))
+    }
 }
 
 #[tauri::command]
@@ -383,15 +403,21 @@ pub fn chat_cancel(state: State<'_, SharedState>) -> AppResult<()> {
 }
 
 #[tauri::command]
+pub async fn hub_status(state: State<'_, SharedState>) -> AppResult<hub::HubConnectionStatus> {
+    let settings = {
+        let conn = state.db.lock();
+        db::get_settings(&conn)?
+    };
+    Ok(hub::check_hub_status(&settings.hub_base_url).await)
+}
+
+#[tauri::command]
 pub async fn hub_list_packs(state: State<'_, SharedState>) -> AppResult<Vec<PackMeta>> {
     let settings = {
         let conn = state.db.lock();
         db::get_settings(&conn)?
     };
-    match hub::list_packs_remote(&settings.hub_base_url).await {
-        Ok(packs) if !packs.is_empty() => Ok(packs),
-        _ => hub::list_packs_fixture(&state.fixtures_root),
-    }
+    hub::list_packs_remote(&settings.hub_base_url).await
 }
 
 #[tauri::command]
@@ -462,22 +488,35 @@ pub async fn hub_download_pack(
         let conn = state.db.lock();
         db::get_settings(&conn)?
     };
-    let packs = match hub::list_packs_remote(&settings.hub_base_url).await {
-        Ok(p) if !p.is_empty() => p,
-        _ => hub::list_packs_fixture(&state.fixtures_root)?,
-    };
+    let packs = hub::list_packs_remote(&settings.hub_base_url).await?;
     let pack = packs
         .into_iter()
         .find(|p| p.id == pack_id)
         .ok_or_else(|| AppError::msg(format!("Unknown pack: {pack_id}")))?;
 
-    if hub::download_pack_remote(&settings.hub_base_url, &pack, &state.vault_root)
-        .await
-        .is_err()
+    hub::download_pack_remote(&settings.hub_base_url, &pack, &state.vault_root).await?;
+
     {
-        hub::import_pack_fixture(&state.fixtures_root, &pack, &state.vault_root)?;
+        let conn = state.db.lock();
+        hub::record_sync(&conn, &pack)?;
     }
 
+    index_rebuild(state).await
+}
+
+#[tauri::command]
+pub async fn hub_import_local_pack(
+    state: State<'_, SharedState>,
+    source_path: String,
+) -> AppResult<IndexStatus> {
+    let source = std::path::PathBuf::from(source_path.trim());
+    crate::nest_debug!(
+        "hub",
+        "import_local_pack source={}",
+        source.display()
+    );
+
+    let pack = hub::import_local_pack(&source, &state.vault_root)?;
     {
         let conn = state.db.lock();
         hub::record_sync(&conn, &pack)?;

@@ -30,4 +30,6 @@ Copy `.env.example` to `.env` and adjust as needed:
 | GET | `/packs/:id` | Pack metadata |
 | GET | `/packs/:id/download` | ZIP of Markdown tree |
 
-Further context: [docs/architecture.md](../../docs/architecture.md), [docs/development.md](../../docs/development.md).
+Further context: [docs/architecture.md](../../docs/architecture.md), [docs/development.md](../../docs/development.md), [fixtures README](../../fixtures/knowledge/README.md).
+
+Each fixture pack directory must include `pack.json`. The Hub discovers packs by scanning those files and packages them as `.zip` downloads.

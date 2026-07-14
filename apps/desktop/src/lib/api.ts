@@ -4,6 +4,7 @@ import type {
   AppSettings,
   ChatMessage,
   ChatSession,
+  HubConnectionStatus,
   IndexStatus,
   InstalledPack,
   Pack,
@@ -17,7 +18,8 @@ export const api = {
   settingsGet: () => invoke<AppSettings>("settings_get"),
   settingsSet: (settings: AppSettings) =>
     invoke<void>("settings_set", { settings }),
-  settingsTestConnection: () => invoke<string>("settings_test_connection"),
+  settingsTestLlm: () => invoke<string>("settings_test_llm"),
+  settingsTestHub: () => invoke<string>("settings_test_hub"),
 
   indexStatus: () => invoke<IndexStatus>("index_status"),
   indexRebuild: () => invoke<IndexStatus>("index_rebuild"),
@@ -51,11 +53,14 @@ export const api = {
   chatCancel: () => invoke<void>("chat_cancel"),
 
   hubListPacks: () => invoke<Pack[]>("hub_list_packs"),
+  hubStatus: () => invoke<HubConnectionStatus>("hub_status"),
   hubListInstalled: () => invoke<InstalledPack[]>("hub_list_installed"),
   hubRemovePack: (packId: string) =>
     invoke<IndexStatus>("hub_remove_pack", { packId }),
   hubDownloadPack: (packId: string) =>
     invoke<IndexStatus>("hub_download_pack", { packId }),
+  hubImportLocalPack: (sourcePath: string) =>
+    invoke<IndexStatus>("hub_import_local_pack", { sourcePath }),
 };
 
 export type ChatStreamEvent =

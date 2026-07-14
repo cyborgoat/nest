@@ -22,7 +22,7 @@ flowchart TB
   end
 
   subgraph hub [Knowledge Hub NestJS]
-    Catalog[packs.json + fixtures]
+    Catalog[pack.json per pack dir]
     API["/packs + ZIP download"]
     Catalog --> API
   end
@@ -39,11 +39,21 @@ flowchart TB
 | Desktop backend | `apps/desktop/src-tauri` | Vault I/O, index, RAG, LLM, sessions |
 | Shared types | `packages/shared` | TypeScript contracts shared with the UI |
 | Knowledge Hub | `apps/hub` | Pack catalog + ZIP download |
-| Fixtures | `fixtures/knowledge` | Sample packs + `packs.json` |
+| Fixtures | `fixtures/knowledge` | Sample packs for the Hub server only; each pack dir requires `pack.json` |
+
+## Knowledge Hub connectivity
+
+The desktop app uses the configured remote Hub (`Settings → Hub URL`, default `http://127.0.0.1:8787`).
+
+- Catalog list and download require the Hub to be online (`GET /health`, `GET /packs`, `GET /packs/:id/download`).
+- If the Hub is unreachable, the Hub panel shows an **Offline** status. Local **Import** (zip) still works.
+- Fixture folders under `fixtures/knowledge` are served by the **Hub process** only. The desktop app does not copy them as a fallback when the Hub is down.
 
 ## Vault and indexing
 
 - Packs download into `{app_data}/vault/<pack-path>/` as read-only Markdown trees.
+- **Import local pack** accepts a `.zip` that includes a required `pack.json` (same format as fixtures / Hub downloads), extracts into the vault, records `sync_state`, and rebuilds the index.
+- Every knowledge pack root must include `pack.json` with `id`, `name`, `description`, `version`, and `path`.
 - **Remove pack** deletes the tree, purges SQLite/FTS rows, and rebuilds the vector index so RAG cannot cite deleted files.
 - Path resolution never creates missing directories on read (avoids empty leftover folders).
 - Listing the library tree prunes empty directories and hides empty folders.

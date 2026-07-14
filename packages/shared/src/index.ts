@@ -66,3 +66,9 @@ export type IndexStatus = {
   last_indexed_at: string | null;
   message: string | null;
 };
+
+export type HubConnectionStatus = {
+  online: boolean;
+  hub_base_url: string;
+  message: string | null;
+};

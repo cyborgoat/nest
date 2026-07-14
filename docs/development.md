@@ -47,4 +47,4 @@ cd apps/hub && npm run build
 
 ## Fixtures
 
-`fixtures/knowledge` is the Hub catalog source (`packs.json` + pack directories). The desktop app does not ship a built-in demo importer; download packs from Hub (or Hub’s fixture fallback when the remote Hub is offline).
+`fixtures/knowledge` holds sample packs for the Knowledge Hub server (`FIXTURES_PATH`). Each pack directory must include a required `pack.json`. The Hub discovers packs by scanning those files and serves ZIP downloads. The desktop app does not use fixtures as an offline fallback — if the Hub is unreachable, the Hub panel shows Offline and catalog/download are unavailable. From the desktop Hub panel you can still **Import** a local pack `.zip` (with `pack.json` inside) into the vault.

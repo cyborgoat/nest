@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/resizable";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+import { Toaster } from "@/components/ui/sonner";
 import { api } from "@/lib/api";
 import {
   animatePanelSize,
@@ -315,6 +316,8 @@ export default function App() {
         </span>
         <span className="truncate pl-4">{statusMessage ?? "Ready"}</span>
       </footer>
+
+      <Toaster position="bottom-right" richColors closeButton />
     </div>
   );
 }

@@ -9,8 +9,8 @@ npm run tauri dev
 
 ## Highlights
 
-- **Library** — read-only Markdown tree from downloaded packs
-- **Hub** — download / remove packs (auto reindex)
+- **Library** — read-only Markdown tree from downloaded/imported packs
+- **Hub** — download packs, import local pack zips (`pack.json` required), remove packs (auto reindex)
 - **Chat** — RAG agent with session tabs, history, pin/archive
 - **Settings** — OpenAI-compatible LLM + Hub URL
 

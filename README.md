@@ -27,7 +27,7 @@ npm run tauri dev
 
 ### First-run tips
 
-1. Start the Knowledge Hub (`apps/hub`), then open **Hub** in the desktop app and download a pack. Indexing runs automatically after download (and again after remove).
+1. Start the Knowledge Hub (`apps/hub`), then open **Hub** in the desktop app and download a pack — or use **Import** to add a local pack `.zip` (must include `pack.json`). Indexing runs automatically after download, import, and remove.
 2. Configure an OpenAI-compatible **Base URL**, **API key**, and chat model under **Settings**.
 3. In **Library**, open a file to read it (read-only).
 4. Use **scope** on tree items to limit chat retrieval, then ask in **Chat**.
