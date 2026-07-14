@@ -48,7 +48,7 @@ export function HubPanel() {
 
   const remove = useMutation({
     mutationFn: (packId: string) => api.hubRemovePack(packId),
-    onSuccess: (_void, packId) => {
+    onSuccess: (_status, packId) => {
       const localPath =
         installedQuery.data?.find((p) => p.pack_id === packId)?.local_path ??
         packId;
@@ -57,7 +57,8 @@ export function HubPanel() {
       queryClient.invalidateQueries({ queryKey: ["index-status"] });
       queryClient.invalidateQueries({ queryKey: ["installed-packs"] });
       queryClient.invalidateQueries({ queryKey: ["file"] });
-      setStatusMessage(`Removed pack ${packId}`);
+      queryClient.invalidateQueries({ queryKey: ["chat-messages"] });
+      setStatusMessage(`Removed pack ${packId} and refreshed the search index`);
     },
     onError: (e: Error) => setStatusMessage(e.message || String(e)),
   });
@@ -72,8 +73,8 @@ export function HubPanel() {
       <div className="border-b border-border px-4 py-3">
         <h2 className="font-display text-xl">Knowledge Hub</h2>
         <p className="text-sm text-muted-foreground">
-          Browse packs from the cloud hub. Nest downloads them as read-only Markdown trees.
-          If the hub is offline, local fixtures are used.
+          Browse packs from the knowledge hub. Nest downloads them as read-only Markdown trees.
+          If the hub is offline, the local catalog is used when available.
         </p>
       </div>
       <ScrollArea className="flex-1">

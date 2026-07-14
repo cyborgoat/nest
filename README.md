@@ -8,7 +8,7 @@ Local-first desktop knowledge workspace. Browse immutable Markdown knowledge pac
 apps/desktop   Tauri v2 + React (Nest desktop client)
 apps/hub       NestJS Knowledge Hub (catalog + download)
 packages/shared  Shared TypeScript types
-fixtures/knowledge  Sample Markdown packs
+fixtures/knowledge  Markdown packs served by the Knowledge Hub
 ```
 
 ## Prerequisites
@@ -26,11 +26,10 @@ npm run tauri dev
 
 ### First-run tips
 
-1. Open **Library** (empty state) or **Settings → Import demo packs** to load fixture knowledge into your local vault and build the search index.
-2. Configure an OpenAI-compatible **Base URL**, **API key**, and chat model.
-3. Use **Hub** to download individual packs (falls back to fixtures if the hub is offline).
-4. In **Library**, open a file to read it (read-only).
-5. Use **scope** on tree items to limit chat retrieval, then ask in **Chat**. References appear with every answer.
+1. Start the Knowledge Hub (`apps/hub`), then open **Hub** in the desktop app and download a pack. Indexing runs automatically after download.
+2. Configure an OpenAI-compatible **Base URL**, **API key**, and chat model under **Settings**.
+3. In **Library**, open a file to read it (read-only).
+4. Use **scope** on tree items to limit chat retrieval, then ask in **Chat**. References appear with answers when passages were retrieved.
 
 ## Knowledge Hub
 

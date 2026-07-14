@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { AppSettings } from "@nest/shared";
-import { Database, WandSparkles } from "lucide-react";
+import { Database } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -54,19 +54,6 @@ export function SettingsPanel() {
     onError: (e: Error) => setStatusMessage(e.message),
   });
 
-  const importDemo = useMutation({
-    mutationFn: api.hubImportDemoPack,
-    onSuccess: (status) => {
-      queryClient.invalidateQueries({ queryKey: ["tree"] });
-      queryClient.invalidateQueries({ queryKey: ["index-status"] });
-      queryClient.invalidateQueries({ queryKey: ["installed-packs"] });
-      setStatusMessage(
-        `Demo packs imported · ${status.indexed_files} files / ${status.indexed_chunks} chunks indexed`,
-      );
-    },
-    onError: (e: Error) => setStatusMessage(e.message),
-  });
-
   const update = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) =>
     setForm((prev) => ({ ...prev, [key]: value }));
 
@@ -111,7 +98,7 @@ export function SettingsPanel() {
         </Field>
         <p className="text-xs text-muted-foreground">
           FastEmbed models run on-device (e.g. AllMiniLML6V2Q, BGESmallENV15Q). First index after
-          import may download ONNX weights. Chat still uses the LLM base URL above.
+          a pack download may download ONNX weights. Chat still uses the LLM base URL above.
         </p>
         <Field label="Hub base URL">
           <Input
@@ -137,7 +124,7 @@ export function SettingsPanel() {
         <h3 className="text-sm font-semibold">Local index</h3>
         <p className="text-xs text-muted-foreground">
           Hybrid FTS + FastEmbed vector index over Markdown chunks. Rebuilds automatically when you
-          download or import a knowledge pack.
+          download a knowledge pack from the Hub.
         </p>
         <div className="rounded-md border border-border bg-panel p-3 text-sm">
           <div className="flex items-center gap-2">
@@ -156,14 +143,6 @@ export function SettingsPanel() {
             <p className="mt-1 text-xs text-accent">Indexing in progress…</p>
           )}
         </div>
-        <Button
-          variant="secondary"
-          onClick={() => importDemo.mutate()}
-          disabled={importDemo.isPending || indexQuery.data?.is_indexing}
-        >
-          <WandSparkles className="size-4" />
-          {importDemo.isPending ? "Importing…" : "Import demo packs"}
-        </Button>
       </section>
     </div>
   );

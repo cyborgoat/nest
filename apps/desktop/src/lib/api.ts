@@ -44,10 +44,9 @@ export const api = {
   hubListPacks: () => invoke<Pack[]>("hub_list_packs"),
   hubListInstalled: () => invoke<InstalledPack[]>("hub_list_installed"),
   hubRemovePack: (packId: string) =>
-    invoke<void>("hub_remove_pack", { packId }),
+    invoke<IndexStatus>("hub_remove_pack", { packId }),
   hubDownloadPack: (packId: string) =>
     invoke<IndexStatus>("hub_download_pack", { packId }),
-  hubImportDemoPack: () => invoke<IndexStatus>("hub_import_demo_pack"),
 };
 
 export type ChatStreamEvent =

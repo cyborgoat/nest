@@ -24,11 +24,18 @@ pub async fn retrieve(
     let mut merged: Vec<Citation> = Vec::new();
     let mut seen = HashSet::new();
 
+    crate::nest_debug!(
+        "retrieval",
+        "query={:?} top_k={top_k} scope={scope_paths:?} model={embedding_model_id}",
+        query
+    );
+
     // Vector hits first — no Sync connection held across await.
     if let Ok(model) = embeddings::load_embedding_model(embedding_model_id) {
         if let Ok(hits) =
             vector_store::vector_search(app_data_dir, model, query, top_k, scope_paths).await
         {
+            crate::nest_debug!("retrieval", "vector_hits={}", hits.len());
             for (score, doc) in hits {
                 if seen.insert(doc.id.clone()) {
                     merged.push(Citation {
@@ -40,7 +47,11 @@ pub async fn retrieve(
                     });
                 }
             }
+        } else {
+            crate::nest_debug!("retrieval", "vector_search failed or empty");
         }
+    } else {
+        crate::nest_debug!("retrieval", "embedding model load failed");
     }
 
     // FTS lexical complement (sync, short lock).
@@ -48,6 +59,7 @@ pub async fn retrieve(
         let conn = state.db.lock();
         db::fts_search(&conn, query, top_k, scope_paths)?
     };
+    crate::nest_debug!("retrieval", "fts_hits={}", fts.len());
     for c in fts {
         if seen.insert(c.chunk_id.clone()) {
             merged.push(c);
@@ -57,9 +69,35 @@ pub async fn retrieve(
     if merged.is_empty() {
         let conn = state.db.lock();
         merged = db::lexical_search(&conn, query, top_k, scope_paths)?;
+        crate::nest_debug!("retrieval", "lexical_fallback_hits={}", merged.len());
     }
 
     merged.truncate(top_k as usize);
+
+    // Drop citations whose files were removed (stale vectors / FTS race).
+    let before = merged.len();
+    merged.retain(|c| {
+        let path = state.vault_root.join(&c.file_path);
+        let ok = path.is_file();
+        if !ok {
+            crate::nest_debug!(
+                "retrieval",
+                "dropping stale citation path={}",
+                c.file_path
+            );
+        }
+        ok
+    });
+    if merged.len() != before {
+        crate::nest_debug!(
+            "retrieval",
+            "filtered stale citations {} -> {}",
+            before,
+            merged.len()
+        );
+    }
+
+    crate::nest_debug!("retrieval", "merged_hits={}", merged.len());
     Ok(merged)
 }
 
@@ -73,7 +111,10 @@ fn snippet(content: &str) -> String {
 
 pub fn format_citations_for_tool(citations: &[Citation]) -> String {
     if citations.is_empty() {
-        return "No relevant passages found in the vault.".to_string();
+        return "No relevant passages found in the vault. Tell the user clearly that nothing \
+                matching their question is in the local library, and suggest downloading a \
+                knowledge pack from the Hub that covers the topic."
+            .to_string();
     }
     let mut out = String::from("Retrieved vault passages:\n");
     for (i, c) in citations.iter().enumerate() {
@@ -91,7 +132,9 @@ pub fn format_citations_for_tool(citations: &[Citation]) -> String {
 pub fn agent_preamble() -> &'static str {
     "You are Nest, a local-first knowledge assistant. \
      Use the vault_search tool to retrieve relevant Markdown passages before answering factual questions about the library. \
-     Answer using ONLY retrieved vault content when possible. If nothing relevant is found, say so clearly. \
+     Answer using ONLY retrieved vault content when possible. \
+     If vault_search returns nothing relevant (or the library has no matching packs), clearly tell the user you could not find an answer in their local knowledge — do not invent product steps or guess. \
+     Suggest they download a relevant knowledge pack from the Hub when the topic is missing. \
      Cite passages by their [n] numbers inline when helpful. \
      Prefer concise, accurate answers that respect multi-turn conversation context."
 }

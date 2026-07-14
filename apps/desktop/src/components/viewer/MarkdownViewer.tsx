@@ -1,5 +1,5 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BookOpen, Cloud, Lock, PackageOpen, WandSparkles } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { BookOpen, Cloud, Lock, PackageOpen } from "lucide-react";
 import { motion } from "motion/react";
 import { api } from "@/lib/api";
 import { MarkdownBody } from "@/components/markdown/MarkdownBody";
@@ -10,8 +10,6 @@ import { useUiStore } from "@/stores/ui";
 export function MarkdownViewer() {
   const selectedPath = useUiStore((s) => s.selectedPath);
   const setActivePanel = useUiStore((s) => s.setActivePanel);
-  const setStatusMessage = useUiStore((s) => s.setStatusMessage);
-  const queryClient = useQueryClient();
 
   const treeQuery = useQuery({
     queryKey: ["tree"],
@@ -22,19 +20,6 @@ export function MarkdownViewer() {
     queryKey: ["file", selectedPath],
     queryFn: () => api.vaultReadFile(selectedPath!),
     enabled: !!selectedPath,
-  });
-
-  const importDemo = useMutation({
-    mutationFn: api.hubImportDemoPack,
-    onSuccess: (status) => {
-      queryClient.invalidateQueries({ queryKey: ["tree"] });
-      queryClient.invalidateQueries({ queryKey: ["index-status"] });
-      queryClient.invalidateQueries({ queryKey: ["installed-packs"] });
-      setStatusMessage(
-        `Demo packs imported · ${status.indexed_files} files indexed`,
-      );
-    },
-    onError: (e: Error) => setStatusMessage(e.message),
   });
 
   const vaultEmpty = !treeQuery.isLoading && (treeQuery.data?.length ?? 0) === 0;
@@ -60,24 +45,13 @@ export function MarkdownViewer() {
         <div>
           <h2 className="font-display text-xl">Your library is empty</h2>
           <p className="mt-1 max-w-sm text-sm text-muted-foreground">
-            Download a knowledge pack from the Hub, or import the bundled demo packs
-            to get started.
+            Download a knowledge pack from the Hub to get started.
           </p>
         </div>
-        <div className="flex flex-wrap items-center justify-center gap-2">
-          <Button onClick={() => setActivePanel("hub")}>
-            <Cloud className="size-4" />
-            Open Hub
-          </Button>
-          <Button
-            variant="outline"
-            disabled={importDemo.isPending}
-            onClick={() => importDemo.mutate()}
-          >
-            <WandSparkles className="size-4" />
-            {importDemo.isPending ? "Importing…" : "Import demos"}
-          </Button>
-        </div>
+        <Button onClick={() => setActivePanel("hub")}>
+          <Cloud className="size-4" />
+          Open Hub
+        </Button>
       </div>
     );
   }

@@ -32,6 +32,8 @@ pub fn vault_root(app_data: &Path) -> PathBuf {
 
 pub fn list_tree(root: &Path) -> AppResult<Vec<TreeNode>> {
     ensure_dir(root)?;
+    // Clean leftovers from failed removes / accidental path creation.
+    prune_empty_dirs(root)?;
     Ok(build_tree(root, root)?)
 }
 
@@ -55,11 +57,16 @@ fn build_tree(root: &Path, dir: &Path) -> AppResult<Vec<TreeNode>> {
             .replace('\\', "/");
 
         if path.is_dir() {
+            let children = build_tree(root, &path)?;
+            // Hide empty folders (e.g. leftovers after a pack remove).
+            if children.is_empty() {
+                continue;
+            }
             nodes.push(TreeNode {
                 name,
                 path: rel,
                 kind: TreeNodeKind::Folder,
-                children: Some(build_tree(root, &path)?),
+                children: Some(children),
             });
         } else if path
             .extension()
@@ -81,12 +88,15 @@ fn build_tree(root: &Path, dir: &Path) -> AppResult<Vec<TreeNode>> {
 pub fn read_file(root: &Path, rel_path: &str) -> AppResult<String> {
     let path = resolve_vault_path(root, rel_path)?;
     if !path.is_file() {
-        return Err(AppError::msg(format!("File not found: {rel_path}")));
+        return Err(AppError::msg(format!(
+            "This file is no longer in your library (removed or missing): {rel_path}"
+        )));
     }
     Ok(fs::read_to_string(path)?)
 }
 
 /// Resolve a relative vault path and reject path traversal.
+/// Does not create directories — callers that write must `ensure_dir` themselves.
 pub fn resolve_vault_path(root: &Path, rel_path: &str) -> AppResult<PathBuf> {
     let cleaned = rel_path.trim_start_matches('/');
     if cleaned.is_empty() || cleaned.contains("..") {
@@ -101,16 +111,68 @@ pub fn resolve_vault_path(root: &Path, rel_path: &str) -> AppResult<PathBuf> {
         }
         Ok(canonical)
     } else {
-        // For new paths (e.g. download destination), check parent stays in root.
-        if let Some(parent) = path.parent() {
-            ensure_dir(parent)?;
-            let parent_canon = fs::canonicalize(parent)?;
-            if !parent_canon.starts_with(&canonical_root) {
-                return Err(AppError::msg("Path escapes vault"));
+        // Missing path: ensure the intended location stays under the vault root
+        // without creating folders (creating them left empty packs after deletes).
+        let mut probe = root.to_path_buf();
+        for component in Path::new(cleaned).components() {
+            probe.push(component);
+            if probe.exists() {
+                let canon = fs::canonicalize(&probe)?;
+                if !canon.starts_with(&canonical_root) {
+                    return Err(AppError::msg("Path escapes vault"));
+                }
             }
         }
         Ok(path)
     }
+}
+
+/// Remove empty directories under the vault root (never deletes the root itself).
+pub fn prune_empty_dirs(root: &Path) -> AppResult<()> {
+    if !root.is_dir() {
+        return Ok(());
+    }
+    prune_empty_dirs_inner(root, root)
+}
+
+fn prune_empty_dirs_inner(root: &Path, dir: &Path) -> AppResult<()> {
+    let entries: Vec<_> = match fs::read_dir(dir) {
+        Ok(rd) => rd.filter_map(|e| e.ok()).collect(),
+        Err(_) => return Ok(()),
+    };
+    for entry in &entries {
+        let path = entry.path();
+        if path.is_dir() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with('.') {
+                continue;
+            }
+            prune_empty_dirs_inner(root, &path)?;
+        }
+    }
+    // Re-check after children pruned; never remove vault root.
+    if dir != root {
+        let remaining = fs::read_dir(dir)?
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                let name = e.file_name().to_string_lossy().to_string();
+                !name.starts_with('.')
+            })
+            .count();
+        if remaining == 0 {
+            // Remove leftover .DS_Store / hidden junk, then the dir itself.
+            if let Ok(rd) = fs::read_dir(dir) {
+                for entry in rd.filter_map(|e| e.ok()) {
+                    let p = entry.path();
+                    if p.is_file() {
+                        let _ = fs::remove_file(&p);
+                    }
+                }
+            }
+            let _ = fs::remove_dir(dir);
+        }
+    }
+    Ok(())
 }
 
 pub fn copy_dir_recursive(src: &Path, dst: &Path) -> AppResult<()> {
@@ -168,5 +230,26 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         ensure_dir(&dir).unwrap();
         assert!(resolve_vault_path(&dir, "../etc/passwd").is_err());
+    }
+
+    #[test]
+    fn resolve_missing_does_not_create_dirs() {
+        let dir = env::temp_dir().join("nest-vault-resolve-no-mkdir");
+        let _ = fs::remove_dir_all(&dir);
+        ensure_dir(&dir).unwrap();
+        let resolved = resolve_vault_path(&dir, "gone/pack/note.md").unwrap();
+        assert_eq!(resolved, dir.join("gone/pack/note.md"));
+        assert!(!dir.join("gone").exists());
+    }
+
+    #[test]
+    fn prune_removes_empty_pack_folders() {
+        let dir = env::temp_dir().join("nest-vault-prune");
+        let _ = fs::remove_dir_all(&dir);
+        let empty = dir.join("empty-pack").join("nested");
+        ensure_dir(&empty).unwrap();
+        prune_empty_dirs(&dir).unwrap();
+        assert!(!dir.join("empty-pack").exists());
+        assert!(dir.is_dir());
     }
 }

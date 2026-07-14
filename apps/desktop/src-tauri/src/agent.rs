@@ -77,6 +77,12 @@ impl Tool for VaultSearchTool {
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         let top_k = args.top_k.unwrap_or(self.default_top_k).max(1);
+        crate::nest_debug!(
+            "vault_search",
+            "query={:?} top_k={top_k} scope={:?}",
+            args.query,
+            self.scope_paths
+        );
         let citations = retrieval::retrieve(
             &self.app_data_dir,
             &self.state,
@@ -86,7 +92,20 @@ impl Tool for VaultSearchTool {
             top_k,
         )
         .await
-        .map_err(|e| VaultSearchError(e.to_string()))?;
+        .map_err(|e| {
+            crate::nest_debug!("vault_search", "retrieve error: {e}");
+            VaultSearchError(e.to_string())
+        })?;
+
+        crate::nest_debug!(
+            "vault_search",
+            "hits={} paths={:?}",
+            citations.len(),
+            citations
+                .iter()
+                .map(|c| c.file_path.as_str())
+                .collect::<Vec<_>>()
+        );
 
         emit_reading_files(&self.app, &self.stream_event, &citations).await;
         *self.citations.lock() = citations.clone();
@@ -122,6 +141,42 @@ async fn emit_reading_files(app: &AppHandle, stream_event: &str, citations: &[Ci
         // Brief pause so the UI can show each file before the next.
         tokio::time::sleep(Duration::from_millis(90)).await;
     }
+}
+
+fn not_found_reply() -> &'static str {
+    "I couldn't find anything relevant in your local knowledge library for that. \
+     Nest only answers from Markdown packs you've downloaded — open Hub to download a \
+     pack that covers this topic, then ask again."
+}
+
+fn is_hard_llm_error(msg: &str) -> bool {
+    let m = msg.to_lowercase();
+    m.contains("api key")
+        || m.contains("unauthorized")
+        || m.contains("401")
+        || m.contains("403")
+        || m.contains("connection")
+        || m.contains("timed out")
+        || m.contains("timeout")
+        || m.contains("dns")
+        || m.contains("refused")
+        || m.contains("ssl")
+        || m.contains("tls")
+}
+
+async fn emit_soft_reply(
+    app: &AppHandle,
+    stream_event: &str,
+    reply: &str,
+) -> AppResult<()> {
+    let _ = app.emit(stream_event, ChatStreamEvent::Generating);
+    let _ = app.emit(
+        stream_event,
+        ChatStreamEvent::Token {
+            content: reply.to_string(),
+        },
+    );
+    Ok(())
 }
 
 pub async fn run_agent_chat(
@@ -171,6 +226,14 @@ pub async fn run_agent_chat(
         .memory(memory)
         .build();
 
+    crate::nest_debug!(
+        "agent",
+        "start session={session_id} query_len={} scope={:?} history={}",
+        query.len(),
+        scope_paths,
+        prior_history.len()
+    );
+
     let eager = retrieval::retrieve(
         &app_data_dir,
         &state,
@@ -181,6 +244,7 @@ pub async fn run_agent_chat(
     )
     .await
     .unwrap_or_default();
+    crate::nest_debug!("agent", "eager_retrieval hits={}", eager.len());
     if !eager.is_empty() {
         emit_reading_files(app, stream_event, &eager).await;
         *citations_slot.lock() = eager;
@@ -231,6 +295,7 @@ pub async fn run_agent_chat(
             })) => {
                 emitted_generating = false;
                 let name = tool_call.function.name.clone();
+                crate::nest_debug!("agent", "tool_call name={name}");
                 let _ = app.emit(
                     stream_event,
                     ChatStreamEvent::Reading {
@@ -243,6 +308,12 @@ pub async fn run_agent_chat(
                 );
             }
             Ok(MultiTurnStreamItem::FinalResponse(resp)) => {
+                crate::nest_debug!(
+                    "agent",
+                    "final_response output_len={} streamed_len={}",
+                    resp.output.len(),
+                    full.len()
+                );
                 if full.trim().is_empty() && !resp.output.trim().is_empty() {
                     full = resp.output;
                 }
@@ -254,13 +325,25 @@ pub async fn run_agent_chat(
                     break;
                 }
                 let msg = e.to_string();
-                let _ = app.emit(
-                    stream_event,
-                    ChatStreamEvent::Error {
-                        message: msg.clone(),
-                    },
-                );
-                return Err(AppError::msg(msg));
+                crate::nest_debug!("agent", "stream error: {msg}");
+                if is_hard_llm_error(&msg) {
+                    let _ = app.emit(
+                        stream_event,
+                        ChatStreamEvent::Error {
+                            message: msg.clone(),
+                        },
+                    );
+                    return Err(AppError::msg(msg));
+                }
+                // Soft failures (empty tool turns, max-turn noise, etc.):
+                // prefer a helpful reply over a hard UI error.
+                if full.trim().is_empty() {
+                    let reply = not_found_reply().to_string();
+                    emit_soft_reply(app, stream_event, &reply).await?;
+                    full = reply;
+                    break;
+                }
+                break;
             }
         }
     }
@@ -292,10 +375,26 @@ pub async fn run_agent_chat(
     }
 
     if full.trim().is_empty() {
-        let msg = "LLM returned an empty response".to_string();
-        let _ = app.emit(stream_event, ChatStreamEvent::Error { message: msg.clone() });
-        return Err(AppError::msg(msg));
+        crate::nest_debug!(
+            "agent",
+            "empty answer after stream; citations={} — soft not-found reply",
+            citations.len()
+        );
+        let reply = not_found_reply().to_string();
+        emit_soft_reply(app, stream_event, &reply).await?;
+        return Ok(AgentChatResult {
+            answer: reply,
+            citations,
+            cancelled: false,
+        });
     }
+
+    crate::nest_debug!(
+        "agent",
+        "done answer_len={} citations={}",
+        full.len(),
+        citations.len()
+    );
 
     Ok(AgentChatResult {
         answer: full,

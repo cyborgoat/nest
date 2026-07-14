@@ -164,8 +164,20 @@ pub fn chat_list_messages(
     state: State<'_, SharedState>,
     session_id: String,
 ) -> AppResult<Vec<ChatMessage>> {
-    let conn = state.db.lock();
-    db::list_messages(&conn, &session_id)
+    let mut messages = {
+        let conn = state.db.lock();
+        db::list_messages(&conn, &session_id)?
+    };
+    // Hide citations that point at removed vault files (packs deleted after the reply).
+    for msg in &mut messages {
+        if let Some(refs) = msg.citations.as_mut() {
+            refs.retain(|c| state.vault_root.join(&c.file_path).is_file());
+            if refs.is_empty() {
+                msg.citations = None;
+            }
+        }
+    }
+    Ok(messages)
 }
 
 #[tauri::command]
@@ -205,6 +217,13 @@ pub async fn chat_send(
         crate::memory::messages_to_rig_history(&msgs)
     };
 
+    crate::nest_debug!(
+        "chat",
+        "chat_send session={session_id} query_len={} scope={:?}",
+        query.len(),
+        scope
+    );
+
     let result = match agent::run_agent_chat(
         &app,
         state.inner().clone(),
@@ -220,6 +239,7 @@ pub async fn chat_send(
     {
         Ok(v) => v,
         Err(e) => {
+            crate::nest_debug!("chat", "chat_send failed: {e}");
             // Soft-cancel: user stopped before any tokens arrived.
             if e.to_string() == "cancelled" {
                 let _ = app.emit(
@@ -239,6 +259,14 @@ pub async fn chat_send(
             return Err(e);
         }
     };
+
+    crate::nest_debug!(
+        "chat",
+        "chat_send ok answer_len={} citations={} cancelled={}",
+        result.answer.len(),
+        result.citations.len(),
+        result.cancelled
+    );
 
     let answer = if result.cancelled && !result.answer.trim().is_empty() {
         format!("{}\n\n_(stopped)_", result.answer.trim_end())
@@ -289,12 +317,33 @@ pub async fn hub_list_packs(state: State<'_, SharedState>) -> AppResult<Vec<Pack
 pub fn hub_list_installed(state: State<'_, SharedState>) -> AppResult<Vec<InstalledPack>> {
     let conn = state.db.lock();
     let mut installed = db::list_sync_state(&conn)?;
-    installed.retain(|p| state.vault_root.join(&p.local_path).is_dir());
+    // Require real Markdown content — empty leftovers must not count as installed.
+    installed.retain(|p| pack_has_markdown(&state.vault_root, &p.local_path));
     Ok(installed)
 }
 
+fn pack_has_markdown(vault_root: &std::path::Path, local_path: &str) -> bool {
+    let dir = vault_root.join(local_path);
+    if !dir.is_dir() {
+        return false;
+    }
+    walkdir::WalkDir::new(&dir)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .any(|e| {
+            e.path()
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .map(|ext| ext.eq_ignore_ascii_case("md"))
+                .unwrap_or(false)
+        })
+}
+
 #[tauri::command]
-pub fn hub_remove_pack(state: State<'_, SharedState>, pack_id: String) -> AppResult<()> {
+pub async fn hub_remove_pack(
+    state: State<'_, SharedState>,
+    pack_id: String,
+) -> AppResult<IndexStatus> {
     let local_path = {
         let conn = state.db.lock();
         if let Some(installed) = db::get_sync_state(&conn, &pack_id)? {
@@ -304,13 +353,23 @@ pub fn hub_remove_pack(state: State<'_, SharedState>, pack_id: String) -> AppRes
         }
     };
 
+    crate::nest_debug!(
+        "hub",
+        "remove_pack id={pack_id} local_path={local_path}"
+    );
+
     vault::remove_pack(&state.vault_root, &local_path)?;
-    let conn = state.db.lock();
-    db::purge_path_data(&conn, &local_path)?;
-    if local_path != pack_id {
-        db::purge_path_data(&conn, &pack_id)?;
+    vault::prune_empty_dirs(&state.vault_root)?;
+    {
+        let conn = state.db.lock();
+        db::purge_path_data(&conn, &local_path)?;
+        if local_path != pack_id {
+            db::purge_path_data(&conn, &pack_id)?;
+        }
     }
-    Ok(())
+
+    // Rebuild so FastEmbed vectors stay in sync with the vault (purge only clears FTS/SQL).
+    index_rebuild(state).await
 }
 
 #[tauri::command]
@@ -343,16 +402,5 @@ pub async fn hub_download_pack(
         hub::record_sync(&conn, &pack)?;
     }
 
-    index_rebuild(state).await
-}
-
-#[tauri::command]
-pub async fn hub_import_demo_pack(state: State<'_, SharedState>) -> AppResult<IndexStatus> {
-    let packs = hub::list_packs_fixture(&state.fixtures_root)?;
-    for pack in packs {
-        hub::import_pack_fixture(&state.fixtures_root, &pack, &state.vault_root)?;
-        let conn = state.db.lock();
-        hub::record_sync(&conn, &pack)?;
-    }
     index_rebuild(state).await
 }

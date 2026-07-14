@@ -126,18 +126,18 @@ const AnimationComponent: React.FC<{
       <motion.span
         aria-hidden='true'
         variants={variants}
-        className='inline-block whitespace-pre'
+        className='inline whitespace-pre'
       >
         {segment}
       </motion.span>
     ) : (
-      <motion.span className='inline-block whitespace-pre'>
+      <motion.span className='inline whitespace-pre'>
         {segment.split('').map((char, charIndex) => (
           <motion.span
             key={`char-${charIndex}`}
             aria-hidden='true'
             variants={variants}
-            className='inline-block whitespace-pre'
+            className='inline whitespace-pre'
           >
             {char}
           </motion.span>
@@ -149,7 +149,7 @@ const AnimationComponent: React.FC<{
     return content;
   }
 
-  const defaultWrapperClassName = per === 'line' ? 'block' : 'inline-block';
+  const defaultWrapperClassName = per === 'line' ? 'block' : 'inline';
 
   return (
     <span className={cn(defaultWrapperClassName, segmentWrapperClassName)}>

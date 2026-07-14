@@ -1,4 +1,4 @@
-import { FileText, Loader2, Sparkles } from "lucide-react";
+import { FileText, Loader2 } from "lucide-react";
 import { TextShimmer } from "@/components/motion-primitives/text-shimmer";
 
 export type AgentActivity =
@@ -16,17 +16,25 @@ function labelFor(activity: NonNullable<AgentActivity>): string {
 export function AgentStatusIndicator({ activity }: { activity: AgentActivity }) {
   if (!activity) return null;
 
-  const Icon = activity.kind === "generating" ? Sparkles : FileText;
+  const isGenerating = activity.kind === "generating";
 
   return (
-    <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
-      <Loader2 className="size-3.5 shrink-0 animate-spin text-primary" />
-      <Icon className="size-3.5 shrink-0 text-accent" />
+    <div className="mb-2 flex items-center gap-2">
+      {!isGenerating && (
+        <>
+          <Loader2 className="size-3.5 shrink-0 animate-spin text-primary" />
+          <FileText className="size-3.5 shrink-0 text-accent" />
+        </>
+      )}
       <TextShimmer
         as="span"
-        className="text-xs [--base-color:#556270] [--base-gradient-color:#0d6e6e]"
-        duration={1.6}
-        spread={1.5}
+        duration={1}
+        spread={3}
+        className={
+          isGenerating
+            ? "text-sm font-medium [--base-color:#8aa0ad] [--base-gradient-color:#0d6e6e]"
+            : "text-xs font-medium [--base-color:#8aa0ad] [--base-gradient-color:#0d6e6e]"
+        }
       >
         {labelFor(activity)}
       </TextShimmer>

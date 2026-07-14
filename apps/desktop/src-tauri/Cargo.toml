@@ -32,3 +32,4 @@ rig-sqlite = "0.40"
 sqlite-vec = "0.1.9"
 tokio-rusqlite = { version = "0.6", features = ["bundled"] }
 futures = "0.3.32"
+dotenvy = "0.15.7"

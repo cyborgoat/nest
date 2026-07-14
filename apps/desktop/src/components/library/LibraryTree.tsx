@@ -87,7 +87,7 @@ export function LibraryTree({ tree }: { tree: TreeNode[] }) {
       <div className="flex flex-col gap-2 p-4">
         <p className="text-sm font-medium text-foreground">No packs yet</p>
         <p className="text-sm text-muted-foreground">
-          Download from Hub or import demos from the main view.
+          Download from the Hub to add knowledge packs.
         </p>
       </div>
     );

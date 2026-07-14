@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { Citation } from "@nest/shared";
+import type { ChatMessage, Citation } from "@nest/shared";
 import { AlertCircle, MessageSquare, Send, Sparkles, Square, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -36,6 +36,9 @@ export function ChatPanel() {
   const [isSending, setIsSending] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  // Skip Enter that confirms an IME candidate (CJK etc.) — some browsers fire
+  // that keydown after compositionend with isComposing already false.
+  const imeConfirmPending = useRef(false);
 
   const sessionsQuery = useQuery({
     queryKey: ["chat-sessions"],
@@ -103,9 +106,39 @@ export function ChatPanel() {
       setStreaming("");
       setAgentActivity({ kind: "generating" });
     },
-    onSuccess: () => {
+    onSuccess: (assistantMsg, query) => {
+      if (sessionId) {
+        // Seed the message cache before clearing the stream bubble so React
+        // paints one continuous frame (no empty gap / remount flash).
+        queryClient.setQueryData<ChatMessage[]>(
+          ["chat-messages", sessionId],
+          (old) => {
+            const list = [...(old ?? [])];
+            const hasUser = list.some(
+              (m) => m.role === "user" && m.content === query,
+            );
+            if (!hasUser) {
+              list.push({
+                id: `local-user-${Date.now()}`,
+                role: "user",
+                content: query,
+                created_at: new Date().toISOString(),
+              });
+            }
+            if (!list.some((m) => m.id === assistantMsg.id)) {
+              list.push(assistantMsg);
+            }
+            return list;
+          },
+        );
+        void queryClient.invalidateQueries({
+          queryKey: ["chat-messages", sessionId],
+        });
+      }
       setPendingUser(null);
       setAgentActivity(null);
+      setIsSending(false);
+      setStreaming("");
       queryClient.invalidateQueries({ queryKey: ["chat-sessions"] });
     },
     onError: (e: Error) => {
@@ -113,19 +146,23 @@ export function ChatPanel() {
       // User-initiated stop — not an error toast.
       if (message.toLowerCase().includes("cancelled")) {
         setStatusMessage("Generation stopped");
+        setIsSending(false);
+        setStreaming("");
+        setPendingUser(null);
+        setAgentActivity(null);
+        if (sessionId) {
+          void queryClient.invalidateQueries({
+            queryKey: ["chat-messages", sessionId],
+          });
+        }
         return;
       }
       setChatError(message);
       setStatusMessage(message);
-    },
-    onSettled: () => {
       setIsSending(false);
       setStreaming("");
       setPendingUser(null);
       setAgentActivity(null);
-      if (sessionId) {
-        queryClient.invalidateQueries({ queryKey: ["chat-messages", sessionId] });
-      }
     },
   });
 
@@ -180,8 +217,8 @@ export function ChatPanel() {
         )}
       </div>
 
-      <ScrollArea className="flex-1">
-        <div className="space-y-4 p-3">
+      <ScrollArea className="flex-1 min-h-0">
+        <div className="space-y-4 px-3 pt-3 pb-8">
           {(messagesQuery.data ?? []).map((msg) => (
             <div key={msg.id} className="space-y-2">
               {msg.role === "user" ? (
@@ -216,12 +253,11 @@ export function ChatPanel() {
             )}
           </AnimatePresence>
 
-          <AnimatePresence>
+          <AnimatePresence initial={false}>
             {isSending && (
               <motion.div
                 initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0 }}
                 className="space-y-2"
               >
                 <div className="mr-2 rounded-lg bg-muted px-3 py-2">
@@ -260,11 +296,12 @@ export function ChatPanel() {
             </div>
           )}
 
-          <div ref={bottomRef} />
+          {/* Breathing room above the composer */}
+          <div ref={bottomRef} className="h-4" />
         </div>
       </ScrollArea>
 
-      <div className="border-t border-border p-3">
+      <div className="shrink-0 border-t border-border px-3 pb-3 pt-4">
         <div className="relative">
           <Textarea
             value={input}
@@ -272,7 +309,25 @@ export function ChatPanel() {
             placeholder="Ask about your knowledge…"
             className="min-h-[72px] resize-none pb-9 pr-10"
             disabled={isSending}
+            onCompositionStart={() => {
+              imeConfirmPending.current = false;
+            }}
+            onCompositionEnd={() => {
+              imeConfirmPending.current = true;
+              // Clear after the confirming Enter (if any) has been delivered.
+              window.setTimeout(() => {
+                imeConfirmPending.current = false;
+              }, 0);
+            }}
             onKeyDown={(e) => {
+              // Enter confirms IME composition — never treat that as Send.
+              if (
+                e.nativeEvent.isComposing ||
+                e.keyCode === 229 ||
+                imeConfirmPending.current
+              ) {
+                return;
+              }
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
                 if (input.trim() && !isSending) send.mutate(input.trim());
@@ -303,6 +358,9 @@ export function ChatPanel() {
             </Button>
           )}
         </div>
+        <p className="mt-1.5 text-[11px] text-muted-foreground">
+          Enter to send · Shift+Enter for a new line
+        </p>
       </div>
     </div>
   );

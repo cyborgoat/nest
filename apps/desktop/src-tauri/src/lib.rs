@@ -1,6 +1,7 @@
 mod agent;
 mod commands;
 mod db;
+mod debug;
 mod embeddings;
 mod error;
 mod hub;
@@ -38,13 +39,21 @@ fn resolve_fixtures_root() -> PathBuf {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    debug::init();
+
     tauri::Builder::default()
         .setup(|app| {
+            nest_debug!(
+                "app",
+                "app_data_dir bootstrap starting"
+            );
             let app_data = app
                 .path()
                 .app_data_dir()
                 .expect("failed to resolve app data dir");
+            nest_debug!("app", "app_data_dir={}", app_data.display());
             let fixtures = resolve_fixtures_root();
+            nest_debug!("app", "fixtures_root={}", fixtures.display());
             let state = AppState::new(app_data, fixtures)?;
             app.manage(Arc::new(state) as SharedState);
             Ok(())
@@ -66,7 +75,6 @@ pub fn run() {
             commands::hub_list_installed,
             commands::hub_remove_pack,
             commands::hub_download_pack,
-            commands::hub_import_demo_pack,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Nest");

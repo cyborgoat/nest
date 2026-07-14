@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { TextEffect } from "@/components/motion-primitives/text-effect";
 
+type Chunk = { id: number; text: string };
+
 /**
- * Animate only the newest tail of streaming text with TextEffect,
- * keeping the settled prefix static so earlier words don't re-animate.
+ * Streams with motion-primitives TextEffect on each newly finished chunk.
+ * Committed chunks stay mounted so earlier words do not remount/re-animate.
  */
 export function StreamingTextEffect({
   text,
@@ -12,49 +14,66 @@ export function StreamingTextEffect({
   text: string;
   className?: string;
 }) {
-  const [settled, setSettled] = useState("");
-  const [fresh, setFresh] = useState(text);
-  const settledLen = useRef(0);
+  const [chunks, setChunks] = useState<Chunk[]>([]);
+  const [tail, setTail] = useState("");
+  const nextId = useRef(0);
+  const committedRef = useRef("");
 
   useEffect(() => {
-    if (text.length < settledLen.current) {
-      settledLen.current = 0;
-      setSettled("");
-      setFresh(text);
+    const committed = committedRef.current;
+
+    // New turn / replaced content
+    if (committed && !text.startsWith(committed)) {
+      committedRef.current = "";
+      nextId.current = 0;
+      setChunks([]);
+      setTail(text);
       return;
     }
 
-    // Promote all but the latest ~3 word segments into the settled prefix.
-    const parts = text.slice(settledLen.current).split(/(\s+)/);
-    if (parts.length <= 6) {
-      setFresh(text.slice(settledLen.current));
+    const incoming = text.slice(committed.length);
+    const parts = incoming.split(/(\s+)/);
+
+    // Still building the first/last unfinished token — keep as plain tail.
+    if (parts.length < 2) {
+      setTail(incoming);
       return;
     }
 
-    const promote = parts.slice(0, -4).join("");
-    const nextSettled = text.slice(0, settledLen.current) + promote;
-    settledLen.current = nextSettled.length;
-    setSettled(nextSettled);
-    setFresh(text.slice(nextSettled.length));
+    const completeParts = parts.slice(0, -1);
+    const rest = parts[parts.length - 1] ?? "";
+    const toCommit = completeParts.join("");
+    if (!toCommit) {
+      setTail(rest);
+      return;
+    }
+
+    const id = nextId.current++;
+    committedRef.current = committed + toCommit;
+    setChunks((prev) => [...prev, { id, text: toCommit }]);
+    setTail(rest);
   }, [text]);
 
   return (
-    <div className={className}>
-      {settled ? (
-        <span className="whitespace-pre-wrap text-sm leading-relaxed">{settled}</span>
-      ) : null}
-      {fresh ? (
+    <div className={className ?? "text-sm leading-relaxed"}>
+      {chunks.map((chunk) => (
         <TextEffect
-          key={`fresh-${settled.length}`}
+          key={chunk.id}
           as="span"
           per="word"
           preset="fade"
-          speedReveal={4}
-          speedSegment={2}
-          className="inline text-sm leading-relaxed whitespace-pre-wrap"
+          speedReveal={7}
+          speedSegment={3}
+          className="inline text-sm leading-relaxed"
+          segmentWrapperClassName="inline"
         >
-          {fresh}
+          {chunk.text}
         </TextEffect>
+      ))}
+      {tail ? (
+        <span className="inline whitespace-pre-wrap text-sm leading-relaxed">
+          {tail}
+        </span>
       ) : null}
     </div>
   );
