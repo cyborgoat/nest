@@ -1,10 +1,24 @@
-export type Pack = {
+export type PackRelease = {
   id: string;
   name: string;
   description: string;
   version: string;
+  /** Vault folder; equals `id`. */
   path: string;
+  yanked?: boolean;
 };
+
+/** Hub catalog project (may have multiple SemVer releases). */
+export type PackProject = {
+  id: string;
+  name: string;
+  description: string;
+  latest_version: string;
+  versions: string[];
+};
+
+/** @deprecated Prefer PackProject / PackRelease */
+export type Pack = PackRelease;
 
 export type InstalledPack = {
   pack_id: string;

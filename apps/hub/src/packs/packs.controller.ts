@@ -1,27 +1,63 @@
-import { Controller, Get, Param, StreamableFile } from '@nestjs/common';
+import { Controller, Get, Param, Res, StreamableFile } from '@nestjs/common';
+import type { Response } from 'express';
 import { PacksService } from './packs.service';
-import type { Pack } from './pack.types';
+import type { PackProject, PackRelease } from './pack.types';
 
 @Controller('packs')
 export class PacksController {
   constructor(private readonly packsService: PacksService) {}
 
   @Get()
-  listPacks(): Promise<Pack[]> {
-    return this.packsService.listPacks();
+  listProjects(): Promise<PackProject[]> {
+    return this.packsService.listProjects();
+  }
+
+  /** Latest ZIP — must be registered before `:packId/:version`. */
+  @Get(':packId/download')
+  async downloadLatest(
+    @Param('packId') packId: string,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const { buffer, filename, sha256 } =
+      await this.packsService.createPackZip(packId);
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${filename}"`,
+    );
+    res.setHeader('X-Content-SHA256', sha256);
+    return new StreamableFile(buffer);
+  }
+
+  @Get(':packId/:version/download')
+  async downloadVersion(
+    @Param('packId') packId: string,
+    @Param('version') version: string,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const { buffer, filename, sha256 } = await this.packsService.createPackZip(
+      packId,
+      version,
+    );
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${filename}"`,
+    );
+    res.setHeader('X-Content-SHA256', sha256);
+    return new StreamableFile(buffer);
+  }
+
+  @Get(':packId/:version')
+  getRelease(
+    @Param('packId') packId: string,
+    @Param('version') version: string,
+  ): Promise<PackRelease> {
+    return this.packsService.getRelease(packId, version);
   }
 
   @Get(':packId')
-  getPack(@Param('packId') packId: string): Promise<Pack> {
-    return this.packsService.getPack(packId);
-  }
-
-  @Get(':packId/download')
-  async downloadPack(@Param('packId') packId: string): Promise<StreamableFile> {
-    const { buffer, filename } = await this.packsService.createPackZip(packId);
-    return new StreamableFile(buffer, {
-      type: 'application/zip',
-      disposition: `attachment; filename="${filename}"`,
-    });
+  getProject(@Param('packId') packId: string): Promise<PackProject> {
+    return this.packsService.getProject(packId);
   }
 }

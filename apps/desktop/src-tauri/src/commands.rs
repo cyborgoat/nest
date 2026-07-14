@@ -1,9 +1,9 @@
 use crate::db::{
-    self, AppSettings, ChatMessage, ChatSession, IndexStatus, InstalledPack, PackMeta,
+    self, AppSettings, ChatMessage, ChatSession, IndexStatus, InstalledPack,
 };
 use crate::embeddings;
 use crate::error::{AppError, AppResult};
-use crate::hub;
+use crate::hub::{self, PackProject};
 use crate::indexer;
 use crate::llm;
 use crate::state::SharedState;
@@ -412,7 +412,7 @@ pub async fn hub_status(state: State<'_, SharedState>) -> AppResult<hub::HubConn
 }
 
 #[tauri::command]
-pub async fn hub_list_packs(state: State<'_, SharedState>) -> AppResult<Vec<PackMeta>> {
+pub async fn hub_list_packs(state: State<'_, SharedState>) -> AppResult<Vec<PackProject>> {
     let settings = {
         let conn = state.db.lock();
         db::get_settings(&conn)?
@@ -483,18 +483,20 @@ pub async fn hub_remove_pack(
 pub async fn hub_download_pack(
     state: State<'_, SharedState>,
     pack_id: String,
+    version: Option<String>,
 ) -> AppResult<IndexStatus> {
     let settings = {
         let conn = state.db.lock();
         db::get_settings(&conn)?
     };
-    let packs = hub::list_packs_remote(&settings.hub_base_url).await?;
-    let pack = packs
-        .into_iter()
-        .find(|p| p.id == pack_id)
-        .ok_or_else(|| AppError::msg(format!("Unknown pack: {pack_id}")))?;
 
-    hub::download_pack_remote(&settings.hub_base_url, &pack, &state.vault_root).await?;
+    let pack = hub::download_pack_remote(
+        &settings.hub_base_url,
+        &pack_id,
+        version.as_deref(),
+        &state.vault_root,
+    )
+    .await?;
 
     {
         let conn = state.db.lock();

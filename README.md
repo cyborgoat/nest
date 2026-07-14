@@ -47,13 +47,16 @@ npm run start:dev
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/health` | Liveness |
-| GET | `/packs` | Catalog |
-| GET | `/packs/:id` | Metadata |
-| GET | `/packs/:id/download` | ZIP of Markdown tree |
+| GET | `/packs` | Versioned project catalog |
+| GET | `/packs/:id` | Project + versions |
+| GET | `/packs/:id/:version` | Release metadata |
+| GET | `/packs/:id/download` | Latest ZIP |
+| GET | `/packs/:id/:version/download` | Pinned ZIP |
 
 ## Documentation
 
 - [Architecture](docs/architecture.md) — vault, RAG, streaming
+- [Pack registry](docs/pack-registry.md) — PyPI-style multi-version Hub
 - [Chat sessions](docs/chat-sessions.md) — tabs, history, titles
 - [Development](docs/development.md) — env vars and sanity checks
 

@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { InstalledPack } from "@nest/shared";
+import type { InstalledPack, PackProject } from "@nest/shared";
 import {
+  ArrowUpCircle,
   Check,
   CloudDownload,
   CloudOff,
@@ -9,7 +10,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { motion } from "motion/react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ImportPackDialog } from "@/components/hub/ImportPackDialog";
 import {
@@ -56,12 +57,19 @@ export function HubPanel() {
     queryFn: api.hubListInstalled,
   });
 
+  const installedById = useMemo(() => {
+    const map = new Map<string, InstalledPack>();
+    for (const p of installedQuery.data ?? []) {
+      map.set(p.pack_id, p);
+    }
+    return map;
+  }, [installedQuery.data]);
+
   const catalogIds = useMemo(
     () => new Set((packsQuery.data ?? []).map((p) => p.id)),
     [packsQuery.data],
   );
 
-  /** Packs in the vault that are not in the remote catalog (local imports). */
   const localOnlyInstalled = useMemo(
     () =>
       hubOnline && packsQuery.data
@@ -70,7 +78,6 @@ export function HubPanel() {
     [hubOnline, packsQuery.data, installedQuery.data, catalogIds],
   );
 
-  /** When Hub is offline, catalog rows are hidden — list everything installed for remove. */
   const installedWhileOffline = useMemo(
     () => (hubOffline ? (installedQuery.data ?? []) : []),
     [hubOffline, installedQuery.data],
@@ -85,12 +92,25 @@ export function HubPanel() {
   };
 
   const download = useMutation({
-    mutationFn: (packId: string) => api.hubDownloadPack(packId),
-    onSuccess: (status, packId) => {
+    mutationFn: ({
+      packId,
+      version,
+    }: {
+      packId: string;
+      version: string;
+      previousVersion?: string;
+    }) => api.hubDownloadPack(packId, version),
+    onSuccess: (status, vars) => {
       invalidateAfterPackChange();
-      toast.success("Pack downloaded", {
-        description: `${packId}: ${status.indexed_files} files indexed`,
-      });
+      if (vars.previousVersion && vars.previousVersion !== vars.version) {
+        toast.success("Pack upgraded", {
+          description: `${vars.packId} ${vars.previousVersion} → ${vars.version} (${status.indexed_files} files indexed)`,
+        });
+      } else {
+        toast.success("Pack downloaded", {
+          description: `${vars.packId}@${vars.version}: ${status.indexed_files} files indexed`,
+        });
+      }
     },
     onError: (e: Error) =>
       toast.error("Download failed", { description: e.message }),
@@ -129,11 +149,6 @@ export function HubPanel() {
       }),
   });
 
-  const isDownloaded = (packId: string, packPath: string) =>
-    (installedQuery.data ?? []).some(
-      (p) => p.pack_id === packId || p.local_path === packPath,
-    );
-
   return (
     <div className="flex h-full flex-col">
       <div className="border-b border-border px-4 py-3">
@@ -154,9 +169,9 @@ export function HubPanel() {
               )}
             </div>
             <p className="text-sm text-muted-foreground">
-              Download packs from the remote Knowledge Hub or import a pack zip
-              from your computer. Nest stores them as read-only trees in your
-              vault.
+              Install versioned packs from the remote Knowledge Hub (PyPI-style
+              registry) or import a pack zip. One active version per pack lives
+              in your vault.
             </p>
           </div>
           <Button
@@ -212,12 +227,16 @@ export function HubPanel() {
                 <PackRow
                   key={pack.id}
                   index={i}
-                  title={pack.name}
-                  subtitle={`v${pack.version}`}
-                  description={pack.description}
-                  downloaded={isDownloaded(pack.id, pack.path)}
+                  project={pack}
+                  installed={installedById.get(pack.id)}
                   busy={download.isPending || remove.isPending}
-                  onDownload={() => download.mutate(pack.id)}
+                  onInstall={(version) =>
+                    download.mutate({
+                      packId: pack.id,
+                      version,
+                      previousVersion: installedById.get(pack.id)?.version,
+                    })
+                  }
                   onRemove={() => remove.mutate(pack.id)}
                   removePending={remove.isPending}
                 />
@@ -277,25 +296,38 @@ export function HubPanel() {
 
 function PackRow({
   index,
-  title,
-  subtitle,
-  description,
-  downloaded,
+  project,
+  installed,
   busy,
-  onDownload,
+  onInstall,
   onRemove,
   removePending,
 }: {
   index: number;
-  title: string;
-  subtitle: string;
-  description: string;
-  downloaded: boolean;
+  project: PackProject;
+  installed?: InstalledPack;
   busy: boolean;
-  onDownload: () => void;
+  onInstall: (version: string) => void;
   onRemove: () => void;
   removePending: boolean;
 }) {
+  const [selectedVersion, setSelectedVersion] = useState(
+    project.latest_version,
+  );
+  const versions = project.versions.length
+    ? project.versions
+    : [project.latest_version];
+
+  useEffect(() => {
+    setSelectedVersion(project.latest_version);
+  }, [project.id, project.latest_version]);
+
+  const isInstalled = !!installed;
+  const updateAvailable =
+    isInstalled && installed.version !== project.latest_version;
+  const selectedIsInstalled =
+    isInstalled && installed.version === selectedVersion;
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
@@ -303,33 +335,98 @@ function PackRow({
       transition={{ delay: index * 0.05 }}
       className="group flex items-start justify-between gap-3 border-b border-border pb-3"
     >
-      <div className="min-w-0">
-        <div className="flex items-center gap-2">
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
           <Package className="size-4 text-primary" />
-          <h3 className="font-medium">{title}</h3>
-          <span className="text-xs text-muted-foreground">{subtitle}</span>
+          <h3 className="font-medium">{project.name}</h3>
+          <span className="text-xs text-muted-foreground">
+            latest {project.latest_version}
+          </span>
+          {isInstalled && (
+            <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
+              installed {installed.version}
+            </span>
+          )}
+          {updateAvailable && (
+            <span className="rounded bg-accent/15 px-1.5 py-0.5 text-[11px] font-medium text-accent">
+              Update available
+            </span>
+          )}
         </div>
-        <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {project.description}
+        </p>
+        {versions.length > 1 && (
+          <label className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+            Version
+            <select
+              className="h-8 rounded-md border border-border bg-card px-2 text-sm text-foreground"
+              value={selectedVersion}
+              onChange={(e) => setSelectedVersion(e.target.value)}
+              disabled={busy}
+            >
+              {versions.map((v) => (
+                <option key={v} value={v}>
+                  {v}
+                  {v === project.latest_version ? " (latest)" : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
       </div>
-      <div className="relative flex shrink-0 items-center">
-        {downloaded ? (
+      <div className="relative flex shrink-0 items-center gap-2">
+        {selectedIsInstalled ? (
           <>
             <Button size="sm" variant="secondary" disabled>
               <Check className="size-4" />
-              Downloaded
+              Installed
             </Button>
+            {updateAvailable && (
+              <Button
+                size="sm"
+                disabled={busy}
+                onClick={() => onInstall(project.latest_version)}
+              >
+                <ArrowUpCircle className="size-4" />
+                Upgrade
+              </Button>
+            )}
             <RemoveHoverButton
-              name={title}
+              name={project.name}
               disabled={busy || removePending}
               pending={removePending}
               onConfirm={onRemove}
             />
           </>
         ) : (
-          <Button size="sm" disabled={busy} onClick={onDownload}>
-            <CloudDownload className="size-4" />
-            Download
-          </Button>
+          <>
+            <Button
+              size="sm"
+              disabled={busy}
+              onClick={() => onInstall(selectedVersion)}
+            >
+              {isInstalled ? (
+                <>
+                  <ArrowUpCircle className="size-4" />
+                  Install {selectedVersion}
+                </>
+              ) : (
+                <>
+                  <CloudDownload className="size-4" />
+                  Download
+                </>
+              )}
+            </Button>
+            {isInstalled && (
+              <RemoveHoverButton
+                name={project.name}
+                disabled={busy || removePending}
+                pending={removePending}
+                onConfirm={onRemove}
+              />
+            )}
+          </>
         )}
       </div>
     </motion.div>

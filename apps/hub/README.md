@@ -26,10 +26,10 @@ Copy `.env.example` to `.env` and adjust as needed:
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/health` | Liveness |
-| GET | `/packs` | Pack catalog |
-| GET | `/packs/:id` | Pack metadata |
-| GET | `/packs/:id/download` | ZIP of Markdown tree |
+| GET | `/packs` | Projects (`latest_version`, `versions[]`) |
+| GET | `/packs/:id` | Project detail |
+| GET | `/packs/:id/:version` | Release metadata |
+| GET | `/packs/:id/download` | Latest non-yanked ZIP |
+| GET | `/packs/:id/:version/download` | Pinned version ZIP |
 
-Further context: [docs/architecture.md](../../docs/architecture.md), [docs/development.md](../../docs/development.md), [fixtures README](../../fixtures/knowledge/README.md).
-
-Each fixture pack directory must include `pack.json`. The Hub discovers packs by scanning those files and packages them as `.zip` downloads.
+Registry layout is PyPI-style `{id}/{semver}/`. See [pack-registry.md](../../docs/pack-registry.md).

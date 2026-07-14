@@ -3,7 +3,7 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from './../src/app.module';
-import type { Pack } from './../src/packs/pack.types';
+import type { PackProject, PackRelease } from './../src/packs/pack.types';
 
 describe('Knowledge Hub (e2e)', () => {
   let app: INestApplication<App>;
@@ -29,15 +29,28 @@ describe('Knowledge Hub (e2e)', () => {
       .expect({ status: 'ok' });
   });
 
-  it('/packs (GET)', async () => {
+  it('/packs (GET) returns projects with versions', async () => {
     const res = await request(app.getHttpServer()).get('/packs').expect(200);
-    const packs = res.body as Pack[];
+    const packs = res.body as PackProject[];
     expect(Array.isArray(packs)).toBe(true);
     expect(packs.length).toBeGreaterThan(0);
-    expect(packs[0]).toHaveProperty('id');
+    const gs = packs.find((p) => p.id === 'getting-started');
+    expect(gs).toBeDefined();
+    expect(gs!.latest_version).toBe('1.1.0');
+    expect(gs!.versions).toEqual(expect.arrayContaining(['1.0.0', '1.1.0']));
   });
 
-  it('/packs/:id/download (GET)', async () => {
+  it('/packs/:id/:version (GET)', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/packs/getting-started/1.0.0')
+      .expect(200);
+    const release = res.body as PackRelease;
+    expect(release.id).toBe('getting-started');
+    expect(release.version).toBe('1.0.0');
+    expect(release.path).toBe('getting-started');
+  });
+
+  it('/packs/:id/download (GET) latest', async () => {
     const res = await request(app.getHttpServer())
       .get('/packs/getting-started/download')
       .buffer(true)
@@ -50,7 +63,26 @@ describe('Knowledge Hub (e2e)', () => {
       })
       .expect(200);
     expect(res.headers['content-type']).toMatch(/zip/);
+    expect(res.headers['x-content-sha256']).toMatch(/^[a-f0-9]{64}$/);
     expect(Buffer.isBuffer(res.body)).toBe(true);
     expect((res.body as Buffer).length).toBeGreaterThan(0);
+  });
+
+  it('/packs/:id/:version/download (GET)', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/packs/getting-started/1.0.0/download')
+      .buffer(true)
+      .parse((response, callback) => {
+        const chunks: Buffer[] = [];
+        response.on('data', (chunk: Buffer) => chunks.push(chunk));
+        response.on('end', () => {
+          callback(null, Buffer.concat(chunks));
+        });
+      })
+      .expect(200);
+    expect(res.headers['content-disposition']).toContain(
+      'getting-started-1.0.0.zip',
+    );
+    expect(res.headers['x-content-sha256']).toMatch(/^[a-f0-9]{64}$/);
   });
 });

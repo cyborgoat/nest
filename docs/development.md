@@ -47,4 +47,10 @@ cd apps/hub && npm run build
 
 ## Fixtures
 
-`fixtures/knowledge` holds sample packs for the Knowledge Hub server (`FIXTURES_PATH`). Each pack directory must include a required `pack.json`. The Hub discovers packs by scanning those files and serves ZIP downloads. The desktop app does not use fixtures as an offline fallback — if the Hub is unreachable, the Hub panel shows Offline and catalog/download are unavailable. From the desktop Hub panel you can still **Import** a local pack `.zip` (with `pack.json` inside) into the vault.
+`fixtures/knowledge` is a PyPI-style registry: `{pack-id}/{semver}/pack.json`. The Hub discovers releases by scanning those folders and serves ZIP downloads (`{id}-{version}.zip`). Validate with:
+
+```bash
+node scripts/validate-pack-registry.mjs
+```
+
+The desktop app does not use fixtures as an offline fallback. See [pack-registry.md](pack-registry.md).

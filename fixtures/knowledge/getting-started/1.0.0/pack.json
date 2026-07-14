@@ -2,6 +2,5 @@
   "id": "getting-started",
   "name": "Getting Started",
   "description": "Introduces Nest vaults, retrieval, and asking questions.",
-  "version": "1.0.0",
-  "path": "getting-started"
+  "version": "1.0.0"
 }

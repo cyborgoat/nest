@@ -7,7 +7,7 @@ import type {
   HubConnectionStatus,
   IndexStatus,
   InstalledPack,
-  Pack,
+  PackProject,
   TreeNode,
 } from "@nest/shared";
 
@@ -52,13 +52,16 @@ export const api = {
     }),
   chatCancel: () => invoke<void>("chat_cancel"),
 
-  hubListPacks: () => invoke<Pack[]>("hub_list_packs"),
+  hubListPacks: () => invoke<PackProject[]>("hub_list_packs"),
   hubStatus: () => invoke<HubConnectionStatus>("hub_status"),
   hubListInstalled: () => invoke<InstalledPack[]>("hub_list_installed"),
   hubRemovePack: (packId: string) =>
     invoke<IndexStatus>("hub_remove_pack", { packId }),
-  hubDownloadPack: (packId: string) =>
-    invoke<IndexStatus>("hub_download_pack", { packId }),
+  hubDownloadPack: (packId: string, version?: string) =>
+    invoke<IndexStatus>("hub_download_pack", {
+      packId,
+      version: version ?? null,
+    }),
   hubImportLocalPack: (sourcePath: string) =>
     invoke<IndexStatus>("hub_import_local_pack", { sourcePath }),
 };

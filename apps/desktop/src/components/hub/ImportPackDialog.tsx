@@ -138,10 +138,10 @@ export function ImportPackDialog({
                 <span className="font-mono text-xs">pack.json</span> must set{" "}
                 <span className="font-mono text-xs">id</span>,{" "}
                 <span className="font-mono text-xs">name</span>,{" "}
-                <span className="font-mono text-xs">description</span>,{" "}
-                <span className="font-mono text-xs">version</span>, and{" "}
-                <span className="font-mono text-xs">path</span> (single folder
-                name).
+                <span className="font-mono text-xs">description</span>, and{" "}
+                <span className="font-mono text-xs">version</span> (SemVer).{" "}
+                <span className="font-mono text-xs">path</span> is optional and
+                must equal <span className="font-mono text-xs">id</span> if set.
               </li>
               <li>
                 Include at least one{" "}
@@ -149,8 +149,8 @@ export function ImportPackDialog({
                 subfolders are fine.
               </li>
               <li>
-                Re-importing the same{" "}
-                <span className="font-mono text-xs">path</span> replaces the
+                Re-importing the same pack{" "}
+                <span className="font-mono text-xs">id</span> replaces the
                 previous copy. Packs are stored read-only in the vault.
               </li>
             </ul>

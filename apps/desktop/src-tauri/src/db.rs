@@ -75,6 +75,7 @@ pub struct PackMeta {
     pub name: String,
     pub description: String,
     pub version: String,
+    #[serde(default)]
     pub path: String,
 }
 
