@@ -93,7 +93,7 @@ Chat uses a Rig agent with multi-turn memory and a `vault_search` tool; completi
 
 ## Persistence
 
-Under the OS app data directory for `com.nest.app`:
+Under the OS app data directory for `com.cyborgoat.nest.app`:
 
 | Store | Purpose |
 |-------|---------|

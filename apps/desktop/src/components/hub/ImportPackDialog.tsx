@@ -112,7 +112,7 @@ export function ImportPackDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl">
+      <DialogContent className="max-w-xl overflow-hidden">
         <DialogHeader>
           <DialogTitle>Import local pack</DialogTitle>
           <DialogDescription>
@@ -121,7 +121,7 @@ export function ImportPackDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 text-sm">
+        <div className="min-w-0 space-y-4 overflow-hidden text-sm">
           <div className="rounded-md border border-border bg-muted/40 px-3 py-3">
             <p className="font-medium text-foreground">Import guide</p>
             <ul className="mt-2 list-disc space-y-1.5 pl-5 text-muted-foreground">
@@ -154,7 +154,7 @@ export function ImportPackDialog({
                 previous copy. Packs are stored read-only in the vault.
               </li>
             </ul>
-            <p className="mt-3 text-xs text-muted-foreground">
+            <p className="mt-3 break-words text-xs text-muted-foreground">
               Example zip layout:{" "}
               <span className="font-mono">my-topic/pack.json</span>,{" "}
               <span className="font-mono">my-topic/README.md</span>,{" "}
@@ -167,7 +167,7 @@ export function ImportPackDialog({
             onClick={() => void pickZip()}
             disabled={importing}
             className={cn(
-              "flex w-full flex-col items-center justify-center gap-2 rounded-md border border-dashed px-4 py-8 text-center transition-colors",
+              "flex w-full min-w-0 flex-col items-center justify-center gap-2 rounded-md border border-dashed px-4 py-8 text-center transition-colors",
               dragging
                 ? "border-primary bg-primary/5 text-foreground"
                 : "border-border bg-card text-muted-foreground hover:border-primary/50 hover:text-foreground",
@@ -181,13 +181,19 @@ export function ImportPackDialog({
           </button>
 
           {selectedPath && (
-            <div className="flex items-start gap-2 rounded-md border border-border px-3 py-2">
+            <div className="flex min-w-0 items-start gap-2 overflow-hidden rounded-md border border-border px-3 py-2">
               <FileArchive className="mt-0.5 size-4 shrink-0 text-accent" />
-              <div className="min-w-0">
+              <div className="min-w-0 flex-1 overflow-hidden">
                 <p className="text-xs font-medium text-muted-foreground">
                   Selected zip
                 </p>
-                <p className="truncate font-mono text-xs" title={selectedPath}>
+                <p className="truncate font-medium" title={selectedPath}>
+                  {selectedPath.split(/[/\\]/).pop() || selectedPath}
+                </p>
+                <p
+                  className="truncate font-mono text-[11px] text-muted-foreground"
+                  title={selectedPath}
+                >
                   {selectedPath}
                 </p>
               </div>
@@ -195,7 +201,7 @@ export function ImportPackDialog({
           )}
 
           {dropError && (
-            <p className="text-sm text-destructive">{dropError}</p>
+            <p className="break-words text-sm text-destructive">{dropError}</p>
           )}
         </div>
 

@@ -71,4 +71,4 @@ npm run start:dev
 
 ## Data locations
 
-App data (vault + `nest.db` + vector DB) lives in the OS app data directory for `com.nest.app`.
+App data (vault + `nest.db` + vector DB) lives in the OS app data directory for `com.cyborgoat.nest.app`.

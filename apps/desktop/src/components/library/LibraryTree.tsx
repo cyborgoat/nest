@@ -299,17 +299,6 @@ export function LibraryTree({
       toast.error("Could not update pack", { description: e.message }),
   });
 
-  if (tree.length === 0) {
-    return (
-      <div className="flex flex-col gap-2 p-4">
-        <p className="text-sm font-medium text-foreground">No packs yet</p>
-        <p className="text-sm text-muted-foreground">
-          Download from the Hub to add knowledge packs.
-        </p>
-      </div>
-    );
-  }
-
   const forceOpen = search.trim().length > 0;
   const inactiveMatches = useMemo(
     () => filterTree(inactiveRoots, search),
@@ -322,6 +311,17 @@ export function LibraryTree({
       setInactiveOpen("inactive");
     }
   }, [forceOpen, inactiveMatches.length]);
+
+  if (tree.length === 0) {
+    return (
+      <div className="flex flex-col gap-2 p-4">
+        <p className="text-sm font-medium text-foreground">No packs yet</p>
+        <p className="text-sm text-muted-foreground">
+          Download from the Hub to add knowledge packs.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full min-h-0 flex-col">

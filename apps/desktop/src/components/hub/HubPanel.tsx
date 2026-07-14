@@ -11,7 +11,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { motion } from "motion/react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ImportPackDialog } from "@/components/hub/ImportPackDialog";
 import {
@@ -47,6 +47,22 @@ export function HubPanel() {
 
   const hubOnline = hubStatusQuery.data?.online === true;
   const hubOffline = hubStatusQuery.data?.online === false;
+  const wasOnlineRef = useRef<boolean | null>(null);
+
+  useEffect(() => {
+    if (hubStatusQuery.data == null) return;
+    const online = hubStatusQuery.data.online;
+    const prev = wasOnlineRef.current;
+    wasOnlineRef.current = online;
+    // Toast on first known offline, or when connection drops.
+    if (!online && prev !== false) {
+      toast.warning("Knowledge Hub offline", {
+        description:
+          hubStatusQuery.data.message ||
+          "Catalog unavailable. You can still import a local pack zip.",
+      });
+    }
+  }, [hubStatusQuery.data]);
 
   const packsQuery = useQuery({
     queryKey: ["packs"],
@@ -200,32 +216,29 @@ export function HubPanel() {
             Import
           </Button>
         </div>
-        {hubOffline && (
-          <div className="mt-3 flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-            <CloudOff className="mt-0.5 size-4 shrink-0" />
-            <div className="min-w-0">
-              <p className="font-medium">Remote Knowledge Hub is not accessible</p>
-              <p className="mt-0.5 text-xs opacity-90">
-                {hubStatusQuery.data?.message ||
-                  "Start the Hub service or check the Hub URL in Settings. You can still import a local pack zip."}
-              </p>
-              {hubStatusQuery.data?.hub_base_url && (
-                <p className="mt-1 truncate font-mono text-[11px] opacity-80">
-                  {hubStatusQuery.data.hub_base_url}
-                </p>
-              )}
-            </div>
-          </div>
-        )}
       </div>
 
       <ScrollArea className="flex-1">
         <div className="space-y-6 p-4">
-          <section className="space-y-3">
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Hub catalog
-            </h3>
-            {!hubOffline && (
+          {hubOffline && (
+            <section className="space-y-2 rounded-lg border border-dashed border-border bg-muted/40 px-4 py-5 text-center">
+              <CloudOff className="mx-auto size-6 text-muted-foreground" />
+              <h3 className="text-sm font-medium text-foreground">
+                Connect to the Knowledge Hub
+              </h3>
+              <p className="mx-auto max-w-sm text-sm text-muted-foreground">
+                Start the Hub service and check the Hub URL in Settings to browse
+                available packs from the cloud. You can still import a local pack
+                zip anytime.
+              </p>
+            </section>
+          )}
+
+          {!hubOffline && (
+            <section className="space-y-3">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Hub catalog
+              </h3>
               <div className="relative">
                 <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
                 <Input
@@ -235,22 +248,15 @@ export function HubPanel() {
                   className="h-9 pl-8"
                 />
               </div>
-            )}
-            {packsQuery.isLoading && !hubOffline && (
-              <p className="text-sm text-muted-foreground">Loading packs…</p>
-            )}
-            {hubOffline && (
-              <p className="text-sm text-muted-foreground">
-                Catalog unavailable while the Hub is offline.
-              </p>
-            )}
-            {!hubOffline && packsQuery.error && (
-              <p className="text-sm text-destructive">
-                {(packsQuery.error as Error).message}
-              </p>
-            )}
-            {!hubOffline &&
-              filteredCatalog.map((pack, i) => (
+              {packsQuery.isLoading && (
+                <p className="text-sm text-muted-foreground">Loading packs…</p>
+              )}
+              {packsQuery.error && (
+                <p className="text-sm text-destructive">
+                  {(packsQuery.error as Error).message}
+                </p>
+              )}
+              {filteredCatalog.map((pack, i) => (
                 <PackRow
                   key={pack.id}
                   index={i}
@@ -268,18 +274,18 @@ export function HubPanel() {
                   removePending={remove.isPending}
                 />
               ))}
-            {!hubOffline &&
-              packsQuery.data &&
-              packsQuery.data.length > 0 &&
-              filteredCatalog.length === 0 && (
-                <p className="text-sm text-muted-foreground">
-                  No packs match “{catalogSearch}”.
-                </p>
+              {packsQuery.data &&
+                packsQuery.data.length > 0 &&
+                filteredCatalog.length === 0 && (
+                  <p className="text-sm text-muted-foreground">
+                    No packs match “{catalogSearch}”.
+                  </p>
+                )}
+              {packsQuery.data?.length === 0 && (
+                <p className="text-sm text-muted-foreground">No packs available.</p>
               )}
-            {!hubOffline && packsQuery.data?.length === 0 && (
-              <p className="text-sm text-muted-foreground">No packs available.</p>
-            )}
-          </section>
+            </section>
+          )}
 
           {hubOffline && installedWhileOffline.length > 0 && (
             <section className="space-y-3">
