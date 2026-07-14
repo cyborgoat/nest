@@ -1,8 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Citation } from "@nest/shared";
-import { AlertCircle, MessageSquare, Send, Sparkles, X } from "lucide-react";
+import { AlertCircle, MessageSquare, Send, Sparkles, Square, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { MarkdownBody } from "@/components/markdown/MarkdownBody";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
@@ -95,6 +102,11 @@ export function ChatPanel() {
     },
     onError: (e: Error) => {
       const message = e.message || "Chat request failed";
+      // User-initiated stop — not an error toast.
+      if (message.toLowerCase().includes("cancelled")) {
+        setStatusMessage("Generation stopped");
+        return;
+      }
       setChatError(message);
       setStatusMessage(message);
     },
@@ -107,6 +119,10 @@ export function ChatPanel() {
       }
     },
   });
+
+  const stopGeneration = () => {
+    void api.chatCancel();
+  };
 
   const newChat = async () => {
     const session = await api.chatCreateSession(
@@ -157,19 +173,20 @@ export function ChatPanel() {
         <div className="space-y-4 p-3">
           {(messagesQuery.data ?? []).map((msg) => (
             <div key={msg.id} className="space-y-2">
-              <div
-                className={
-                  msg.role === "user"
-                    ? "ml-6 rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground"
-                    : "mr-2 rounded-lg bg-muted px-3 py-2 text-sm"
-                }
-              >
-                {msg.content}
-              </div>
+              {msg.role === "user" ? (
+                <div className="ml-6 rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground whitespace-pre-wrap">
+                  {msg.content}
+                </div>
+              ) : (
+                <div className="mr-2 rounded-lg bg-muted px-3 py-2">
+                  <MarkdownBody>{msg.content}</MarkdownBody>
+                </div>
+              )}
               {msg.role === "assistant" && msg.citations && msg.citations.length > 0 && (
                 <References
                   citations={msg.citations}
                   onOpen={(path) => setSelectedPath(path)}
+                  defaultOpen={false}
                 />
               )}
             </div>
@@ -200,10 +217,15 @@ export function ChatPanel() {
                   <References
                     citations={liveCitations}
                     onOpen={(path) => setSelectedPath(path)}
+                    defaultOpen
                   />
                 )}
-                <div className="mr-2 rounded-lg bg-muted px-3 py-2 text-sm">
-                  {streaming || "Thinking…"}
+                <div className="mr-2 rounded-lg bg-muted px-3 py-2">
+                  {streaming ? (
+                    <MarkdownBody>{streaming}</MarkdownBody>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">Thinking…</p>
+                  )}
                 </div>
               </motion.div>
             )}
@@ -232,12 +254,12 @@ export function ChatPanel() {
       </ScrollArea>
 
       <div className="border-t border-border p-3">
-        <div className="flex gap-2">
+        <div className="relative">
           <Textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder="Ask about your knowledge…"
-            className="min-h-[72px] resize-none"
+            className="min-h-[72px] resize-none pb-9 pr-10"
             disabled={isSending}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
@@ -246,14 +268,29 @@ export function ChatPanel() {
               }
             }}
           />
-          <Button
-            size="icon"
-            className="h-[72px] w-10 shrink-0"
-            disabled={!input.trim() || isSending || !sessionId}
-            onClick={() => send.mutate(input.trim())}
-          >
-            <Send className="size-4" />
-          </Button>
+          {isSending ? (
+            <Button
+              size="icon"
+              variant="secondary"
+              className="absolute right-2 bottom-2 size-7"
+              onClick={stopGeneration}
+              aria-label="Stop generation"
+              title="Stop"
+            >
+              <Square className="size-3 fill-current" />
+            </Button>
+          ) : (
+            <Button
+              size="icon"
+              className="absolute right-2 bottom-2 size-7"
+              disabled={!input.trim() || !sessionId}
+              onClick={() => send.mutate(input.trim())}
+              aria-label="Send"
+              title="Send"
+            >
+              <Send className="size-3.5" />
+            </Button>
+          )}
         </div>
       </div>
     </div>
@@ -263,39 +300,55 @@ export function ChatPanel() {
 function References({
   citations,
   onOpen,
+  defaultOpen = false,
 }: {
   citations: Citation[];
   onOpen: (path: string) => void;
+  defaultOpen?: boolean;
 }) {
   return (
-    <div className="rounded-md border border-border bg-panel p-2">
-      <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-        References
-      </p>
-      <ul className="space-y-1.5">
-        {citations.map((c, i) => (
-          <li key={c.chunk_id}>
-            <button
-              type="button"
-              onClick={() => onOpen(c.file_path)}
-              className="w-full rounded-md px-2 py-1.5 text-left hover:bg-muted"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <span className="truncate text-xs font-medium">
-                  [{i + 1}] {c.title || c.file_path}
-                </span>
-                <span className="shrink-0 text-[10px] text-muted-foreground">
-                  {c.score.toFixed(2)}
-                </span>
-              </div>
-              <p className="mt-0.5 line-clamp-2 text-[11px] text-muted-foreground">
-                {c.snippet}
-              </p>
-              <p className="mt-0.5 truncate text-[10px] text-accent">{c.file_path}</p>
-            </button>
-          </li>
-        ))}
-      </ul>
-    </div>
+    <Accordion
+      type="single"
+      collapsible
+      defaultValue={defaultOpen ? "references" : undefined}
+      className="rounded-md border border-border bg-panel px-2"
+    >
+      <AccordionItem value="references" className="border-none">
+        <AccordionTrigger className="py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground hover:no-underline hover:text-foreground">
+          <span className="inline-flex items-center gap-2">
+            References
+            <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium normal-case tracking-normal text-muted-foreground">
+              {citations.length}
+            </span>
+          </span>
+        </AccordionTrigger>
+        <AccordionContent className="pb-2">
+          <ul className="space-y-1.5">
+            {citations.map((c, i) => (
+              <li key={c.chunk_id}>
+                <button
+                  type="button"
+                  onClick={() => onOpen(c.file_path)}
+                  className="w-full rounded-md px-2 py-1.5 text-left hover:bg-muted"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate text-xs font-medium">
+                      [{i + 1}] {c.title || c.file_path}
+                    </span>
+                    <span className="shrink-0 text-[10px] text-muted-foreground">
+                      {c.score.toFixed(2)}
+                    </span>
+                  </div>
+                  <p className="mt-0.5 line-clamp-2 text-[11px] text-muted-foreground">
+                    {c.snippet}
+                  </p>
+                  <p className="mt-0.5 truncate text-[10px] text-accent">{c.file_path}</p>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </AccordionContent>
+      </AccordionItem>
+    </Accordion>
   );
 }

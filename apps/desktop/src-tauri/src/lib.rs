@@ -1,12 +1,16 @@
+mod agent;
 mod commands;
 mod db;
+mod embeddings;
 mod error;
 mod hub;
 mod indexer;
 mod llm;
+mod memory;
 mod retrieval;
 mod state;
 mod vault;
+mod vector_store;
 
 use state::{AppState, SharedState};
 use std::path::PathBuf;
@@ -57,6 +61,7 @@ pub fn run() {
             commands::chat_list_sessions,
             commands::chat_list_messages,
             commands::chat_send,
+            commands::chat_cancel,
             commands::hub_list_packs,
             commands::hub_list_installed,
             commands::hub_remove_pack,

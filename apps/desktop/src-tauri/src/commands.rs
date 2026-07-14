@@ -1,13 +1,15 @@
 use crate::db::{
     self, AppSettings, ChatMessage, ChatSession, IndexStatus, InstalledPack, PackMeta,
 };
+use crate::embeddings;
 use crate::error::{AppError, AppResult};
 use crate::hub;
 use crate::indexer;
 use crate::llm;
-use crate::retrieval;
 use crate::state::SharedState;
+use crate::vector_store::{self, KnowledgeChunk};
 use crate::vault::{self, TreeNode};
+use crate::agent;
 use tauri::{AppHandle, Emitter, State};
 
 #[tauri::command]
@@ -53,12 +55,91 @@ pub async fn index_rebuild(state: State<'_, SharedState>) -> AppResult<IndexStat
         return Err(AppError::msg("Indexing already in progress"));
     }
     state.set_indexing(true);
-    let result = (|| {
+
+    let result = async {
+        let settings = {
+            let conn = state.db.lock();
+            db::get_settings(&conn)?
+        };
+
+        {
+            let conn = state.db.lock();
+            db::set_index_meta(&conn, 0, 0, Some("Collecting Markdown…"))?;
+        }
+
         let pending = indexer::collect_pending_chunks(&state.vault_root)?;
+
+        {
+            let conn = state.db.lock();
+            db::set_index_meta(
+                &conn,
+                0,
+                pending.len() as u32,
+                Some("Building FTS index…"),
+            )?;
+            indexer::persist_chunks(&conn, &pending)?;
+            db::set_index_meta(
+                &conn,
+                {
+                    let mut files = std::collections::HashSet::new();
+                    for (_, path, _, _, _, _) in &pending {
+                        files.insert(path.clone());
+                    }
+                    files.len() as u32
+                },
+                pending.len() as u32,
+                Some("Loading FastEmbed model (may download on first run)…"),
+            )?;
+        }
+
+        let model = embeddings::load_embedding_model(&settings.embedding_model)?;
+        let chunks: Vec<KnowledgeChunk> = pending
+            .iter()
+            .map(|(id, file_path, title, content, _, _)| KnowledgeChunk {
+                id: id.clone(),
+                file_path: file_path.clone(),
+                title: title.clone(),
+                content: content.clone(),
+            })
+            .collect();
+
+        {
+            let conn = state.db.lock();
+            let file_count = {
+                let mut files = std::collections::HashSet::new();
+                for c in &chunks {
+                    files.insert(c.file_path.clone());
+                }
+                files.len() as u32
+            };
+            db::set_index_meta(
+                &conn,
+                file_count,
+                chunks.len() as u32,
+                Some("Embedding chunks into local vector store…"),
+            )?;
+        }
+
+        vector_store::rebuild_vector_index(&state.app_data_dir, model, chunks).await?;
+
         let conn = state.db.lock();
-        indexer::persist_chunks(&conn, &pending)?;
+        let file_count = {
+            let mut files = std::collections::HashSet::new();
+            for (_, path, _, _, _, _) in &pending {
+                files.insert(path.clone());
+            }
+            files.len() as u32
+        };
+        db::set_index_meta(
+            &conn,
+            file_count,
+            pending.len() as u32,
+            Some("Local FTS + FastEmbed vector index ready"),
+        )?;
         db::get_index_status(&conn, false)
-    })();
+    }
+    .await;
+
     state.set_indexing(false);
     result
 }
@@ -101,30 +182,54 @@ pub async fn chat_send(
         db::get_settings(&conn)?
     };
     let scope = scope_paths.unwrap_or_default();
+    let app_data_dir = state.app_data_dir.clone();
 
+    // Persist the user turn first for durable history / UI refresh.
     {
         let conn = state.db.lock();
         db::add_message(&conn, &session_id, "user", &query, None)?;
     }
 
-    let citations = {
+    // Build prior turns for the agent, excluding the just-saved user message
+    // so `stream_chat(query, …)` does not duplicate it.
+    let prior = {
         let conn = state.db.lock();
-        retrieval::retrieve(&conn, &query, &scope, settings.top_k)?
+        let mut msgs = db::list_messages(&conn, &session_id)?;
+        if msgs
+            .last()
+            .map(|m| m.role == "user" && m.content == query)
+            .unwrap_or(false)
+        {
+            msgs.pop();
+        }
+        crate::memory::messages_to_rig_history(&msgs)
     };
 
-    let (system, user) = retrieval::build_prompt(&query, &citations);
-    let answer = match llm::stream_chat(
+    let result = match agent::run_agent_chat(
         &app,
-        &stream_event,
+        state.inner().clone(),
+        app_data_dir,
         &settings,
-        &system,
-        &user,
-        citations.clone(),
+        &session_id,
+        &query,
+        scope,
+        &stream_event,
+        prior,
     )
     .await
     {
-        Ok(text) => text,
+        Ok(v) => v,
         Err(e) => {
+            // Soft-cancel: user stopped before any tokens arrived.
+            if e.to_string() == "cancelled" {
+                let _ = app.emit(
+                    &stream_event,
+                    llm::ChatStreamEvent::Done {
+                        message_id: String::new(),
+                    },
+                );
+                return Err(e);
+            }
             let _ = app.emit(
                 &stream_event,
                 llm::ChatStreamEvent::Error {
@@ -135,6 +240,12 @@ pub async fn chat_send(
         }
     };
 
+    let answer = if result.cancelled && !result.answer.trim().is_empty() {
+        format!("{}\n\n_(stopped)_", result.answer.trim_end())
+    } else {
+        result.answer
+    };
+
     let message = {
         let conn = state.db.lock();
         db::add_message(
@@ -142,7 +253,7 @@ pub async fn chat_send(
             &session_id,
             "assistant",
             &answer,
-            Some(&citations),
+            Some(&result.citations),
         )?
     };
 
@@ -154,6 +265,12 @@ pub async fn chat_send(
     );
 
     Ok(message)
+}
+
+#[tauri::command]
+pub fn chat_cancel(state: State<'_, SharedState>) -> AppResult<()> {
+    state.request_chat_cancel();
+    Ok(())
 }
 
 #[tauri::command]
@@ -172,7 +289,6 @@ pub async fn hub_list_packs(state: State<'_, SharedState>) -> AppResult<Vec<Pack
 pub fn hub_list_installed(state: State<'_, SharedState>) -> AppResult<Vec<InstalledPack>> {
     let conn = state.db.lock();
     let mut installed = db::list_sync_state(&conn)?;
-    // Only keep packs whose vault directory still exists.
     installed.retain(|p| state.vault_root.join(&p.local_path).is_dir());
     Ok(installed)
 }
@@ -184,7 +300,6 @@ pub fn hub_remove_pack(state: State<'_, SharedState>, pack_id: String) -> AppRes
         if let Some(installed) = db::get_sync_state(&conn, &pack_id)? {
             installed.local_path
         } else {
-            // Fallback: pack_id often matches top-level folder name.
             pack_id.clone()
         }
     };
@@ -192,7 +307,6 @@ pub fn hub_remove_pack(state: State<'_, SharedState>, pack_id: String) -> AppRes
     vault::remove_pack(&state.vault_root, &local_path)?;
     let conn = state.db.lock();
     db::purge_path_data(&conn, &local_path)?;
-    // Also purge by pack_id in case local_path differed.
     if local_path != pack_id {
         db::purge_path_data(&conn, &pack_id)?;
     }

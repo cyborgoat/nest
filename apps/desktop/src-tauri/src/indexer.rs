@@ -130,7 +130,7 @@ pub fn collect_pending_chunks(
     Ok(pending)
 }
 
-/// Persist chunks into SQLite + FTS5. Purely local — no embedding model.
+/// Persist chunks into SQLite + FTS5.
 pub fn persist_chunks(
     conn: &Connection,
     pending: &[(String, String, String, String, usize, usize)],
@@ -147,7 +147,7 @@ pub fn persist_chunks(
         conn,
         file_count,
         chunk_count,
-        Some("Local FTS keyword index (no embeddings)"),
+        Some("Local FTS + vector index (FastEmbed)"),
     )?;
     Ok((file_count, chunk_count))
 }

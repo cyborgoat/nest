@@ -68,7 +68,7 @@ function TreeItem({ node, depth = 0 }: { node: TreeNode; depth?: number }) {
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.18 }}
+            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
             className="overflow-hidden"
           >
             {node.children.map((child) => (

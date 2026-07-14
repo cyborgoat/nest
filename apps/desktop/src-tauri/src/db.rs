@@ -10,6 +10,7 @@ pub struct AppSettings {
     pub llm_base_url: String,
     pub llm_api_key: String,
     pub chat_model: String,
+    pub embedding_model: String,
     pub top_k: u32,
     pub hub_base_url: String,
 }
@@ -20,6 +21,7 @@ impl Default for AppSettings {
             llm_base_url: "https://api.openai.com/v1".into(),
             llm_api_key: String::new(),
             chat_model: "gpt-4o-mini".into(),
+            embedding_model: crate::embeddings::DEFAULT_EMBEDDING_MODEL.into(),
             top_k: 5,
             hub_base_url: "http://127.0.0.1:8787".into(),
         }
@@ -174,10 +176,9 @@ pub fn get_settings(conn: &Connection) -> AppResult<AppSettings> {
             "llm_base_url" => settings.llm_base_url = value,
             "llm_api_key" => settings.llm_api_key = value,
             "chat_model" => settings.chat_model = value,
+            "embedding_model" | "embeddings_model" => settings.embedding_model = value,
             "top_k" => settings.top_k = value.parse().unwrap_or(5),
             "hub_base_url" => settings.hub_base_url = value,
-            // Ignore legacy embeddings_model key if present in older DBs
-            "embeddings_model" => {}
             _ => {}
         }
     }
@@ -189,6 +190,7 @@ pub fn save_settings(conn: &Connection, settings: &AppSettings) -> AppResult<()>
         ("llm_base_url", settings.llm_base_url.clone()),
         ("llm_api_key", settings.llm_api_key.clone()),
         ("chat_model", settings.chat_model.clone()),
+        ("embedding_model", settings.embedding_model.clone()),
         ("top_k", settings.top_k.to_string()),
         ("hub_base_url", settings.hub_base_url.clone()),
     ];

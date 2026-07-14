@@ -19,6 +19,27 @@
   --color-ring: #0d6e6e;
   --color-sidebar: #e4eaee;
   --color-panel: #f4f7f8;
+
+  --animate-accordion-down: accordion-down 0.22s ease-out;
+  --animate-accordion-up: accordion-up 0.2s ease-out;
+}
+
+@keyframes accordion-down {
+  from {
+    height: 0;
+  }
+  to {
+    height: var(--radix-accordion-content-height);
+  }
+}
+
+@keyframes accordion-up {
+  from {
+    height: var(--radix-accordion-content-height);
+  }
+  to {
+    height: 0;
+  }
 }
 
 @layer base {
@@ -42,6 +63,14 @@
 
 .markdown-body {
   @apply text-sm leading-relaxed text-foreground;
+}
+
+.markdown-body > :first-child {
+  margin-top: 0;
+}
+
+.markdown-body > :last-child {
+  margin-bottom: 0;
 }
 
 .markdown-body h1,
@@ -75,11 +104,11 @@
 }
 
 .markdown-body code {
-  @apply font-mono text-[0.85em] bg-muted px-1 py-0.5 rounded;
+  @apply font-mono text-[0.85em] bg-foreground/5 px-1 py-0.5 rounded;
 }
 
 .markdown-body pre {
-  @apply bg-muted p-3 rounded-lg overflow-x-auto mb-3;
+  @apply bg-foreground/5 p-3 rounded-lg overflow-x-auto mb-3 border border-border/60;
 }
 
 .markdown-body pre code {
@@ -92,4 +121,25 @@
 
 .markdown-body a {
   @apply text-primary underline underline-offset-2;
+}
+
+.markdown-body table {
+  @apply mb-3 w-full border-collapse text-left text-sm;
+}
+
+.markdown-body th,
+.markdown-body td {
+  @apply border border-border px-2 py-1.5;
+}
+
+.markdown-body th {
+  @apply bg-foreground/5 font-medium;
+}
+
+.markdown-body hr {
+  @apply my-4 border-border;
+}
+
+.markdown-body strong {
+  @apply font-semibold text-foreground;
 }

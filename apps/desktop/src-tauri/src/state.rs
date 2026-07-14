@@ -8,9 +8,11 @@ use std::sync::Arc;
 
 pub struct AppState {
     pub db: Mutex<Connection>,
+    pub app_data_dir: PathBuf,
     pub vault_root: PathBuf,
     pub fixtures_root: PathBuf,
     pub is_indexing: AtomicBool,
+    pub chat_cancel: AtomicBool,
 }
 
 impl AppState {
@@ -22,9 +24,11 @@ impl AppState {
         let db = crate::db::open_db(&db_path)?;
         Ok(Self {
             db: Mutex::new(db),
+            app_data_dir,
             vault_root,
             fixtures_root,
             is_indexing: AtomicBool::new(false),
+            chat_cancel: AtomicBool::new(false),
         })
     }
 
@@ -34,6 +38,18 @@ impl AppState {
 
     pub fn indexing(&self) -> bool {
         self.is_indexing.load(Ordering::SeqCst)
+    }
+
+    pub fn clear_chat_cancel(&self) {
+        self.chat_cancel.store(false, Ordering::SeqCst);
+    }
+
+    pub fn request_chat_cancel(&self) {
+        self.chat_cancel.store(true, Ordering::SeqCst);
+    }
+
+    pub fn chat_cancel_requested(&self) -> bool {
+        self.chat_cancel.load(Ordering::SeqCst)
     }
 }
 

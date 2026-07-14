@@ -12,6 +12,7 @@ const EMPTY: AppSettings = {
   llm_base_url: "https://api.openai.com/v1",
   llm_api_key: "",
   chat_model: "gpt-4o-mini",
+  embedding_model: "AllMiniLML6V2Q",
   top_k: 5,
   hub_base_url: "http://127.0.0.1:8787",
 };
@@ -87,7 +88,8 @@ export function SettingsPanel() {
       <div>
         <h2 className="font-display text-xl">Settings</h2>
         <p className="text-sm text-muted-foreground">
-          Configure your OpenAI-compatible LLM and local index.
+          Configure your OpenAI-compatible chat LLM. Retrieval uses local FastEmbed + SQLite
+          vectors (offline).
         </p>
       </div>
 
@@ -124,8 +126,16 @@ export function SettingsPanel() {
             />
           </Field>
         </div>
+        <Field label="Local embedding model">
+          <Input
+            value={form.embedding_model}
+            onChange={(e) => update("embedding_model", e.target.value)}
+            placeholder="AllMiniLML6V2Q"
+          />
+        </Field>
         <p className="text-xs text-muted-foreground">
-          Retrieval uses a local SQLite FTS keyword index (no embedding model).
+          FastEmbed models run on-device (e.g. AllMiniLML6V2Q, BGESmallENV15Q). First rebuild may
+          download ONNX weights. Chat still uses the LLM base URL above.
         </p>
         <Field label="Hub base URL">
           <Input
@@ -150,7 +160,7 @@ export function SettingsPanel() {
       <section className="space-y-3">
         <h3 className="text-sm font-semibold">Local index</h3>
         <p className="text-xs text-muted-foreground">
-          Lightweight on-device FTS over Markdown chunks. Rebuild after importing packs.
+          Hybrid FTS + FastEmbed vector index over Markdown chunks. Rebuild after importing packs.
         </p>
         <div className="rounded-md border border-border bg-panel p-3 text-sm">
           <div className="flex items-center gap-2">

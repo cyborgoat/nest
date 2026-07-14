@@ -22,8 +22,17 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { api } from "@/lib/api";
+import {
+  animatePanelSize,
+  cancelPanelAnimation,
+} from "@/lib/panel-animation";
 import { cn } from "@/lib/utils";
 import { useUiStore } from "@/stores/ui";
+
+const LIBRARY_DEFAULT_PX = 260;
+const LIBRARY_MIN_PX = 180;
+const CHAT_DEFAULT_PX = 360;
+const CHAT_MIN_PX = 280;
 
 export default function App() {
   const activePanel = useUiStore((s) => s.activePanel);
@@ -36,9 +45,15 @@ export default function App() {
 
   const libraryPanelRef = usePanelRef();
   const chatPanelRef = usePanelRef();
-  // Ignore spurious zero sizes while panels are laying out / remounting.
+  // Ignore onResize while we drive sizes programmatically.
   const syncingLibrary = useRef(false);
   const syncingChat = useRef(false);
+  const libraryAnimRef = useRef<number | null>(null);
+  const chatAnimRef = useRef<number | null>(null);
+  const libraryLastSizeRef = useRef(LIBRARY_DEFAULT_PX);
+  const chatLastSizeRef = useRef(CHAT_DEFAULT_PX);
+  const libraryReadyRef = useRef(false);
+  const chatReadyRef = useRef(false);
 
   const treeQuery = useQuery({
     queryKey: ["tree"],
@@ -56,30 +71,76 @@ export default function App() {
   useEffect(() => {
     const panel = libraryPanelRef.current;
     if (!panel) return;
+
     syncingLibrary.current = true;
-    if (libraryVisible) panel.expand();
-    else panel.collapse();
-    const id = requestAnimationFrame(() => {
-      syncingLibrary.current = false;
-    });
-    return () => cancelAnimationFrame(id);
+
+    // First sync: no animation (avoid opening animation on load).
+    if (!libraryReadyRef.current) {
+      libraryReadyRef.current = true;
+      panel.resize(libraryVisible ? LIBRARY_DEFAULT_PX : 0);
+      const id = requestAnimationFrame(() => {
+        syncingLibrary.current = false;
+      });
+      return () => cancelAnimationFrame(id);
+    }
+
+    let cancelled = false;
+    const run = async () => {
+      if (libraryVisible) {
+        const target = Math.max(libraryLastSizeRef.current, LIBRARY_MIN_PX);
+        await animatePanelSize(panel, target, libraryAnimRef);
+      } else {
+        const size = panel.getSize().inPixels;
+        if (size > LIBRARY_MIN_PX / 2) libraryLastSizeRef.current = size;
+        await animatePanelSize(panel, 0, libraryAnimRef);
+      }
+      if (!cancelled) syncingLibrary.current = false;
+    };
+    void run();
+
+    return () => {
+      cancelled = true;
+      cancelPanelAnimation(libraryAnimRef);
+    };
   }, [libraryVisible, libraryPanelRef]);
 
   useEffect(() => {
     const panel = chatPanelRef.current;
     if (!panel) return;
+
     syncingChat.current = true;
-    if (chatOpen) panel.expand();
-    else panel.collapse();
-    const id = requestAnimationFrame(() => {
-      syncingChat.current = false;
-    });
-    return () => cancelAnimationFrame(id);
+
+    if (!chatReadyRef.current) {
+      chatReadyRef.current = true;
+      panel.resize(chatOpen ? CHAT_DEFAULT_PX : 0);
+      const id = requestAnimationFrame(() => {
+        syncingChat.current = false;
+      });
+      return () => cancelAnimationFrame(id);
+    }
+
+    let cancelled = false;
+    const run = async () => {
+      if (chatOpen) {
+        const target = Math.max(chatLastSizeRef.current, CHAT_MIN_PX);
+        await animatePanelSize(panel, target, chatAnimRef);
+      } else {
+        const size = panel.getSize().inPixels;
+        if (size > CHAT_MIN_PX / 2) chatLastSizeRef.current = size;
+        await animatePanelSize(panel, 0, chatAnimRef);
+      }
+      if (!cancelled) syncingChat.current = false;
+    };
+    void run();
+
+    return () => {
+      cancelled = true;
+      cancelPanelAnimation(chatAnimRef);
+    };
   }, [chatOpen, chatPanelRef]);
 
   function handleToggleSidebar() {
-    const next = !sidebarOpen;
-    setSidebarOpen(next);
+    setSidebarOpen(!sidebarOpen);
   }
 
   function handleToggleChat() {
@@ -151,14 +212,19 @@ export default function App() {
             panelRef={libraryPanelRef}
             collapsible
             collapsedSize={0}
-            defaultSize={sidebarOpen ? 260 : 0}
-            minSize={180}
+            defaultSize={sidebarOpen ? LIBRARY_DEFAULT_PX : 0}
+            // minSize must stay 0 so collapse can animate through every pixel;
+            // react-resizable-panels snaps anything between collapsedSize and minSize.
+            minSize={0}
             maxSize={420}
             className="overflow-hidden bg-sidebar"
             onResize={(size) => {
               // Only persist user-driven resize while the library tab is active.
               if (syncingLibrary.current || activePanel !== "library") return;
-              const open = size.inPixels > 0;
+              if (size.inPixels >= LIBRARY_MIN_PX) {
+                libraryLastSizeRef.current = size.inPixels;
+              }
+              const open = size.inPixels > 8;
               if (open !== sidebarOpen) setSidebarOpen(open);
             }}
           >
@@ -180,9 +246,24 @@ export default function App() {
             </aside>
           </ResizablePanel>
 
-          {libraryVisible ? <ResizableHandle withHandle className="w-1.5" /> : null}
+          {/* Keep handle mounted so layout does not snap when collapsing. */}
+          <ResizableHandle
+            withHandle={libraryVisible}
+            disabled={!libraryVisible}
+            className={cn(
+              "transition-[width,opacity] duration-200 ease-out",
+              libraryVisible
+                ? "w-1.5 opacity-100"
+                : "w-0 opacity-0 pointer-events-none",
+            )}
+          />
 
-          <ResizablePanel id="main" minSize="30%" defaultSize="50%" className="bg-card/60">
+          <ResizablePanel
+            id="main"
+            minSize="30%"
+            defaultSize="50%"
+            className="bg-card/60"
+          >
             <main className="h-full min-w-0 overflow-hidden">
               {activePanel === "library" && <MarkdownViewer />}
               {activePanel === "hub" && <HubPanel />}
@@ -190,20 +271,32 @@ export default function App() {
             </main>
           </ResizablePanel>
 
-          {chatOpen ? <ResizableHandle withHandle className="w-1.5" /> : null}
+          <ResizableHandle
+            withHandle={chatOpen}
+            disabled={!chatOpen}
+            className={cn(
+              "transition-[width,opacity] duration-200 ease-out",
+              chatOpen
+                ? "w-1.5 opacity-100"
+                : "w-0 opacity-0 pointer-events-none",
+            )}
+          />
 
           <ResizablePanel
             id="chat"
             panelRef={chatPanelRef}
             collapsible
             collapsedSize={0}
-            defaultSize={chatOpen ? 360 : 0}
-            minSize={280}
+            defaultSize={chatOpen ? CHAT_DEFAULT_PX : 0}
+            minSize={0}
             maxSize={640}
             className="overflow-hidden bg-panel"
             onResize={(size) => {
               if (syncingChat.current) return;
-              const open = size.inPixels > 0;
+              if (size.inPixels >= CHAT_MIN_PX) {
+                chatLastSizeRef.current = size.inPixels;
+              }
+              const open = size.inPixels > 8;
               if (open !== chatOpen) setChatOpen(open);
             }}
           >

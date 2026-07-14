@@ -1,9 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { BookOpen, Cloud, Lock, PackageOpen, WandSparkles } from "lucide-react";
 import { motion } from "motion/react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { api } from "@/lib/api";
+import { MarkdownBody } from "@/components/markdown/MarkdownBody";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useUiStore } from "@/stores/ui";
@@ -117,7 +116,7 @@ export function MarkdownViewer() {
         </span>
       </div>
       <ScrollArea className="flex-1">
-        <div className="markdown-body max-w-3xl px-6 py-5">
+        <div className="max-w-3xl px-6 py-5">
           {isLoading && <p className="text-muted-foreground">Loading…</p>}
           {error && (
             <p className="text-destructive">
@@ -131,7 +130,7 @@ export function MarkdownViewer() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.2 }}
             >
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{data}</ReactMarkdown>
+              <MarkdownBody>{data}</MarkdownBody>
             </motion.div>
           )}
         </div>

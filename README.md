@@ -49,11 +49,11 @@ npm run start:dev
 | GET | `/packs/:id` | Metadata |
 | GET | `/packs/:id/download` | ZIP of Markdown tree |
 
-## Phase 1 scope
+## Phase 1–2 scope
 
 - Markdown-only knowledge
-- Local vault + SQLite chat / lightweight FTS retrieval (no embedding model)
-- Chat answers still use your configured OpenAI-compatible LLM
+- Local vault + SQLite FTS **and** FastEmbed vector RAG via [Rig](https://github.com/0xPlaygrounds/rig) (`rig-fastembed` + `rig-sqlite`)
+- Chat uses a Rig agent with multi-turn history and a `vault_search` tool; completions still go to your OpenAI-compatible LLM
 - Desktop Nest is a download-only client (no publishing)
 - Hub auth and multi-tenant cloud are deferred
 

@@ -27,6 +27,7 @@ export type AppSettings = {
   llm_base_url: string;
   llm_api_key: string;
   chat_model: string;
+  embedding_model: string;
   top_k: number;
   hub_base_url: string;
 };

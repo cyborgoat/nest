@@ -39,6 +39,7 @@ export const api = {
       scopePaths,
       streamEvent,
     }),
+  chatCancel: () => invoke<void>("chat_cancel"),
 
   hubListPacks: () => invoke<Pack[]>("hub_list_packs"),
   hubListInstalled: () => invoke<InstalledPack[]>("hub_list_installed"),

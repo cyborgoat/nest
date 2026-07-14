@@ -66,6 +66,21 @@ build/Release
 **/target/
 **/src-tauri/gen/
 
+# Local embedding / ML model caches (FastEmbed, ONNX, HuggingFace)
+**/.fastembed_cache/
+**/.cache/huggingface/
+**/onnx/
+*.onnx
+*.onnx_data
+*.safetensors
+*.gguf
+*.ggml
+
+# Local vector / RAG databases
+**/nest-vectors.db
+**/nest-vectors.db-*
+*.sqlite-vec
+
 # Python (legacy / local tools)
 __pycache__/
 *.py[cod]
