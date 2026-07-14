@@ -1,0 +1,16 @@
+[
+  {
+    "id": "getting-started",
+    "name": "Getting Started",
+    "description": "Introduces Nest vaults, retrieval, and asking questions.",
+    "version": "1.0.0",
+    "path": "getting-started"
+  },
+  {
+    "id": "software-engineering",
+    "name": "Software Engineering",
+    "description": "Sample patterns and testing notes for demos.",
+    "version": "1.0.0",
+    "path": "software-engineering"
+  }
+]
