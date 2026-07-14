@@ -62,7 +62,8 @@
 }
 
 .markdown-body {
-  @apply text-sm leading-relaxed text-foreground;
+  @apply min-w-0 max-w-full break-words text-sm leading-relaxed text-foreground;
+  overflow-wrap: anywhere;
 }
 
 .markdown-body > :first-child {
@@ -108,7 +109,7 @@
 }
 
 .markdown-body pre {
-  @apply bg-foreground/5 p-3 rounded-lg overflow-x-auto mb-3 border border-border/60;
+  @apply max-w-full bg-foreground/5 p-3 rounded-lg overflow-x-auto mb-3 border border-border/60;
 }
 
 .markdown-body pre code {

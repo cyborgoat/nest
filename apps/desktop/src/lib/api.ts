@@ -25,6 +25,15 @@ export const api = {
   chatCreateSession: (title?: string) =>
     invoke<ChatSession>("chat_create_session", { title: title ?? null }),
   chatListSessions: () => invoke<ChatSession[]>("chat_list_sessions"),
+  chatUpdateSession: (
+    sessionId: string,
+    patch: { title?: string; pinned?: boolean; archived?: boolean },
+  ) =>
+    invoke<ChatSession>("chat_update_session", { sessionId, patch }),
+  chatDeleteSession: (sessionId: string) =>
+    invoke<void>("chat_delete_session", { sessionId }),
+  chatGenerateTitle: (sessionId: string) =>
+    invoke<ChatSession>("chat_generate_title", { sessionId }),
   chatListMessages: (sessionId: string) =>
     invoke<ChatMessage[]>("chat_list_messages", { sessionId }),
   chatSend: (

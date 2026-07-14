@@ -1,13 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { ChatMessage, Citation } from "@nest/shared";
-import { AlertCircle, MessageSquare, Send, Sparkles, Square, X } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import type { ChatMessage, ChatSession, Citation } from "@nest/shared";
+import { AlertCircle, Send, Sparkles, Square, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   AgentStatusIndicator,
   type AgentActivity,
 } from "@/components/chat/AgentStatusIndicator";
-import { StreamingTextEffect } from "@/components/chat/StreamingTextEffect";
+import { ChatSessionBar } from "@/components/chat/ChatSessionBar";
 import { MarkdownBody } from "@/components/markdown/MarkdownBody";
 import {
   Accordion,
@@ -19,16 +18,22 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import { api, listenChatStream, type ChatStreamEvent } from "@/lib/api";
+import { cn } from "@/lib/utils";
 import { useUiStore } from "@/stores/ui";
+
+const bubble =
+  "min-w-0 max-w-full overflow-hidden break-words [overflow-wrap:anywhere]";
 
 export function ChatPanel() {
   const selectedScope = useUiStore((s) => s.selectedScope);
   const clearScope = useUiStore((s) => s.clearScope);
   const setSelectedPath = useUiStore((s) => s.setSelectedPath);
   const setStatusMessage = useUiStore((s) => s.setStatusMessage);
+  const sessionId = useUiStore((s) => s.chatSessionId);
+  const openChatTab = useUiStore((s) => s.openChatTab);
+  const pruneChatTabs = useUiStore((s) => s.pruneChatTabs);
   const queryClient = useQueryClient();
 
-  const [sessionId, setSessionId] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [pendingUser, setPendingUser] = useState<string | null>(null);
   const [streaming, setStreaming] = useState("");
@@ -36,26 +41,97 @@ export function ChatPanel() {
   const [isSending, setIsSending] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
-  // Skip Enter that confirms an IME candidate (CJK etc.) — some browsers fire
-  // that keydown after compositionend with isComposing already false.
   const imeConfirmPending = useRef(false);
+  const bootstrapped = useRef(false);
+
+  // Buffer tokens and flush once per animation frame — avoids one React render per token.
+  const streamBuf = useRef("");
+  const streamRaf = useRef<number | null>(null);
+
+  const flushStream = () => {
+    if (streamRaf.current != null) {
+      cancelAnimationFrame(streamRaf.current);
+      streamRaf.current = null;
+    }
+    setStreaming(streamBuf.current);
+  };
+
+  const clearStream = () => {
+    if (streamRaf.current != null) {
+      cancelAnimationFrame(streamRaf.current);
+      streamRaf.current = null;
+    }
+    streamBuf.current = "";
+    setStreaming("");
+  };
+
+  const appendStream = (chunk: string) => {
+    streamBuf.current += chunk;
+    if (streamRaf.current != null) return;
+    streamRaf.current = requestAnimationFrame(() => {
+      streamRaf.current = null;
+      setStreaming(streamBuf.current);
+    });
+  };
 
   const sessionsQuery = useQuery({
     queryKey: ["chat-sessions"],
     queryFn: api.chatListSessions,
   });
 
+  const sessions: ChatSession[] = sessionsQuery.data ?? [];
+
+  const resetChatUi = () => {
+    setPendingUser(null);
+    clearStream();
+    setAgentActivity(null);
+    setChatError(null);
+  };
+
   useEffect(() => {
-    if (sessionId || !sessionsQuery.data) return;
-    if (sessionsQuery.data.length > 0) {
-      setSessionId(sessionsQuery.data[0].id);
+    if (!sessionsQuery.data || bootstrapped.current) return;
+    bootstrapped.current = true;
+
+    const all = sessionsQuery.data;
+    const valid = new Set(all.map((s: ChatSession) => s.id));
+    pruneChatTabs(valid);
+
+    const { openChatTabs: tabs, chatSessionId } = useUiStore.getState();
+    if (chatSessionId && valid.has(chatSessionId)) {
+      if (!tabs.includes(chatSessionId)) openChatTab(chatSessionId);
       return;
     }
-    api.chatCreateSession("Library chat").then((s) => {
-      setSessionId(s.id);
+
+    const preferred =
+      all.find((s: ChatSession) => !s.archived && tabs.includes(s.id)) ??
+      all.find((s: ChatSession) => !s.archived) ??
+      all[0];
+
+    if (preferred) {
+      openChatTab(preferred.id);
+      return;
+    }
+
+    void api.chatCreateSession("New chat").then((s) => {
+      openChatTab(s.id);
       queryClient.invalidateQueries({ queryKey: ["chat-sessions"] });
     });
-  }, [sessionId, sessionsQuery.data, queryClient]);
+  }, [sessionsQuery.data, pruneChatTabs, openChatTab, queryClient]);
+
+  useEffect(() => {
+    if (!sessionsQuery.data || !bootstrapped.current) return;
+    if (sessionId) return;
+
+    const preferred = sessionsQuery.data.find((s: ChatSession) => !s.archived);
+    if (preferred) {
+      openChatTab(preferred.id);
+      return;
+    }
+    void api.chatCreateSession("New chat").then((s) => {
+      openChatTab(s.id);
+      queryClient.invalidateQueries({ queryKey: ["chat-sessions"] });
+    });
+  }, [sessionId, sessionsQuery.data, openChatTab, queryClient]);
 
   const messagesQuery = useQuery({
     queryKey: ["chat-messages", sessionId],
@@ -64,8 +140,17 @@ export function ChatPanel() {
   });
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    const id = requestAnimationFrame(() => {
+      bottomRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+    });
+    return () => cancelAnimationFrame(id);
   }, [messagesQuery.data, pendingUser, streaming, chatError, agentActivity]);
+
+  useEffect(() => {
+    return () => {
+      if (streamRaf.current != null) cancelAnimationFrame(streamRaf.current);
+    };
+  }, []);
 
   const scopeLabel = useMemo(() => {
     if (selectedScope.length === 0) return "Whole library";
@@ -78,19 +163,24 @@ export function ChatPanel() {
       if (!sessionId) throw new Error("No chat session");
       const eventName = `chat-stream-${Date.now()}`;
 
-      const unlisten = await listenChatStream(eventName, (event: ChatStreamEvent) => {
-        if (event.type === "reading") {
-          setAgentActivity({ kind: "reading", path: event.path });
-        } else if (event.type === "generating") {
-          setAgentActivity({ kind: "generating" });
-        } else if (event.type === "token") {
-          setAgentActivity({ kind: "generating" });
-          setStreaming((prev) => prev + event.content);
-        } else if (event.type === "error") {
-          setChatError(event.message);
-          setStatusMessage(event.message);
-        }
-      });
+      const unlisten = await listenChatStream(
+        eventName,
+        (event: ChatStreamEvent) => {
+          if (event.type === "reading") {
+            setAgentActivity({ kind: "reading", path: event.path });
+          } else if (event.type === "generating") {
+            setAgentActivity({ kind: "generating" });
+          } else if (event.type === "token") {
+            setAgentActivity((prev) =>
+              prev?.kind === "generating" ? prev : { kind: "generating" },
+            );
+            appendStream(event.content);
+          } else if (event.type === "error") {
+            setChatError(event.message);
+            setStatusMessage(event.message);
+          }
+        },
+      );
 
       try {
         return await api.chatSend(sessionId, query, selectedScope, eventName);
@@ -103,21 +193,17 @@ export function ChatPanel() {
       setPendingUser(query);
       setInput("");
       setIsSending(true);
-      setStreaming("");
+      clearStream();
       setAgentActivity({ kind: "generating" });
     },
     onSuccess: (assistantMsg, query) => {
+      flushStream();
       if (sessionId) {
-        // Seed the message cache before clearing the stream bubble so React
-        // paints one continuous frame (no empty gap / remount flash).
         queryClient.setQueryData<ChatMessage[]>(
           ["chat-messages", sessionId],
           (old) => {
             const list = [...(old ?? [])];
-            const hasUser = list.some(
-              (m) => m.role === "user" && m.content === query,
-            );
-            if (!hasUser) {
+            if (!list.some((m) => m.role === "user" && m.content === query)) {
               list.push({
                 id: `local-user-${Date.now()}`,
                 role: "user",
@@ -131,23 +217,19 @@ export function ChatPanel() {
             return list;
           },
         );
-        void queryClient.invalidateQueries({
-          queryKey: ["chat-messages", sessionId],
-        });
       }
       setPendingUser(null);
       setAgentActivity(null);
       setIsSending(false);
-      setStreaming("");
-      queryClient.invalidateQueries({ queryKey: ["chat-sessions"] });
+      clearStream();
+      void queryClient.invalidateQueries({ queryKey: ["chat-sessions"] });
     },
     onError: (e: Error) => {
       const message = e.message || "Chat request failed";
-      // User-initiated stop — not an error toast.
       if (message.toLowerCase().includes("cancelled")) {
         setStatusMessage("Generation stopped");
         setIsSending(false);
-        setStreaming("");
+        clearStream();
         setPendingUser(null);
         setAgentActivity(null);
         if (sessionId) {
@@ -160,47 +242,21 @@ export function ChatPanel() {
       setChatError(message);
       setStatusMessage(message);
       setIsSending(false);
-      setStreaming("");
+      clearStream();
       setPendingUser(null);
       setAgentActivity(null);
     },
   });
 
-  const stopGeneration = () => {
-    void api.chatCancel();
-  };
-
-  const newChat = async () => {
-    const session = await api.chatCreateSession(
-      input.trim().slice(0, 40) || "New chat",
-    );
-    setSessionId(session.id);
-    setPendingUser(null);
-    setStreaming("");
-    setAgentActivity(null);
-    setChatError(null);
-    queryClient.invalidateQueries({ queryKey: ["chat-sessions"] });
-  };
-
   const showOptimisticUser =
     pendingUser !== null &&
     !(messagesQuery.data ?? []).some(
-      (m) => m.role === "user" && m.content === pendingUser,
+      (m: ChatMessage) => m.role === "user" && m.content === pendingUser,
     );
-
-  const showStatusOnly = isSending && !streaming && !!agentActivity;
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between border-b border-border px-3 py-2">
-        <div className="flex items-center gap-2">
-          <MessageSquare className="size-4 text-primary" />
-          <h3 className="text-sm font-medium">Chat</h3>
-        </div>
-        <Button size="sm" variant="ghost" onClick={newChat}>
-          New
-        </Button>
-      </div>
+      <ChatSessionBar sessions={sessions} onResetChatUi={resetChatUi} />
 
       <div className="flex items-center gap-2 border-b border-border px-3 py-2 text-xs">
         <Sparkles className="size-3.5 text-accent" />
@@ -218,65 +274,51 @@ export function ChatPanel() {
       </div>
 
       <ScrollArea className="flex-1 min-h-0">
-        <div className="space-y-4 px-3 pt-3 pb-8">
-          {(messagesQuery.data ?? []).map((msg) => (
-            <div key={msg.id} className="space-y-2">
+        <div className="min-w-0 max-w-full space-y-4 overflow-x-hidden px-3 pt-3 pb-8">
+          {(messagesQuery.data ?? []).map((msg: ChatMessage) => (
+            <div key={msg.id} className="min-w-0 space-y-2">
               {msg.role === "user" ? (
-                <div className="ml-6 rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground whitespace-pre-wrap">
-                  {msg.content}
-                </div>
+                <UserBubble>{msg.content}</UserBubble>
               ) : (
-                <div className="mr-2 rounded-lg bg-muted px-3 py-2">
-                  <MarkdownBody>{msg.content}</MarkdownBody>
-                </div>
+                <AssistantBubble>
+                  <MarkdownBody className={bubble}>{msg.content}</MarkdownBody>
+                </AssistantBubble>
               )}
-              {msg.role === "assistant" && msg.citations && msg.citations.length > 0 && (
-                <References
-                  citations={msg.citations}
-                  onOpen={(path) => setSelectedPath(path)}
-                  defaultOpen={false}
-                />
-              )}
+              {msg.role === "assistant" &&
+                msg.citations &&
+                msg.citations.length > 0 && (
+                  <References
+                    citations={msg.citations}
+                    onOpen={(path) => setSelectedPath(path)}
+                  />
+                )}
             </div>
           ))}
 
-          <AnimatePresence>
-            {showOptimisticUser && (
-              <motion.div
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0 }}
-                className="ml-6 rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground"
-              >
-                {pendingUser}
-              </motion.div>
-            )}
-          </AnimatePresence>
+          {showOptimisticUser && <UserBubble>{pendingUser}</UserBubble>}
 
-          <AnimatePresence initial={false}>
-            {isSending && (
-              <motion.div
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="space-y-2"
-              >
-                <div className="mr-2 rounded-lg bg-muted px-3 py-2">
-                  <AgentStatusIndicator
-                    activity={
-                      streaming && agentActivity?.kind === "generating"
-                        ? null
-                        : agentActivity
-                    }
-                  />
-                  {streaming ? (
-                    <StreamingTextEffect text={streaming} />
-                  ) : showStatusOnly ? null : (
-                    <AgentStatusIndicator activity={{ kind: "generating" }} />
+          {isSending && (
+            <AssistantBubble>
+              {streaming ? (
+                <>
+                  {agentActivity?.kind === "reading" && (
+                    <AgentStatusIndicator activity={agentActivity} />
                   )}
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+                  <p className={cn(bubble, "text-sm leading-relaxed whitespace-pre-wrap")}>
+                    {streaming}
+                    <span
+                      aria-hidden
+                      className="ml-0.5 inline-block h-[1em] w-1.5 translate-y-[0.1em] animate-pulse rounded-sm bg-foreground/50 align-baseline"
+                    />
+                  </p>
+                </>
+              ) : (
+                <AgentStatusIndicator
+                  activity={agentActivity ?? { kind: "generating" }}
+                />
+              )}
+            </AssistantBubble>
+          )}
 
           {chatError && (
             <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
@@ -296,7 +338,6 @@ export function ChatPanel() {
             </div>
           )}
 
-          {/* Breathing room above the composer */}
           <div ref={bottomRef} className="h-4" />
         </div>
       </ScrollArea>
@@ -314,13 +355,11 @@ export function ChatPanel() {
             }}
             onCompositionEnd={() => {
               imeConfirmPending.current = true;
-              // Clear after the confirming Enter (if any) has been delivered.
               window.setTimeout(() => {
                 imeConfirmPending.current = false;
               }, 0);
             }}
             onKeyDown={(e) => {
-              // Enter confirms IME composition — never treat that as Send.
               if (
                 e.nativeEvent.isComposing ||
                 e.keyCode === 229 ||
@@ -339,7 +378,7 @@ export function ChatPanel() {
               size="icon"
               variant="secondary"
               className="absolute right-2 bottom-2 size-7"
-              onClick={stopGeneration}
+              onClick={() => void api.chatCancel()}
               aria-label="Stop generation"
               title="Stop"
             >
@@ -366,20 +405,40 @@ export function ChatPanel() {
   );
 }
 
+function UserBubble({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex justify-end">
+      <div
+        className={cn(
+          bubble,
+          "max-w-[85%] rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground whitespace-pre-wrap",
+        )}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function AssistantBubble({ children }: { children: ReactNode }) {
+  return (
+    <div className={cn(bubble, "mr-2 rounded-lg bg-muted px-3 py-2")}>
+      {children}
+    </div>
+  );
+}
+
 function References({
   citations,
   onOpen,
-  defaultOpen = false,
 }: {
   citations: Citation[];
   onOpen: (path: string) => void;
-  defaultOpen?: boolean;
 }) {
   return (
     <Accordion
       type="single"
       collapsible
-      defaultValue={defaultOpen ? "references" : undefined}
       className="rounded-md border border-border bg-panel px-2"
     >
       <AccordionItem value="references" className="border-none">
@@ -411,7 +470,9 @@ function References({
                   <p className="mt-0.5 line-clamp-2 text-[11px] text-muted-foreground">
                     {c.snippet}
                   </p>
-                  <p className="mt-0.5 truncate text-[10px] text-accent">{c.file_path}</p>
+                  <p className="mt-0.5 truncate text-[10px] text-accent">
+                    {c.file_path}
+                  </p>
                 </button>
               </li>
             ))}

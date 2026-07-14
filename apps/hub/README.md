@@ -19,6 +19,7 @@ Copy `.env.example` to `.env` and adjust as needed:
 |----------|---------|-------------|
 | `PORT` | `8787` | HTTP listen port |
 | `FIXTURES_PATH` | `../../fixtures/knowledge` | Path to the knowledge fixtures root (absolute, or relative to `apps/hub`) |
+| `NEST_DEBUG` | `false` | Verbose Hub service logs when `true` / `1` / `yes` / `on` |
 
 ## Endpoints
 
@@ -28,3 +29,5 @@ Copy `.env.example` to `.env` and adjust as needed:
 | GET | `/packs` | Pack catalog |
 | GET | `/packs/:id` | Pack metadata |
 | GET | `/packs/:id/download` | ZIP of Markdown tree |
+
+Further context: [docs/architecture.md](../../docs/architecture.md), [docs/development.md](../../docs/development.md).

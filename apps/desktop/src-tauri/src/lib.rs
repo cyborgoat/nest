@@ -10,6 +10,7 @@ mod llm;
 mod memory;
 mod retrieval;
 mod state;
+mod title;
 mod vault;
 mod vector_store;
 
@@ -68,6 +69,9 @@ pub fn run() {
             commands::index_rebuild,
             commands::chat_create_session,
             commands::chat_list_sessions,
+            commands::chat_update_session,
+            commands::chat_delete_session,
+            commands::chat_generate_title,
             commands::chat_list_messages,
             commands::chat_send,
             commands::chat_cancel,

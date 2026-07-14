@@ -47,9 +47,14 @@ export type ChatMessage = {
   created_at: string;
 };
 
+export type ChatSessionTitleSource = "placeholder" | "llm" | "manual";
+
 export type ChatSession = {
   id: string;
   title: string;
+  pinned: boolean;
+  archived: boolean;
+  title_source: ChatSessionTitleSource;
   created_at: string;
   updated_at: string;
 };

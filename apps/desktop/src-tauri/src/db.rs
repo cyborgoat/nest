@@ -48,9 +48,17 @@ pub struct Citation {
 pub struct ChatSession {
     pub id: String,
     pub title: String,
+    pub pinned: bool,
+    pub archived: bool,
+    /// `placeholder` | `llm` | `manual`
+    pub title_source: String,
     pub created_at: String,
     pub updated_at: String,
 }
+
+pub const TITLE_SOURCE_PLACEHOLDER: &str = "placeholder";
+pub const TITLE_SOURCE_LLM: &str = "llm";
+pub const TITLE_SOURCE_MANUAL: &str = "manual";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
@@ -126,6 +134,9 @@ fn migrate(conn: &Connection) -> AppResult<()> {
         CREATE TABLE IF NOT EXISTS chat_sessions (
             id TEXT PRIMARY KEY,
             title TEXT NOT NULL,
+            pinned INTEGER NOT NULL DEFAULT 0,
+            archived INTEGER NOT NULL DEFAULT 0,
+            title_source TEXT NOT NULL DEFAULT 'placeholder',
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         );
@@ -159,7 +170,53 @@ fn migrate(conn: &Connection) -> AppResult<()> {
         INSERT OR IGNORE INTO index_meta (id, indexed_files, indexed_chunks) VALUES (1, 0, 0);
         "#,
     )?;
+    ensure_chat_session_columns(conn)?;
     Ok(())
+}
+
+fn table_has_column(conn: &Connection, table: &str, column: &str) -> AppResult<bool> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
+    for name in rows.flatten() {
+        if name == column {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn ensure_chat_session_columns(conn: &Connection) -> AppResult<()> {
+    if !table_has_column(conn, "chat_sessions", "pinned")? {
+        conn.execute(
+            "ALTER TABLE chat_sessions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+    }
+    if !table_has_column(conn, "chat_sessions", "archived")? {
+        conn.execute(
+            "ALTER TABLE chat_sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+    }
+    if !table_has_column(conn, "chat_sessions", "title_source")? {
+        conn.execute(
+            "ALTER TABLE chat_sessions ADD COLUMN title_source TEXT NOT NULL DEFAULT 'placeholder'",
+            [],
+        )?;
+    }
+    Ok(())
+}
+
+fn map_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChatSession> {
+    Ok(ChatSession {
+        id: row.get(0)?,
+        title: row.get(1)?,
+        pinned: row.get::<_, i64>(2)? != 0,
+        archived: row.get::<_, i64>(3)? != 0,
+        title_source: row.get(4)?,
+        created_at: row.get(5)?,
+        updated_at: row.get(6)?,
+    })
 }
 
 pub fn get_settings(conn: &Connection) -> AppResult<AppSettings> {
@@ -407,30 +464,125 @@ pub fn create_session(conn: &Connection, title: &str) -> AppResult<ChatSession> 
     let id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
     conn.execute(
-        "INSERT INTO chat_sessions (id, title, created_at, updated_at) VALUES (?1, ?2, ?3, ?4)",
-        params![id, title, now, now],
+        "INSERT INTO chat_sessions (id, title, pinned, archived, title_source, created_at, updated_at)
+         VALUES (?1, ?2, 0, 0, ?3, ?4, ?5)",
+        params![id, title, TITLE_SOURCE_PLACEHOLDER, now, now],
     )?;
     Ok(ChatSession {
         id,
         title: title.to_string(),
+        pinned: false,
+        archived: false,
+        title_source: TITLE_SOURCE_PLACEHOLDER.to_string(),
         created_at: now.clone(),
         updated_at: now,
     })
 }
 
+pub fn get_session(conn: &Connection, session_id: &str) -> AppResult<Option<ChatSession>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, title, pinned, archived, title_source, created_at, updated_at
+         FROM chat_sessions WHERE id = ?1",
+    )?;
+    let mut rows = stmt.query(params![session_id])?;
+    if let Some(row) = rows.next()? {
+        Ok(Some(map_session_row(row)?))
+    } else {
+        Ok(None)
+    }
+}
+
 pub fn list_sessions(conn: &Connection) -> AppResult<Vec<ChatSession>> {
     let mut stmt = conn.prepare(
-        "SELECT id, title, created_at, updated_at FROM chat_sessions ORDER BY updated_at DESC",
+        "SELECT id, title, pinned, archived, title_source, created_at, updated_at
+         FROM chat_sessions
+         ORDER BY pinned DESC, updated_at DESC",
     )?;
-    let rows = stmt.query_map([], |row| {
-        Ok(ChatSession {
-            id: row.get(0)?,
-            title: row.get(1)?,
-            created_at: row.get(2)?,
-            updated_at: row.get(3)?,
-        })
-    })?;
+    let rows = stmt.query_map([], map_session_row)?;
     Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ChatSessionUpdate {
+    pub title: Option<String>,
+    pub pinned: Option<bool>,
+    pub archived: Option<bool>,
+    pub title_source: Option<String>,
+}
+
+pub fn update_session(
+    conn: &Connection,
+    session_id: &str,
+    update: ChatSessionUpdate,
+) -> AppResult<ChatSession> {
+    let mut current = get_session(conn, session_id)?
+        .ok_or_else(|| crate::error::AppError::msg(format!("Session not found: {session_id}")))?;
+
+    if let Some(title) = update.title {
+        current.title = title;
+        current.title_source = TITLE_SOURCE_MANUAL.to_string();
+    }
+    if let Some(source) = update.title_source {
+        current.title_source = source;
+    }
+    if let Some(pinned) = update.pinned {
+        current.pinned = pinned;
+    }
+    if let Some(archived) = update.archived {
+        current.archived = archived;
+    }
+
+    let now = Utc::now().to_rfc3339();
+    current.updated_at = now.clone();
+
+    conn.execute(
+        "UPDATE chat_sessions
+         SET title = ?1, pinned = ?2, archived = ?3, title_source = ?4, updated_at = ?5
+         WHERE id = ?6",
+        params![
+            current.title,
+            if current.pinned { 1 } else { 0 },
+            if current.archived { 1 } else { 0 },
+            current.title_source,
+            now,
+            session_id,
+        ],
+    )?;
+    Ok(current)
+}
+
+pub fn delete_session(conn: &Connection, session_id: &str) -> AppResult<()> {
+    let n = conn.execute(
+        "DELETE FROM chat_sessions WHERE id = ?1",
+        params![session_id],
+    )?;
+    if n == 0 {
+        return Err(crate::error::AppError::msg(format!(
+            "Session not found: {session_id}"
+        )));
+    }
+    Ok(())
+}
+
+pub fn set_session_title_llm(
+    conn: &Connection,
+    session_id: &str,
+    title: &str,
+) -> AppResult<ChatSession> {
+    let mut current = get_session(conn, session_id)?
+        .ok_or_else(|| crate::error::AppError::msg(format!("Session not found: {session_id}")))?;
+    if current.title_source != TITLE_SOURCE_PLACEHOLDER {
+        return Ok(current);
+    }
+    let now = Utc::now().to_rfc3339();
+    current.title = title.to_string();
+    current.title_source = TITLE_SOURCE_LLM.to_string();
+    current.updated_at = now.clone();
+    conn.execute(
+        "UPDATE chat_sessions SET title = ?1, title_source = ?2, updated_at = ?3 WHERE id = ?4",
+        params![current.title, current.title_source, now, session_id],
+    )?;
+    Ok(current)
 }
 
 pub fn add_message(

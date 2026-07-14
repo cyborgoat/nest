@@ -159,6 +159,65 @@ pub fn chat_list_sessions(state: State<'_, SharedState>) -> AppResult<Vec<ChatSe
     db::list_sessions(&conn)
 }
 
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatSessionPatch {
+    pub title: Option<String>,
+    pub pinned: Option<bool>,
+    pub archived: Option<bool>,
+}
+
+#[tauri::command]
+pub fn chat_update_session(
+    state: State<'_, SharedState>,
+    session_id: String,
+    patch: ChatSessionPatch,
+) -> AppResult<ChatSession> {
+    let conn = state.db.lock();
+    db::update_session(
+        &conn,
+        &session_id,
+        db::ChatSessionUpdate {
+            title: patch.title,
+            pinned: patch.pinned,
+            archived: patch.archived,
+            title_source: None,
+        },
+    )
+}
+
+#[tauri::command]
+pub fn chat_delete_session(state: State<'_, SharedState>, session_id: String) -> AppResult<()> {
+    let conn = state.db.lock();
+    db::delete_session(&conn, &session_id)
+}
+
+#[tauri::command]
+pub async fn chat_generate_title(
+    state: State<'_, SharedState>,
+    session_id: String,
+) -> AppResult<ChatSession> {
+    let settings = {
+        let conn = state.db.lock();
+        db::get_settings(&conn)?
+    };
+    let state_clone = state.inner().clone();
+    let sid = session_id.clone();
+    crate::title::generate_title_for_session(
+        &settings,
+        &session_id,
+        || {
+            let conn = state_clone.db.lock();
+            crate::title::load_session_turns(&conn, &sid)
+        },
+        |title| {
+            let conn = state_clone.db.lock();
+            db::set_session_title_llm(&conn, &sid, title)
+        },
+    )
+    .await
+}
+
 #[tauri::command]
 pub fn chat_list_messages(
     state: State<'_, SharedState>,
@@ -291,6 +350,28 @@ pub async fn chat_send(
             message_id: message.id.clone(),
         },
     );
+
+    // Best-effort title naming — do not block returning the assistant message.
+    if !result.cancelled {
+        let state_clone = state.inner().clone();
+        let sid = session_id.clone();
+        let settings_for_title = settings.clone();
+        tauri::async_runtime::spawn(async move {
+            let _ = crate::title::maybe_auto_title_after_reply(
+                &settings_for_title,
+                &sid,
+                || {
+                    let conn = state_clone.db.lock();
+                    crate::title::load_session_turns(&conn, &sid)
+                },
+                |title| {
+                    let conn = state_clone.db.lock();
+                    db::set_session_title_llm(&conn, &sid, title)
+                },
+            )
+            .await;
+        });
+    }
 
     Ok(message)
 }
