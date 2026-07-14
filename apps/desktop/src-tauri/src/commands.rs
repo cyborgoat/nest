@@ -347,12 +347,12 @@ pub async fn hub_download_pack(
 }
 
 #[tauri::command]
-pub fn hub_import_demo_pack(state: State<'_, SharedState>) -> AppResult<()> {
+pub async fn hub_import_demo_pack(state: State<'_, SharedState>) -> AppResult<IndexStatus> {
     let packs = hub::list_packs_fixture(&state.fixtures_root)?;
     for pack in packs {
         hub::import_pack_fixture(&state.fixtures_root, &pack, &state.vault_root)?;
         let conn = state.db.lock();
         hub::record_sync(&conn, &pack)?;
     }
-    Ok(())
+    index_rebuild(state).await
 }

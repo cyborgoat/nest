@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { AppSettings } from "@nest/shared";
-import { Database, RefreshCw, WandSparkles } from "lucide-react";
+import { Database, WandSparkles } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,7 +13,6 @@ const EMPTY: AppSettings = {
   llm_api_key: "",
   chat_model: "gpt-4o-mini",
   embedding_model: "AllMiniLML6V2Q",
-  top_k: 5,
   hub_base_url: "http://127.0.0.1:8787",
 };
 
@@ -55,27 +54,15 @@ export function SettingsPanel() {
     onError: (e: Error) => setStatusMessage(e.message),
   });
 
-  const rebuild = useMutation({
-    mutationFn: api.indexRebuild,
-    onSuccess: (status) => {
-      queryClient.invalidateQueries({ queryKey: ["index-status"] });
-      setStatusMessage(
-        `Indexed ${status.indexed_files} files / ${status.indexed_chunks} chunks`,
-      );
-    },
-    onError: (e: Error) => setStatusMessage(e.message),
-  });
-
   const importDemo = useMutation({
-    mutationFn: async () => {
-      await api.hubImportDemoPack();
-      return api.indexRebuild();
-    },
-    onSuccess: () => {
+    mutationFn: api.hubImportDemoPack,
+    onSuccess: (status) => {
       queryClient.invalidateQueries({ queryKey: ["tree"] });
       queryClient.invalidateQueries({ queryKey: ["index-status"] });
       queryClient.invalidateQueries({ queryKey: ["installed-packs"] });
-      setStatusMessage("Demo packs imported and indexed");
+      setStatusMessage(
+        `Demo packs imported · ${status.indexed_files} files / ${status.indexed_chunks} chunks indexed`,
+      );
     },
     onError: (e: Error) => setStatusMessage(e.message),
   });
@@ -109,23 +96,12 @@ export function SettingsPanel() {
             placeholder="sk-…"
           />
         </Field>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Chat model">
-            <Input
-              value={form.chat_model}
-              onChange={(e) => update("chat_model", e.target.value)}
-            />
-          </Field>
-          <Field label="Retrieval top-k">
-            <Input
-              type="number"
-              min={1}
-              max={20}
-              value={form.top_k}
-              onChange={(e) => update("top_k", Number(e.target.value) || 5)}
-            />
-          </Field>
-        </div>
+        <Field label="Chat model">
+          <Input
+            value={form.chat_model}
+            onChange={(e) => update("chat_model", e.target.value)}
+          />
+        </Field>
         <Field label="Local embedding model">
           <Input
             value={form.embedding_model}
@@ -134,8 +110,8 @@ export function SettingsPanel() {
           />
         </Field>
         <p className="text-xs text-muted-foreground">
-          FastEmbed models run on-device (e.g. AllMiniLML6V2Q, BGESmallENV15Q). First rebuild may
-          download ONNX weights. Chat still uses the LLM base URL above.
+          FastEmbed models run on-device (e.g. AllMiniLML6V2Q, BGESmallENV15Q). First index after
+          import may download ONNX weights. Chat still uses the LLM base URL above.
         </p>
         <Field label="Hub base URL">
           <Input
@@ -160,7 +136,8 @@ export function SettingsPanel() {
       <section className="space-y-3">
         <h3 className="text-sm font-semibold">Local index</h3>
         <p className="text-xs text-muted-foreground">
-          Hybrid FTS + FastEmbed vector index over Markdown chunks. Rebuild after importing packs.
+          Hybrid FTS + FastEmbed vector index over Markdown chunks. Rebuilds automatically when you
+          download or import a knowledge pack.
         </p>
         <div className="rounded-md border border-border bg-panel p-3 text-sm">
           <div className="flex items-center gap-2">
@@ -179,24 +156,14 @@ export function SettingsPanel() {
             <p className="mt-1 text-xs text-accent">Indexing in progress…</p>
           )}
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button
-            variant="outline"
-            onClick={() => rebuild.mutate()}
-            disabled={rebuild.isPending || indexQuery.data?.is_indexing}
-          >
-            <RefreshCw className="size-4" />
-            Rebuild index
-          </Button>
-          <Button
-            variant="secondary"
-            onClick={() => importDemo.mutate()}
-            disabled={importDemo.isPending}
-          >
-            <WandSparkles className="size-4" />
-            Import demo packs
-          </Button>
-        </div>
+        <Button
+          variant="secondary"
+          onClick={() => importDemo.mutate()}
+          disabled={importDemo.isPending || indexQuery.data?.is_indexing}
+        >
+          <WandSparkles className="size-4" />
+          {importDemo.isPending ? "Importing…" : "Import demo packs"}
+        </Button>
       </section>
     </div>
   );

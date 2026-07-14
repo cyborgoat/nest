@@ -8,6 +8,9 @@ use crate::vector_store;
 use std::collections::HashSet;
 use std::path::Path;
 
+/// Default number of vault passages retrieved for RAG (not user-configurable).
+pub const DEFAULT_TOP_K: u32 = 5;
+
 /// Retrieve citations using vector search (primary) merged with FTS (secondary).
 pub async fn retrieve(
     app_data_dir: &Path,

@@ -47,10 +47,12 @@ export const api = {
     invoke<void>("hub_remove_pack", { packId }),
   hubDownloadPack: (packId: string) =>
     invoke<IndexStatus>("hub_download_pack", { packId }),
-  hubImportDemoPack: () => invoke<void>("hub_import_demo_pack"),
+  hubImportDemoPack: () => invoke<IndexStatus>("hub_import_demo_pack"),
 };
 
 export type ChatStreamEvent =
+  | { type: "reading"; path: string }
+  | { type: "generating" }
   | { type: "citations"; citations: import("@nest/shared").Citation[] }
   | { type: "token"; content: string }
   | { type: "done"; message_id: string }

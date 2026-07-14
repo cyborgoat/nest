@@ -4,7 +4,7 @@ use crate::db::{AppSettings, Citation};
 use crate::error::{AppError, AppResult};
 use crate::llm::ChatStreamEvent;
 use crate::memory::SqliteConversationMemory;
-use crate::retrieval::{self, agent_preamble, format_citations_for_tool};
+use crate::retrieval::{self, agent_preamble, format_citations_for_tool, DEFAULT_TOP_K};
 use crate::state::SharedState;
 use futures::StreamExt;
 use parking_lot::Mutex;
@@ -16,8 +16,10 @@ use rig::providers::openai;
 use rig::streaming::{StreamedAssistantContent, StreamingChat};
 use rig::tool::Tool;
 use serde::Deserialize;
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 use thiserror::Error;
 
@@ -34,6 +36,8 @@ pub struct VaultSearchArgs {
 #[derive(Clone)]
 pub struct VaultSearchTool {
     state: SharedState,
+    app: AppHandle,
+    stream_event: String,
     app_data_dir: PathBuf,
     embedding_model_id: String,
     default_top_k: u32,
@@ -84,7 +88,14 @@ impl Tool for VaultSearchTool {
         .await
         .map_err(|e| VaultSearchError(e.to_string()))?;
 
+        emit_reading_files(&self.app, &self.stream_event, &citations).await;
         *self.citations.lock() = citations.clone();
+        let _ = self.app.emit(
+            &self.stream_event,
+            ChatStreamEvent::Citations {
+                citations: citations.clone(),
+            },
+        );
         Ok(format_citations_for_tool(&citations))
     }
 }
@@ -94,6 +105,23 @@ pub struct AgentChatResult {
     pub answer: String,
     pub citations: Vec<Citation>,
     pub cancelled: bool,
+}
+
+async fn emit_reading_files(app: &AppHandle, stream_event: &str, citations: &[Citation]) {
+    let mut seen = HashSet::new();
+    for c in citations {
+        if !seen.insert(c.file_path.clone()) {
+            continue;
+        }
+        let _ = app.emit(
+            stream_event,
+            ChatStreamEvent::Reading {
+                path: c.file_path.clone(),
+            },
+        );
+        // Brief pause so the UI can show each file before the next.
+        tokio::time::sleep(Duration::from_millis(90)).await;
+    }
 }
 
 pub async fn run_agent_chat(
@@ -117,9 +145,11 @@ pub async fn run_agent_chat(
 
     let tool = VaultSearchTool {
         state: state.clone(),
+        app: app.clone(),
+        stream_event: stream_event.to_string(),
         app_data_dir: app_data_dir.clone(),
         embedding_model_id: settings.embedding_model.clone(),
-        default_top_k: settings.top_k,
+        default_top_k: DEFAULT_TOP_K,
         scope_paths: Arc::new(scope_paths.clone()),
         citations: citations_slot.clone(),
     };
@@ -147,20 +177,22 @@ pub async fn run_agent_chat(
         &settings.embedding_model,
         query,
         &scope_paths,
-        settings.top_k,
+        DEFAULT_TOP_K,
     )
     .await
     .unwrap_or_default();
     if !eager.is_empty() {
+        emit_reading_files(app, stream_event, &eager).await;
         *citations_slot.lock() = eager;
+        let _ = app.emit(
+            stream_event,
+            ChatStreamEvent::Citations {
+                citations: citations_slot.lock().clone(),
+            },
+        );
     }
 
-    let _ = app.emit(
-        stream_event,
-        ChatStreamEvent::Citations {
-            citations: citations_slot.lock().clone(),
-        },
-    );
+    let _ = app.emit(stream_event, ChatStreamEvent::Generating);
 
     let mut stream = agent
         .stream_chat(query, prior_history)
@@ -170,6 +202,7 @@ pub async fn run_agent_chat(
 
     let mut full = String::new();
     let mut cancelled = false;
+    let mut emitted_generating = true;
 
     while let Some(item) = stream.next().await {
         if state.chat_cancel_requested() {
@@ -180,11 +213,32 @@ pub async fn run_agent_chat(
             Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Text(
                 Text { text, .. },
             ))) => {
+                if !emitted_generating {
+                    let _ = app.emit(stream_event, ChatStreamEvent::Generating);
+                    emitted_generating = true;
+                }
                 full.push_str(&text);
                 let _ = app.emit(
                     stream_event,
                     ChatStreamEvent::Token {
                         content: text.clone(),
+                    },
+                );
+            }
+            Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::ToolCall {
+                tool_call,
+                ..
+            })) => {
+                emitted_generating = false;
+                let name = tool_call.function.name.clone();
+                let _ = app.emit(
+                    stream_event,
+                    ChatStreamEvent::Reading {
+                        path: if name.is_empty() {
+                            "vault_search".into()
+                        } else {
+                            name
+                        },
                     },
                 );
             }

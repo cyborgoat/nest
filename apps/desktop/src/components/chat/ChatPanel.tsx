@@ -3,6 +3,11 @@ import type { Citation } from "@nest/shared";
 import { AlertCircle, MessageSquare, Send, Sparkles, Square, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  AgentStatusIndicator,
+  type AgentActivity,
+} from "@/components/chat/AgentStatusIndicator";
+import { StreamingTextEffect } from "@/components/chat/StreamingTextEffect";
 import { MarkdownBody } from "@/components/markdown/MarkdownBody";
 import {
   Accordion,
@@ -27,7 +32,7 @@ export function ChatPanel() {
   const [input, setInput] = useState("");
   const [pendingUser, setPendingUser] = useState<string | null>(null);
   const [streaming, setStreaming] = useState("");
-  const [liveCitations, setLiveCitations] = useState<Citation[]>([]);
+  const [agentActivity, setAgentActivity] = useState<AgentActivity>(null);
   const [isSending, setIsSending] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -57,7 +62,7 @@ export function ChatPanel() {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messagesQuery.data, pendingUser, streaming, liveCitations, chatError]);
+  }, [messagesQuery.data, pendingUser, streaming, chatError, agentActivity]);
 
   const scopeLabel = useMemo(() => {
     if (selectedScope.length === 0) return "Whole library";
@@ -71,9 +76,12 @@ export function ChatPanel() {
       const eventName = `chat-stream-${Date.now()}`;
 
       const unlisten = await listenChatStream(eventName, (event: ChatStreamEvent) => {
-        if (event.type === "citations") {
-          setLiveCitations(event.citations);
+        if (event.type === "reading") {
+          setAgentActivity({ kind: "reading", path: event.path });
+        } else if (event.type === "generating") {
+          setAgentActivity({ kind: "generating" });
         } else if (event.type === "token") {
+          setAgentActivity({ kind: "generating" });
           setStreaming((prev) => prev + event.content);
         } else if (event.type === "error") {
           setChatError(event.message);
@@ -93,11 +101,11 @@ export function ChatPanel() {
       setInput("");
       setIsSending(true);
       setStreaming("");
-      setLiveCitations([]);
+      setAgentActivity({ kind: "generating" });
     },
     onSuccess: () => {
       setPendingUser(null);
-      setLiveCitations([]);
+      setAgentActivity(null);
       queryClient.invalidateQueries({ queryKey: ["chat-sessions"] });
     },
     onError: (e: Error) => {
@@ -114,6 +122,7 @@ export function ChatPanel() {
       setIsSending(false);
       setStreaming("");
       setPendingUser(null);
+      setAgentActivity(null);
       if (sessionId) {
         queryClient.invalidateQueries({ queryKey: ["chat-messages", sessionId] });
       }
@@ -130,8 +139,8 @@ export function ChatPanel() {
     );
     setSessionId(session.id);
     setPendingUser(null);
-    setLiveCitations([]);
     setStreaming("");
+    setAgentActivity(null);
     setChatError(null);
     queryClient.invalidateQueries({ queryKey: ["chat-sessions"] });
   };
@@ -141,6 +150,8 @@ export function ChatPanel() {
     !(messagesQuery.data ?? []).some(
       (m) => m.role === "user" && m.content === pendingUser,
     );
+
+  const showStatusOnly = isSending && !streaming && !!agentActivity;
 
   return (
     <div className="flex h-full flex-col">
@@ -213,18 +224,18 @@ export function ChatPanel() {
                 exit={{ opacity: 0 }}
                 className="space-y-2"
               >
-                {liveCitations.length > 0 && (
-                  <References
-                    citations={liveCitations}
-                    onOpen={(path) => setSelectedPath(path)}
-                    defaultOpen
-                  />
-                )}
                 <div className="mr-2 rounded-lg bg-muted px-3 py-2">
+                  <AgentStatusIndicator
+                    activity={
+                      streaming && agentActivity?.kind === "generating"
+                        ? null
+                        : agentActivity
+                    }
+                  />
                   {streaming ? (
-                    <MarkdownBody>{streaming}</MarkdownBody>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">Thinking…</p>
+                    <StreamingTextEffect text={streaming} />
+                  ) : showStatusOnly ? null : (
+                    <AgentStatusIndicator activity={{ kind: "generating" }} />
                   )}
                 </div>
               </motion.div>

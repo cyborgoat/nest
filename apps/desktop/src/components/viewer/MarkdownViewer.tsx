@@ -25,15 +25,14 @@ export function MarkdownViewer() {
   });
 
   const importDemo = useMutation({
-    mutationFn: async () => {
-      await api.hubImportDemoPack();
-      return api.indexRebuild();
-    },
-    onSuccess: () => {
+    mutationFn: api.hubImportDemoPack,
+    onSuccess: (status) => {
       queryClient.invalidateQueries({ queryKey: ["tree"] });
       queryClient.invalidateQueries({ queryKey: ["index-status"] });
       queryClient.invalidateQueries({ queryKey: ["installed-packs"] });
-      setStatusMessage("Demo packs imported and indexed");
+      setStatusMessage(
+        `Demo packs imported · ${status.indexed_files} files indexed`,
+      );
     },
     onError: (e: Error) => setStatusMessage(e.message),
   });
