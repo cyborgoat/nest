@@ -15,6 +15,3 @@ export type PackProject = {
   latest_version: string;
   versions: string[];
 };
-
-/** @deprecated Use PackProject / PackRelease — kept for older clients during transition */
-export type Pack = PackRelease;

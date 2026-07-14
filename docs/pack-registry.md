@@ -63,8 +63,9 @@ Download zip layout: top-level folder `{id}/` including `pack.json` (vault paths
 
 - Install one version per pack id at `vault/<id>/` (replace on upgrade), like `pip install pkg==x.y.z`.
 - Do **not** stack `vault/<id>/<version>/` for RAG (avoids duplicate citations).
-- `sync_state` stores `pack_id` + installed `version`.
+- `sync_state` stores `pack_id`, installed `version`, and **`active`** (RAG inclusion; default `true` on install).
 - Local zip import still installs from embedded `pack.json`.
+- Example Import zip: `fixtures/examples/healthy-diet-1.0.0.zip`.
 
 ## Authoring
 

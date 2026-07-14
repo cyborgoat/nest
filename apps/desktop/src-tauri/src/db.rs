@@ -1,4 +1,4 @@
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -86,6 +86,12 @@ pub struct InstalledPack {
     pub local_path: String,
     pub version: String,
     pub last_synced: Option<String>,
+    #[serde(default = "default_true")]
+    pub active: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 pub fn open_db(path: &Path) -> AppResult<Connection> {
@@ -104,13 +110,6 @@ fn migrate(conn: &Connection) -> AppResult<()> {
         CREATE TABLE IF NOT EXISTS settings (
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS notes (
-            id TEXT PRIMARY KEY,
-            file_path TEXT NOT NULL UNIQUE,
-            content TEXT NOT NULL,
-            updated_at TEXT NOT NULL
         );
 
         CREATE TABLE IF NOT EXISTS chunks (
@@ -157,7 +156,8 @@ fn migrate(conn: &Connection) -> AppResult<()> {
             name TEXT NOT NULL,
             version TEXT NOT NULL,
             local_path TEXT NOT NULL,
-            last_synced TEXT NOT NULL
+            last_synced TEXT NOT NULL,
+            active INTEGER NOT NULL DEFAULT 1
         );
 
         CREATE TABLE IF NOT EXISTS index_meta (
@@ -172,6 +172,17 @@ fn migrate(conn: &Connection) -> AppResult<()> {
         "#,
     )?;
     ensure_chat_session_columns(conn)?;
+    ensure_sync_state_active_column(conn)?;
+    Ok(())
+}
+
+fn ensure_sync_state_active_column(conn: &Connection) -> AppResult<()> {
+    if !table_has_column(conn, "sync_state", "active")? {
+        conn.execute(
+            "ALTER TABLE sync_state ADD COLUMN active INTEGER NOT NULL DEFAULT 1",
+            [],
+        )?;
+    }
     Ok(())
 }
 
@@ -326,11 +337,12 @@ fn tokenize(query: &str) -> Vec<String> {
         .collect()
 }
 
-fn in_scope(path: &str, scope_prefixes: &[String]) -> bool {
-    if scope_prefixes.is_empty() {
-        return true;
+fn path_in_prefixes(path: &str, prefixes: &[String]) -> bool {
+    // Empty prefixes mean match nothing (caller must resolve active packs / focus).
+    if prefixes.is_empty() {
+        return false;
     }
-    scope_prefixes.iter().any(|s| {
+    prefixes.iter().any(|s| {
         path == s || path.starts_with(&format!("{s}/")) || s.starts_with(&format!("{path}/"))
     })
 }
@@ -347,26 +359,27 @@ pub fn fts_search(
     conn: &Connection,
     query: &str,
     limit: u32,
-    scope_prefixes: &[String],
+    retrieval_prefixes: &[String],
 ) -> AppResult<Vec<Citation>> {
+    if retrieval_prefixes.is_empty() {
+        return Ok(Vec::new());
+    }
     let mut sql = String::from(
         "SELECT chunk_id, file_path, title, content, bm25(chunks_fts) as score
          FROM chunks_fts
          WHERE chunks_fts MATCH ?1",
     );
-    if !scope_prefixes.is_empty() {
-        sql.push_str(" AND (");
-        for (i, _) in scope_prefixes.iter().enumerate() {
-            if i > 0 {
-                sql.push_str(" OR ");
-            }
-            sql.push_str(&format!("file_path LIKE ?{}", i + 2));
+    sql.push_str(" AND (");
+    for (i, _) in retrieval_prefixes.iter().enumerate() {
+        if i > 0 {
+            sql.push_str(" OR ");
         }
-        sql.push(')');
+        sql.push_str(&format!("file_path LIKE ?{}", i + 2));
     }
+    sql.push(')');
     sql.push_str(&format!(
         " ORDER BY score LIMIT ?{}",
-        scope_prefixes.len() + 2
+        retrieval_prefixes.len() + 2
     ));
 
     let mut stmt = conn.prepare(&sql)?;
@@ -380,7 +393,7 @@ pub fn fts_search(
         return Ok(Vec::new());
     }
     params_vec.push(Box::new(fts_query));
-    for prefix in scope_prefixes {
+    for prefix in retrieval_prefixes {
         params_vec.push(Box::new(format!("{prefix}%")));
     }
     params_vec.push(Box::new(limit as i64));
@@ -409,7 +422,7 @@ pub fn lexical_search(
     conn: &Connection,
     query: &str,
     limit: u32,
-    scope_prefixes: &[String],
+    retrieval_prefixes: &[String],
 ) -> AppResult<Vec<Citation>> {
     let terms = tokenize(query);
     if terms.is_empty() {
@@ -429,7 +442,7 @@ pub fn lexical_search(
     let mut scored: Vec<Citation> = Vec::new();
     for row in rows.flatten() {
         let (id, path, title, content) = row;
-        if !in_scope(&path, scope_prefixes) {
+        if !path_in_prefixes(&path, retrieval_prefixes) {
             continue;
         }
         let hay = format!("{title}\n{content}").to_lowercase();
@@ -648,9 +661,10 @@ pub fn upsert_sync_state(
     local_path: &str,
 ) -> AppResult<()> {
     let now = Utc::now().to_rfc3339();
+    // Preserve active flag on upgrade; new packs default to active=1.
     conn.execute(
-        "INSERT INTO sync_state (pack_id, name, version, local_path, last_synced)
-         VALUES (?1, ?2, ?3, ?4, ?5)
+        "INSERT INTO sync_state (pack_id, name, version, local_path, last_synced, active)
+         VALUES (?1, ?2, ?3, ?4, ?5, 1)
          ON CONFLICT(pack_id) DO UPDATE SET
            name = excluded.name,
            version = excluded.version,
@@ -661,9 +675,29 @@ pub fn upsert_sync_state(
     Ok(())
 }
 
+pub fn set_pack_active(conn: &Connection, pack_id: &str, active: bool) -> AppResult<()> {
+    let n = conn.execute(
+        "UPDATE sync_state SET active = ?1 WHERE pack_id = ?2 OR local_path = ?2",
+        params![if active { 1 } else { 0 }, pack_id],
+    )?;
+    if n == 0 {
+        return Err(AppError::msg(format!("Pack not installed: {pack_id}")));
+    }
+    Ok(())
+}
+
+pub fn list_active_pack_roots(conn: &Connection) -> AppResult<Vec<String>> {
+    let mut stmt = conn.prepare(
+        "SELECT local_path FROM sync_state WHERE active = 1 ORDER BY local_path",
+    )?;
+    let rows = stmt.query_map([], |row| row.get(0))?;
+    Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
 pub fn list_sync_state(conn: &Connection) -> AppResult<Vec<InstalledPack>> {
     let mut stmt = conn.prepare(
-        "SELECT pack_id, name, local_path, version, last_synced FROM sync_state ORDER BY name",
+        "SELECT pack_id, name, local_path, version, last_synced, COALESCE(active, 1)
+         FROM sync_state ORDER BY name",
     )?;
     let rows = stmt.query_map([], |row| {
         Ok(InstalledPack {
@@ -672,6 +706,7 @@ pub fn list_sync_state(conn: &Connection) -> AppResult<Vec<InstalledPack>> {
             local_path: row.get(2)?,
             version: row.get(3)?,
             last_synced: row.get(4)?,
+            active: row.get::<_, i64>(5)? != 0,
         })
     })?;
     Ok(rows.filter_map(|r| r.ok()).collect())
@@ -679,7 +714,8 @@ pub fn list_sync_state(conn: &Connection) -> AppResult<Vec<InstalledPack>> {
 
 pub fn get_sync_state(conn: &Connection, pack_id: &str) -> AppResult<Option<InstalledPack>> {
     conn.query_row(
-        "SELECT pack_id, name, local_path, version, last_synced FROM sync_state WHERE pack_id = ?1",
+        "SELECT pack_id, name, local_path, version, last_synced, COALESCE(active, 1)
+         FROM sync_state WHERE pack_id = ?1",
         params![pack_id],
         |row| {
             Ok(InstalledPack {
@@ -688,6 +724,7 @@ pub fn get_sync_state(conn: &Connection, pack_id: &str) -> AppResult<Option<Inst
                 local_path: row.get(2)?,
                 version: row.get(3)?,
                 last_synced: row.get(4)?,
+                active: row.get::<_, i64>(5)? != 0,
             })
         },
     )
@@ -695,15 +732,35 @@ pub fn get_sync_state(conn: &Connection, pack_id: &str) -> AppResult<Option<Inst
     .map_err(Into::into)
 }
 
-/// Remove legacy notes rows, chunks, FTS rows, and sync state for a vault path prefix.
+/// Resolve retrieval prefixes: @ focus under active packs, else all active roots.
+pub fn resolve_retrieval_prefixes(
+    conn: &Connection,
+    focus_paths: &[String],
+) -> AppResult<Vec<String>> {
+    let active = list_active_pack_roots(conn)?;
+    if focus_paths.is_empty() {
+        return Ok(active);
+    }
+    let allowed: Vec<String> = focus_paths
+        .iter()
+        .filter(|f| {
+            active.iter().any(|root| {
+                *f == root || f.starts_with(&format!("{root}/"))
+            })
+        })
+        .cloned()
+        .collect();
+    if allowed.is_empty() {
+        Ok(active)
+    } else {
+        Ok(allowed)
+    }
+}
+
+/// Remove chunks, FTS rows, and sync state for a vault path prefix.
 pub fn purge_path_data(conn: &Connection, path: &str) -> AppResult<()> {
     let exact = path.to_string();
     let prefix = format!("{path}/%");
-
-    conn.execute(
-        "DELETE FROM notes WHERE file_path = ?1 OR file_path LIKE ?2",
-        params![exact, prefix],
-    )?;
 
     // Collect chunk ids before deleting so FTS can be purged.
     let mut stmt = conn.prepare(

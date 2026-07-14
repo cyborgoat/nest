@@ -21,10 +21,7 @@ export class PacksController {
     const { buffer, filename, sha256 } =
       await this.packsService.createPackZip(packId);
     res.setHeader('Content-Type', 'application/zip');
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="${filename}"`,
-    );
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.setHeader('X-Content-SHA256', sha256);
     return new StreamableFile(buffer);
   }
@@ -40,10 +37,7 @@ export class PacksController {
       version,
     );
     res.setHeader('Content-Type', 'application/zip');
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="${filename}"`,
-    );
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.setHeader('X-Content-SHA256', sha256);
     return new StreamableFile(buffer);
   }

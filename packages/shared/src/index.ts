@@ -17,15 +17,13 @@ export type PackProject = {
   versions: string[];
 };
 
-/** @deprecated Prefer PackProject / PackRelease */
-export type Pack = PackRelease;
-
 export type InstalledPack = {
   pack_id: string;
   name: string;
   local_path: string;
   version: string;
   last_synced: string | null;
+  active: boolean;
 };
 
 export type TreeNodeKind = "folder" | "file";

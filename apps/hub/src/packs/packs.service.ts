@@ -233,11 +233,7 @@ export class PacksService {
       }
     }
 
-    const packDir = path.join(
-      this.fixturesRoot(),
-      release.id,
-      release.version,
-    );
+    const packDir = path.join(this.fixturesRoot(), release.id, release.version);
     this.debug(
       `createPackZip id=${packId} version=${release.version} dir=${packDir}`,
     );

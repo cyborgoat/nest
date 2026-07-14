@@ -1,12 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ChatMessage, ChatSession, Citation } from "@nest/shared";
-import { AlertCircle, Send, Sparkles, Square, X } from "lucide-react";
+import { AlertCircle, Sparkles, Square, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   AgentStatusIndicator,
   type AgentActivity,
 } from "@/components/chat/AgentStatusIndicator";
 import { ChatSessionBar } from "@/components/chat/ChatSessionBar";
+import { MentionComposer } from "@/components/chat/MentionComposer";
+import { collectMentionCandidates } from "@/components/library/LibraryTree";
 import { MarkdownBody } from "@/components/markdown/MarkdownBody";
 import {
   Accordion,
@@ -16,7 +18,6 @@ import {
 } from "@/components/ui/accordion";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Textarea } from "@/components/ui/textarea";
 import { api, listenChatStream, type ChatStreamEvent } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useUiStore } from "@/stores/ui";
@@ -25,8 +26,6 @@ const bubble =
   "min-w-0 max-w-full overflow-hidden break-words [overflow-wrap:anywhere]";
 
 export function ChatPanel() {
-  const selectedScope = useUiStore((s) => s.selectedScope);
-  const clearScope = useUiStore((s) => s.clearScope);
   const setSelectedPath = useUiStore((s) => s.setSelectedPath);
   const setStatusMessage = useUiStore((s) => s.setStatusMessage);
   const sessionId = useUiStore((s) => s.chatSessionId);
@@ -34,15 +33,41 @@ export function ChatPanel() {
   const pruneChatTabs = useUiStore((s) => s.pruneChatTabs);
   const queryClient = useQueryClient();
 
-  const [input, setInput] = useState("");
   const [pendingUser, setPendingUser] = useState<string | null>(null);
   const [streaming, setStreaming] = useState("");
   const [agentActivity, setAgentActivity] = useState<AgentActivity>(null);
   const [isSending, setIsSending] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
-  const imeConfirmPending = useRef(false);
   const bootstrapped = useRef(false);
+
+  const treeQuery = useQuery({
+    queryKey: ["tree"],
+    queryFn: api.vaultListTree,
+  });
+
+  const installedQuery = useQuery({
+    queryKey: ["installed-packs"],
+    queryFn: api.hubListInstalled,
+  });
+
+  const activePackRoots = useMemo(() => {
+    const installed = installedQuery.data ?? [];
+    const tree = treeQuery.data ?? [];
+    const byPath = new Map(installed.map((p) => [p.local_path, p]));
+    const roots: string[] = [];
+    for (const node of tree) {
+      if (node.kind !== "folder") continue;
+      const meta = byPath.get(node.path);
+      if (!meta || meta.active) roots.push(node.path);
+    }
+    return roots;
+  }, [installedQuery.data, treeQuery.data]);
+
+  const mentionCandidates = useMemo(
+    () => collectMentionCandidates(treeQuery.data ?? [], activePackRoots),
+    [treeQuery.data, activePackRoots],
+  );
 
   // Buffer tokens and flush once per animation frame — avoids one React render per token.
   const streamBuf = useRef("");
@@ -152,14 +177,20 @@ export function ChatPanel() {
     };
   }, []);
 
-  const scopeLabel = useMemo(() => {
-    if (selectedScope.length === 0) return "Whole library";
-    if (selectedScope.length === 1) return selectedScope[0];
-    return `${selectedScope.length} scoped paths`;
-  }, [selectedScope]);
+  const activeLabel = useMemo(() => {
+    if (activePackRoots.length === 0) return "No active packs";
+    if (activePackRoots.length === 1) return activePackRoots[0];
+    return `${activePackRoots.length} active packs`;
+  }, [activePackRoots]);
 
   const send = useMutation({
-    mutationFn: async (query: string) => {
+    mutationFn: async ({
+      query,
+      focusPaths,
+    }: {
+      query: string;
+      focusPaths: string[];
+    }) => {
       if (!sessionId) throw new Error("No chat session");
       const eventName = `chat-stream-${Date.now()}`;
 
@@ -183,31 +214,32 @@ export function ChatPanel() {
       );
 
       try {
-        return await api.chatSend(sessionId, query, selectedScope, eventName);
+        return await api.chatSend(sessionId, query, focusPaths, eventName);
       } finally {
         unlisten();
       }
     },
-    onMutate: (query) => {
+    onMutate: ({ query }) => {
       setChatError(null);
       setPendingUser(query);
-      setInput("");
       setIsSending(true);
       clearStream();
       setAgentActivity({ kind: "generating" });
     },
-    onSuccess: (assistantMsg, query) => {
+    onSuccess: (assistantMsg, vars) => {
       flushStream();
       if (sessionId) {
         queryClient.setQueryData<ChatMessage[]>(
           ["chat-messages", sessionId],
           (old) => {
             const list = [...(old ?? [])];
-            if (!list.some((m) => m.role === "user" && m.content === query)) {
+            if (
+              !list.some((m) => m.role === "user" && m.content === vars.query)
+            ) {
               list.push({
                 id: `local-user-${Date.now()}`,
                 role: "user",
-                content: query,
+                content: vars.query,
                 created_at: new Date().toISOString(),
               });
             }
@@ -260,17 +292,8 @@ export function ChatPanel() {
 
       <div className="flex items-center gap-2 border-b border-border px-3 py-2 text-xs">
         <Sparkles className="size-3.5 text-accent" />
-        <span className="text-muted-foreground">Scope:</span>
-        <span className="truncate font-medium">{scopeLabel}</span>
-        {selectedScope.length > 0 && (
-          <button
-            type="button"
-            onClick={clearScope}
-            className="ml-auto inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
-          >
-            <X className="size-3" /> Clear
-          </button>
-        )}
+        <span className="text-muted-foreground">Knowledge:</span>
+        <span className="truncate font-medium">{activeLabel}</span>
       </div>
 
       <ScrollArea className="flex-1 min-h-0">
@@ -343,62 +366,34 @@ export function ChatPanel() {
       </ScrollArea>
 
       <div className="shrink-0 border-t border-border px-3 pb-3 pt-4">
-        <div className="relative">
-          <Textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="Ask about your knowledge…"
-            className="min-h-[72px] resize-none pb-9 pr-10"
-            disabled={isSending}
-            onCompositionStart={() => {
-              imeConfirmPending.current = false;
-            }}
-            onCompositionEnd={() => {
-              imeConfirmPending.current = true;
-              window.setTimeout(() => {
-                imeConfirmPending.current = false;
-              }, 0);
-            }}
-            onKeyDown={(e) => {
-              if (
-                e.nativeEvent.isComposing ||
-                e.keyCode === 229 ||
-                imeConfirmPending.current
-              ) {
-                return;
-              }
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                if (input.trim() && !isSending) send.mutate(input.trim());
-              }
-            }}
-          />
-          {isSending ? (
+        <MentionComposer
+          candidates={mentionCandidates}
+          disabled={isSending}
+          canSend={!!sessionId && !isSending}
+          placeholders={{
+            emptyActive:
+              "Activate a pack in the Library to chat and use @…",
+            ready: "Ask about your knowledge… (@ for files/folders)",
+          }}
+          onSend={(query, focusPaths) => send.mutate({ query, focusPaths })}
+        />
+        {isSending && (
+          <div className="mt-2 flex justify-end">
             <Button
-              size="icon"
+              size="sm"
               variant="secondary"
-              className="absolute right-2 bottom-2 size-7"
               onClick={() => void api.chatCancel()}
               aria-label="Stop generation"
               title="Stop"
             >
               <Square className="size-3 fill-current" />
+              Stop
             </Button>
-          ) : (
-            <Button
-              size="icon"
-              className="absolute right-2 bottom-2 size-7"
-              disabled={!input.trim() || !sessionId}
-              onClick={() => send.mutate(input.trim())}
-              aria-label="Send"
-              title="Send"
-            >
-              <Send className="size-3.5" />
-            </Button>
-          )}
-        </div>
+          </div>
+        )}
         <p className="mt-1.5 text-[11px] text-muted-foreground">
-          Enter to send · Shift+Enter for a new line
+          Enter to send · Shift+Enter for a new line · @ for files/folders in
+          active packs
         </p>
       </div>
     </div>

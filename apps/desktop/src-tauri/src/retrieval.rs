@@ -17,7 +17,7 @@ pub async fn retrieve(
     state: &SharedState,
     embedding_model_id: &str,
     query: &str,
-    scope_paths: &[String],
+    retrieval_prefixes: &[String],
     top_k: u32,
 ) -> AppResult<Vec<Citation>> {
     let top_k = top_k.max(1);
@@ -26,14 +26,14 @@ pub async fn retrieve(
 
     crate::nest_debug!(
         "retrieval",
-        "query={:?} top_k={top_k} scope={scope_paths:?} model={embedding_model_id}",
+        "query={:?} top_k={top_k} prefixes={retrieval_prefixes:?} model={embedding_model_id}",
         query
     );
 
     // Vector hits first — no Sync connection held across await.
     if let Ok(model) = embeddings::load_embedding_model(embedding_model_id) {
         if let Ok(hits) =
-            vector_store::vector_search(app_data_dir, model, query, top_k, scope_paths).await
+            vector_store::vector_search(app_data_dir, model, query, top_k, retrieval_prefixes).await
         {
             crate::nest_debug!("retrieval", "vector_hits={}", hits.len());
             for (score, doc) in hits {
@@ -57,7 +57,7 @@ pub async fn retrieve(
     // FTS lexical complement (sync, short lock).
     let fts = {
         let conn = state.db.lock();
-        db::fts_search(&conn, query, top_k, scope_paths)?
+        db::fts_search(&conn, query, top_k, retrieval_prefixes)?
     };
     crate::nest_debug!("retrieval", "fts_hits={}", fts.len());
     for c in fts {
@@ -68,7 +68,7 @@ pub async fn retrieve(
 
     if merged.is_empty() {
         let conn = state.db.lock();
-        merged = db::lexical_search(&conn, query, top_k, scope_paths)?;
+        merged = db::lexical_search(&conn, query, top_k, retrieval_prefixes)?;
         crate::nest_debug!("retrieval", "lexical_fallback_hits={}", merged.len());
     }
 

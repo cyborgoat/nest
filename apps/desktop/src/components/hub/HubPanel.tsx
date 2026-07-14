@@ -7,6 +7,7 @@ import {
   CloudOff,
   FolderInput,
   Package,
+  Search,
   Trash2,
 } from "lucide-react";
 import { motion } from "motion/react";
@@ -25,6 +26,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -34,6 +36,7 @@ export function HubPanel() {
   const clearPathsUnder = useUiStore((s) => s.clearPathsUnder);
   const queryClient = useQueryClient();
   const [importOpen, setImportOpen] = useState(false);
+  const [catalogSearch, setCatalogSearch] = useState("");
 
   const hubStatusQuery = useQuery({
     queryKey: ["hub-status"],
@@ -69,6 +72,19 @@ export function HubPanel() {
     () => new Set((packsQuery.data ?? []).map((p) => p.id)),
     [packsQuery.data],
   );
+
+  const filteredCatalog = useMemo(() => {
+    const packs = packsQuery.data ?? [];
+    const q = catalogSearch.trim().toLowerCase();
+    if (!q) return packs;
+    return packs.filter(
+      (p) =>
+        p.id.toLowerCase().includes(q) ||
+        p.name.toLowerCase().includes(q) ||
+        p.description.toLowerCase().includes(q) ||
+        p.latest_version.toLowerCase().includes(q),
+    );
+  }, [packsQuery.data, catalogSearch]);
 
   const localOnlyInstalled = useMemo(
     () =>
@@ -209,6 +225,17 @@ export function HubPanel() {
             <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Hub catalog
             </h3>
+            {!hubOffline && (
+              <div className="relative">
+                <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={catalogSearch}
+                  onChange={(e) => setCatalogSearch(e.target.value)}
+                  placeholder="Search packs…"
+                  className="h-9 pl-8"
+                />
+              </div>
+            )}
             {packsQuery.isLoading && !hubOffline && (
               <p className="text-sm text-muted-foreground">Loading packs…</p>
             )}
@@ -223,7 +250,7 @@ export function HubPanel() {
               </p>
             )}
             {!hubOffline &&
-              (packsQuery.data ?? []).map((pack, i) => (
+              filteredCatalog.map((pack, i) => (
                 <PackRow
                   key={pack.id}
                   index={i}
@@ -241,6 +268,14 @@ export function HubPanel() {
                   removePending={remove.isPending}
                 />
               ))}
+            {!hubOffline &&
+              packsQuery.data &&
+              packsQuery.data.length > 0 &&
+              filteredCatalog.length === 0 && (
+                <p className="text-sm text-muted-foreground">
+                  No packs match “{catalogSearch}”.
+                </p>
+              )}
             {!hubOffline && packsQuery.data?.length === 0 && (
               <p className="text-sm text-muted-foreground">No packs available.</p>
             )}

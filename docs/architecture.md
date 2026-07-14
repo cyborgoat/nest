@@ -47,13 +47,36 @@ The desktop app uses the configured remote Hub (`Settings → Hub URL`, default 
 
 - Catalog and download use a **PyPI-style versioned registry** (`GET /packs`, `GET /packs/:id/:version/download`). See [pack-registry.md](pack-registry.md).
 - If the Hub is unreachable, the Hub panel shows an **Offline** status. Local **Import** (zip) still works.
-- Fixture folders under `fixtures/knowledge` are `{id}/{semver}/` trees served by the **Hub process** only.
+- Fixture folders under `fixtures/knowledge` are `{id}/{semver}/` trees served by the **Hub process** only — the desktop does not fall back to fixtures when offline.
 
 ## Vault and indexing
 
-- Packs install into `{app_data}/vault/<pack-id>/` as a single active version (upgrade replaces the tree).
+- Packs install into `{app_data}/vault/<pack-id>/` as a single version (upgrade replaces the tree).
 - **Import local pack** accepts a `.zip` with `pack.json` (`id`, `name`, `description`, `version`; `path` optional and must equal `id`).
 - **Remove pack** deletes the tree, purges SQLite/FTS rows, and rebuilds the vector index.
+- Indexing runs automatically after download, import, and remove (no manual rebuild in the UI).
+
+## Library: active / inactive packs
+
+Installed packs have an `active` flag in `sync_state` (default on after install).
+
+| State | Library | Chat / RAG |
+|-------|---------|------------|
+| **Active** | Shown in the main tree | Included in default retrieval and `@` mention candidates |
+| **Inactive** | Collapsible accordion; still readable | Excluded from RAG until reactivated |
+
+Use **+/−** on a pack root to toggle. Multiple packs can be active at once; their roots form the default retrieval domain.
+
+## Chat focus (`@` mentions)
+
+The composer accepts `@` mentions of **files and folders under active packs only**. Mention paths become `focus_paths` on `chat_send`.
+
+Backend resolution (`resolve_retrieval_prefixes`):
+
+1. If `focus_paths` is empty → search all active pack roots.
+2. Otherwise → keep only focus paths that lie under an active root (or fall back to all active roots if none match).
+
+Inactive packs never contribute passages, even if `@`-mentioned somehow.
 
 ## Retrieval (RAG)
 
@@ -64,7 +87,7 @@ Hybrid retrieval in `retrieval.rs`:
 3. Lexical fallback if both are empty
 4. Drop citations whose files no longer exist under the vault
 
-Default top-k is fixed in the backend (`DEFAULT_TOP_K`), not user-configurable.
+Results are filtered by the resolved retrieval prefixes. Default top-k is fixed in the backend (`DEFAULT_TOP_K`), not user-configurable. Embedding model is fixed to `AllMiniLML6V2Q`.
 
 Chat uses a Rig agent with multi-turn memory and a `vault_search` tool; completions go to the user’s OpenAI-compatible LLM (Settings).
 

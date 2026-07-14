@@ -22,7 +22,6 @@ export const api = {
   settingsTestHub: () => invoke<string>("settings_test_hub"),
 
   indexStatus: () => invoke<IndexStatus>("index_status"),
-  indexRebuild: () => invoke<IndexStatus>("index_rebuild"),
 
   chatCreateSession: (title?: string) =>
     invoke<ChatSession>("chat_create_session", { title: title ?? null }),
@@ -34,20 +33,18 @@ export const api = {
     invoke<ChatSession>("chat_update_session", { sessionId, patch }),
   chatDeleteSession: (sessionId: string) =>
     invoke<void>("chat_delete_session", { sessionId }),
-  chatGenerateTitle: (sessionId: string) =>
-    invoke<ChatSession>("chat_generate_title", { sessionId }),
   chatListMessages: (sessionId: string) =>
     invoke<ChatMessage[]>("chat_list_messages", { sessionId }),
   chatSend: (
     sessionId: string,
     query: string,
-    scopePaths: string[],
+    focusPaths: string[],
     streamEvent: string,
   ) =>
     invoke<ChatMessage>("chat_send", {
       sessionId,
       query,
-      scopePaths,
+      focusPaths,
       streamEvent,
     }),
   chatCancel: () => invoke<void>("chat_cancel"),
@@ -55,6 +52,8 @@ export const api = {
   hubListPacks: () => invoke<PackProject[]>("hub_list_packs"),
   hubStatus: () => invoke<HubConnectionStatus>("hub_status"),
   hubListInstalled: () => invoke<InstalledPack[]>("hub_list_installed"),
+  hubSetPackActive: (packId: string, active: boolean) =>
+    invoke<void>("hub_set_pack_active", { packId, active }),
   hubRemovePack: (packId: string) =>
     invoke<IndexStatus>("hub_remove_pack", { packId }),
   hubDownloadPack: (packId: string, version?: string) =>

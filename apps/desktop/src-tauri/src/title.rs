@@ -37,21 +37,6 @@ pub fn load_session_turns(
     Ok((session, turns))
 }
 
-/// Generate a title when still placeholder; otherwise return the existing session.
-pub async fn generate_title_for_session(
-    settings: &AppSettings,
-    _session_id: &str,
-    load: impl FnOnce() -> AppResult<(ChatSession, Vec<(String, String)>)>,
-    save: impl FnOnce(&str) -> AppResult<ChatSession>,
-) -> AppResult<ChatSession> {
-    let (session, turns) = load()?;
-    if session.title_source != db::TITLE_SOURCE_PLACEHOLDER {
-        return Ok(session);
-    }
-    let title = generate_title(settings, &turns).await?;
-    save(&title)
-}
-
 /// Best-effort title after the first reply. Swallows LLM errors (keeps "New chat").
 pub async fn maybe_auto_title_after_reply(
     settings: &AppSettings,

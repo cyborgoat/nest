@@ -23,6 +23,15 @@ Additive SQLite migrations add these columns on existing DBs.
 - Rename sets `title_source = manual` and stops automatic retitling.
 - Title generation failures leave the placeholder title.
 
+## Retrieval context
+
+Chat does not use a separate “scope” picker. Domain is:
+
+1. All **active** packs (Library), and
+2. Optional `@` focus paths sent as `focus_paths` on `chat_send`.
+
+See [Architecture — Library / Chat focus](./architecture.md#library-active--inactive-packs).
+
 ## Commands
 
 | Command | Purpose |
@@ -31,5 +40,4 @@ Additive SQLite migrations add these columns on existing DBs.
 | `chat_list_sessions` | All sessions (UI filters archived) |
 | `chat_update_session` | Rename / pin / archive |
 | `chat_delete_session` | Hard delete (messages cascade) |
-| `chat_generate_title` | Manual/force title generation |
-| `chat_send` / `chat_cancel` | Streamed agent chat |
+| `chat_send` / `chat_cancel` | Streamed agent chat (`focus_paths` optional) |

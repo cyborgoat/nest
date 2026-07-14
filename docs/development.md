@@ -54,3 +54,5 @@ node scripts/validate-pack-registry.mjs
 ```
 
 The desktop app does not use fixtures as an offline fallback. See [pack-registry.md](pack-registry.md).
+
+Library **active** packs are the chat retrieval domain; inactive packs remain browsable. Chat `@` mentions focus files/folders under active packs — see [architecture.md](architecture.md).

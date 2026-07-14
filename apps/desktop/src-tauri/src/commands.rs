@@ -69,7 +69,7 @@ pub fn index_status(state: State<'_, SharedState>) -> AppResult<IndexStatus> {
     db::get_index_status(&conn, state.indexing())
 }
 
-#[tauri::command]
+/// Rebuild FTS + vector indexes (used after download / import / remove).
 pub async fn index_rebuild(state: State<'_, SharedState>) -> AppResult<IndexStatus> {
     if state.indexing() {
         return Err(AppError::msg("Indexing already in progress"));
@@ -213,32 +213,6 @@ pub fn chat_delete_session(state: State<'_, SharedState>, session_id: String) ->
 }
 
 #[tauri::command]
-pub async fn chat_generate_title(
-    state: State<'_, SharedState>,
-    session_id: String,
-) -> AppResult<ChatSession> {
-    let settings = {
-        let conn = state.db.lock();
-        db::get_settings(&conn)?
-    };
-    let state_clone = state.inner().clone();
-    let sid = session_id.clone();
-    crate::title::generate_title_for_session(
-        &settings,
-        &session_id,
-        || {
-            let conn = state_clone.db.lock();
-            crate::title::load_session_turns(&conn, &sid)
-        },
-        |title| {
-            let conn = state_clone.db.lock();
-            db::set_session_title_llm(&conn, &sid, title)
-        },
-    )
-    .await
-}
-
-#[tauri::command]
 pub fn chat_list_messages(
     state: State<'_, SharedState>,
     session_id: String,
@@ -265,14 +239,14 @@ pub async fn chat_send(
     state: State<'_, SharedState>,
     session_id: String,
     query: String,
-    scope_paths: Option<Vec<String>>,
+    focus_paths: Option<Vec<String>>,
     stream_event: String,
 ) -> AppResult<ChatMessage> {
     let settings = {
         let conn = state.db.lock();
         db::get_settings(&conn)?
     };
-    let scope = scope_paths.unwrap_or_default();
+    let focus = focus_paths.unwrap_or_default();
     let app_data_dir = state.app_data_dir.clone();
 
     // Persist the user turn first for durable history / UI refresh.
@@ -298,9 +272,9 @@ pub async fn chat_send(
 
     crate::nest_debug!(
         "chat",
-        "chat_send session={session_id} query_len={} scope={:?}",
+        "chat_send session={session_id} query_len={} focus={:?}",
         query.len(),
-        scope
+        focus
     );
 
     let result = match agent::run_agent_chat(
@@ -310,7 +284,7 @@ pub async fn chat_send(
         &settings,
         &session_id,
         &query,
-        scope,
+        focus,
         &stream_event,
         prior,
     )
@@ -427,6 +401,16 @@ pub fn hub_list_installed(state: State<'_, SharedState>) -> AppResult<Vec<Instal
     // Require real Markdown content — empty leftovers must not count as installed.
     installed.retain(|p| pack_has_markdown(&state.vault_root, &p.local_path));
     Ok(installed)
+}
+
+#[tauri::command]
+pub fn hub_set_pack_active(
+    state: State<'_, SharedState>,
+    pack_id: String,
+    active: bool,
+) -> AppResult<()> {
+    let conn = state.db.lock();
+    db::set_pack_active(&conn, &pack_id, active)
 }
 
 fn pack_has_markdown(vault_root: &std::path::Path, local_path: &str) -> bool {

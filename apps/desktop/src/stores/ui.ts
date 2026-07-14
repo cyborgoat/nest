@@ -6,7 +6,6 @@ type Panel = "library" | "hub" | "settings";
 type UiState = {
   activePanel: Panel;
   selectedPath: string | null;
-  selectedScope: string[];
   sidebarOpen: boolean;
   chatOpen: boolean;
   statusMessage: string | null;
@@ -16,8 +15,6 @@ type UiState = {
   openChatTabs: string[];
   setActivePanel: (panel: Panel) => void;
   setSelectedPath: (path: string | null) => void;
-  toggleScope: (path: string) => void;
-  clearScope: () => void;
   clearPathsUnder: (path: string) => void;
   setSidebarOpen: (open: boolean) => void;
   setChatOpen: (open: boolean) => void;
@@ -37,7 +34,6 @@ export const useUiStore = create<UiState>()(
     (set, get) => ({
       activePanel: "library",
       selectedPath: null,
-      selectedScope: [],
       sidebarOpen: true,
       chatOpen: true,
       statusMessage: null,
@@ -45,25 +41,13 @@ export const useUiStore = create<UiState>()(
       openChatTabs: [],
       setActivePanel: (panel) => set({ activePanel: panel }),
       setSelectedPath: (path) => set({ selectedPath: path }),
-      toggleScope: (path) => {
-        const current = get().selectedScope;
-        set({
-          selectedScope: current.includes(path)
-            ? current.filter((p) => p !== path)
-            : [...current, path],
-        });
-      },
-      clearScope: () => set({ selectedScope: [] }),
       clearPathsUnder: (path) => {
-        const { selectedPath, selectedScope } = get();
+        const { selectedPath } = get();
         set({
           selectedPath:
             selectedPath && pathMatchesOrUnder(selectedPath, path)
               ? null
               : selectedPath,
-          selectedScope: selectedScope.filter(
-            (p) => !pathMatchesOrUnder(p, path),
-          ),
         });
       },
       setSidebarOpen: (open) => set({ sidebarOpen: open }),

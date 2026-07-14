@@ -140,7 +140,7 @@ pub async fn vector_search(
     embedding_model: EmbeddingModel,
     query: &str,
     top_k: u32,
-    scope_paths: &[String],
+    retrieval_prefixes: &[String],
 ) -> AppResult<Vec<(f64, KnowledgeChunk)>> {
     let path = vectors_db_path(app_data_dir);
     if !path.exists() {
@@ -158,13 +158,18 @@ pub async fn vector_search(
 
     let index = store.index(embedding_model);
 
+    // Empty prefixes → no hits (chat resolves active packs / focus before calling).
+    if retrieval_prefixes.is_empty() {
+        return Ok(Vec::new());
+    }
+
     let mut builder = VectorSearchRequest::builder()
         .query(query)
         .samples(u64::from(top_k.max(1)));
 
-    if !scope_paths.is_empty() {
+    {
         let mut filter: Option<SqliteSearchFilter> = None;
-        for scope in scope_paths {
+        for scope in retrieval_prefixes {
             let like = SqliteSearchFilter::like("file_path".to_string(), format!("{scope}%"));
             let eq = SqliteSearchFilter::eq("file_path", serde_json::json!(scope));
             let part = like.or(eq);

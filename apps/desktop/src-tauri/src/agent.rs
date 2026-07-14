@@ -1,11 +1,12 @@
 //! Rig agent: OpenAI-compatible chat + local vault_search tool + streaming.
 
-use crate::db::{AppSettings, Citation};
+use crate::db::{self, AppSettings, Citation};
 use crate::error::{AppError, AppResult};
 use crate::llm::ChatStreamEvent;
 use crate::memory::SqliteConversationMemory;
 use crate::retrieval::{self, agent_preamble, format_citations_for_tool, DEFAULT_TOP_K};
 use crate::state::SharedState;
+use crate::vault;
 use futures::StreamExt;
 use parking_lot::Mutex;
 use rig::agent::MultiTurnStreamItem;
@@ -41,7 +42,7 @@ pub struct VaultSearchTool {
     app_data_dir: PathBuf,
     embedding_model_id: String,
     default_top_k: u32,
-    scope_paths: Arc<Vec<String>>,
+    retrieval_prefixes: Arc<Vec<String>>,
     citations: Arc<Mutex<Vec<Citation>>>,
 }
 
@@ -79,16 +80,16 @@ impl Tool for VaultSearchTool {
         let top_k = args.top_k.unwrap_or(self.default_top_k).max(1);
         crate::nest_debug!(
             "vault_search",
-            "query={:?} top_k={top_k} scope={:?}",
+            "query={:?} top_k={top_k} prefixes={:?}",
             args.query,
-            self.scope_paths
+            self.retrieval_prefixes
         );
         let citations = retrieval::retrieve(
             &self.app_data_dir,
             &self.state,
             &self.embedding_model_id,
             &args.query,
-            &self.scope_paths,
+            &self.retrieval_prefixes,
             top_k,
         )
         .await
@@ -186,7 +187,7 @@ pub async fn run_agent_chat(
     settings: &AppSettings,
     session_id: &str,
     query: &str,
-    scope_paths: Vec<String>,
+    focus_paths: Vec<String>,
     stream_event: &str,
     prior_history: Vec<Message>,
 ) -> AppResult<AgentChatResult> {
@@ -198,6 +199,21 @@ pub async fn run_agent_chat(
 
     let citations_slot: Arc<Mutex<Vec<Citation>>> = Arc::new(Mutex::new(Vec::new()));
 
+    // Active packs form the retrieval scope; @ focus narrows further.
+    let retrieval_prefixes = {
+        let conn = state.db.lock();
+        db::resolve_retrieval_prefixes(&conn, &focus_paths)?
+    };
+
+    let focus_context = build_focus_context(&state, &focus_paths);
+    let agent_query = if focus_context.is_empty() {
+        query.to_string()
+    } else {
+        format!(
+            "{query}\n\n---\nUser asked to focus on these vault paths:\n{focus_context}"
+        )
+    };
+
     let tool = VaultSearchTool {
         state: state.clone(),
         app: app.clone(),
@@ -205,12 +221,11 @@ pub async fn run_agent_chat(
         app_data_dir: app_data_dir.clone(),
         embedding_model_id: settings.embedding_model.clone(),
         default_top_k: DEFAULT_TOP_K,
-        scope_paths: Arc::new(scope_paths.clone()),
+        retrieval_prefixes: Arc::new(retrieval_prefixes.clone()),
         citations: citations_slot.clone(),
     };
 
     let memory = SqliteConversationMemory::new(state.clone());
-    memory.set_skip_persist(true);
 
     let openai = openai::Client::builder()
         .api_key(settings.llm_api_key.clone())
@@ -228,9 +243,10 @@ pub async fn run_agent_chat(
 
     crate::nest_debug!(
         "agent",
-        "start session={session_id} query_len={} scope={:?} history={}",
+        "start session={session_id} query_len={} focus={:?} retrieval={:?} history={}",
         query.len(),
-        scope_paths,
+        focus_paths,
+        retrieval_prefixes,
         prior_history.len()
     );
 
@@ -239,7 +255,7 @@ pub async fn run_agent_chat(
         &state,
         &settings.embedding_model,
         query,
-        &scope_paths,
+        &retrieval_prefixes,
         DEFAULT_TOP_K,
     )
     .await
@@ -259,7 +275,7 @@ pub async fn run_agent_chat(
     let _ = app.emit(stream_event, ChatStreamEvent::Generating);
 
     let mut stream = agent
-        .stream_chat(query, prior_history)
+        .stream_chat(agent_query, prior_history)
         .max_turns(3)
         .conversation(session_id)
         .await;
@@ -401,4 +417,29 @@ pub async fn run_agent_chat(
         citations,
         cancelled: false,
     })
+}
+
+fn build_focus_context(state: &SharedState, focus_paths: &[String]) -> String {
+    let mut parts = Vec::new();
+    for path in focus_paths {
+        let full = state.vault_root.join(path);
+        if full.is_file() {
+            match vault::read_file(&state.vault_root, path) {
+                Ok(content) => {
+                    let truncated = if content.len() > 4000 {
+                        format!("{}…", &content[..4000])
+                    } else {
+                        content
+                    };
+                    parts.push(format!("### File: {path}\n{truncated}"));
+                }
+                Err(_) => parts.push(format!("### File: {path} (unreadable)")),
+            }
+        } else if full.is_dir() {
+            parts.push(format!(
+                "### Folder focus: {path}/ (prefer passages under this path)"
+            ));
+        }
+    }
+    parts.join("\n\n")
 }

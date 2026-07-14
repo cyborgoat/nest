@@ -29,8 +29,8 @@ npm run tauri dev
 
 1. Start the Knowledge Hub (`apps/hub`), then open **Hub** in the desktop app and download a pack — or use **Import** to add a local pack `.zip` (must include `pack.json`). Indexing runs automatically after download, import, and remove.
 2. Configure an OpenAI-compatible **Base URL**, **API key**, and chat model under **Settings**.
-3. In **Library**, open a file to read it (read-only).
-4. Use **scope** on tree items to limit chat retrieval, then ask in **Chat**.
+3. In **Library**, keep packs **Active** for chat retrieval (use **+/−** to deactivate). Inactive packs stay browsable under a collapsible section.
+4. In **Chat**, ask questions over all active packs, or `@`-mention files/folders under active packs to narrow focus.
 5. Chat supports **multiple sessions**: tabs for open chats, History for pin/archive/rename/delete. Session titles are generated after the first reply when still untitled.
 
 ## Knowledge Hub
@@ -60,11 +60,12 @@ npm run start:dev
 - [Chat sessions](docs/chat-sessions.md) — tabs, history, titles
 - [Development](docs/development.md) — env vars and sanity checks
 
-## Scope notes
+## Design notes
 
 - Markdown-only knowledge
 - Local vault + SQLite FTS **and** FastEmbed vector RAG via [Rig](https://github.com/0xPlaygrounds/rig) (`rig-fastembed` + `rig-sqlite`)
-- Chat uses a Rig agent with multi-turn history and a `vault_search` tool; completions still go to your OpenAI-compatible LLM
+- Chat uses a Rig agent with multi-turn history and a `vault_search` tool; completions go to your OpenAI-compatible LLM
+- Active packs define the default RAG domain; `@` focus paths narrow retrieval further
 - Desktop Nest is a download-only client (no publishing)
 - Hub auth and multi-tenant cloud are deferred
 

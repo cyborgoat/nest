@@ -32,34 +32,6 @@ pub async fn list_packs_remote(hub_base_url: &str) -> AppResult<Vec<PackProject>
     Ok(resp.json().await?)
 }
 
-pub async fn get_release_remote(
-    hub_base_url: &str,
-    pack_id: &str,
-    version: &str,
-) -> AppResult<PackMeta> {
-    let url = format!(
-        "{}/packs/{}/{}",
-        hub_base_url.trim_end_matches('/'),
-        pack_id,
-        version
-    );
-    let client = reqwest::Client::new();
-    let resp = client.get(&url).send().await.map_err(|e| {
-        AppError::msg(format!("Knowledge Hub unreachable: {e}"))
-    })?;
-    if !resp.status().is_success() {
-        return Err(AppError::msg(format!(
-            "Knowledge Hub release failed: {}",
-            resp.status()
-        )));
-    }
-    let mut pack: PackMeta = resp.json().await?;
-    if pack.path.trim().is_empty() {
-        pack.path = pack.id.clone();
-    }
-    Ok(pack)
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HubConnectionStatus {
     pub online: bool,
@@ -120,32 +92,7 @@ pub async fn download_pack_remote(
     let tmp = vault_root.join(format!(".{pack_id}.zip"));
     fs::write(&tmp, &bytes)?;
 
-    // Resolve metadata: pinned version from Hub, or after extract from pack.json.
-    let pack = if let Some(v) = version {
-        match get_release_remote(hub_base_url, pack_id, v).await {
-            Ok(meta) => meta,
-            Err(_) => {
-                // Fall through after extract
-                PackMeta {
-                    id: pack_id.to_string(),
-                    name: pack_id.to_string(),
-                    description: String::new(),
-                    version: v.to_string(),
-                    path: pack_id.to_string(),
-                }
-            }
-        }
-    } else {
-        PackMeta {
-            id: pack_id.to_string(),
-            name: pack_id.to_string(),
-            description: String::new(),
-            version: String::new(),
-            path: pack_id.to_string(),
-        }
-    };
-
-    let dest = vault_root.join(&pack.path);
+    let dest = vault_root.join(pack_id);
     if dest.exists() {
         fs::remove_dir_all(&dest)?;
     }
@@ -157,9 +104,10 @@ pub async fn download_pack_remote(
     if meta.path.trim().is_empty() {
         meta.path = meta.id.clone();
     }
-    // Prefer Hub-declared version when we had a pin and zip meta is empty edge case
-    if meta.version.is_empty() && !pack.version.is_empty() {
-        meta.version = pack.version;
+    if meta.version.is_empty() {
+        if let Some(v) = version {
+            meta.version = v.to_string();
+        }
     }
     Ok(meta)
 }
@@ -253,7 +201,7 @@ pub fn import_local_pack(source: &Path, vault_root: &Path) -> AppResult<PackMeta
         return Err(e);
     }
 
-    let (content_root, mut pack) = match locate_pack_root(&tmp) {
+    let (content_root, pack) = match locate_pack_root(&tmp) {
         Ok(v) => v,
         Err(e) => {
             cleanup();
@@ -265,12 +213,11 @@ pub fn import_local_pack(source: &Path, vault_root: &Path) -> AppResult<PackMeta
         cleanup();
         return Err(e);
     }
-    if pack.id.trim().is_empty() {
-        pack.id = pack.path.clone();
-    }
-    if let Err(e) = validate_pack_folder_name(&pack.id) {
+    if pack.id != pack.path {
         cleanup();
-        return Err(e);
+        return Err(AppError::msg(
+            "pack.json id must equal the pack folder name (path)",
+        ));
     }
 
     if !dir_has_markdown(&content_root) {
