@@ -20,6 +20,11 @@ import {
 } from "@/components/ui/accordion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useUiStore } from "@/stores/ui";
@@ -121,24 +126,37 @@ function TreeItem({
         </button>
 
         {isRoot && onSetActive && (
-          <Button
-            type="button"
-            size="icon"
-            variant="ghost"
-            className="size-6 shrink-0 opacity-0 group-hover:opacity-100"
-            title={packActive ? "Deactivate pack" : "Activate pack"}
-            disabled={setActivePending}
-            onClick={(e) => {
-              e.stopPropagation();
-              onSetActive(!packActive);
-            }}
-          >
-            {packActive ? (
-              <Minus className="size-3.5" />
-            ) : (
-              <Plus className="size-3.5" />
-            )}
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                className="size-6 shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                disabled={setActivePending}
+                aria-label={
+                  packActive
+                    ? "Deactivate knowledge pack"
+                    : "Activate knowledge pack"
+                }
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onSetActive(!packActive);
+                }}
+              >
+                {packActive ? (
+                  <Minus className="size-3.5" />
+                ) : (
+                  <Plus className="size-3.5" />
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="right">
+              {packActive
+                ? "Deactivate — exclude from chat knowledge"
+                : "Activate — include in chat knowledge"}
+            </TooltipContent>
+          </Tooltip>
         )}
       </div>
       <AnimatePresence initial={false}>
@@ -376,7 +394,7 @@ export function LibraryTree({
   );
 }
 
-/** Flatten folders + md files under active pack roots for @ mentions. */
+/** Flatten active pack roots + their folders/md files for @ mentions. */
 export function collectMentionCandidates(
   tree: TreeNode[],
   activeRoots: string[],
@@ -385,11 +403,11 @@ export function collectMentionCandidates(
   const roots = new Set(activeRoots);
   const out: { path: string; kind: "file" | "folder"; name: string }[] = [];
 
-  const walkUnder = (node: TreeNode) => {
+  const walk = (node: TreeNode) => {
     if (node.kind === "folder") {
       out.push({ path: node.path, kind: "folder", name: node.name });
       for (const child of node.children ?? []) {
-        walkUnder(child);
+        walk(child);
       }
     } else if (node.name.toLowerCase().endsWith(".md")) {
       out.push({ path: node.path, kind: "file", name: node.name });
@@ -398,9 +416,7 @@ export function collectMentionCandidates(
 
   for (const root of tree) {
     if (root.kind === "folder" && roots.has(root.path)) {
-      for (const child of root.children ?? []) {
-        walkUnder(child);
-      }
+      walk(root);
     }
   }
   return out;
