@@ -39,6 +39,8 @@ pub fn settings_set(state: State<'_, SharedState>, mut settings: AppSettings) ->
     // Embedding model is fixed locally — not user-configurable.
     settings.embedding_model = embeddings::DEFAULT_EMBEDDING_MODEL.into();
     settings.knowledge_dir = settings.knowledge_dir.trim().to_string();
+    settings.hub_base_url = settings.hub_base_url.trim().trim_end_matches('/').to_string();
+    validate_http_base_url("Hub base URL", &settings.hub_base_url)?;
 
     let resolved = crate::state::resolve_knowledge_dir(
         &state.app_data_dir,
@@ -54,6 +56,21 @@ pub fn settings_set(state: State<'_, SharedState>, mut settings: AppSettings) ->
 
     let conn = state.db.lock();
     db::save_settings(&conn, &settings)
+}
+
+fn validate_http_base_url(label: &str, value: &str) -> AppResult<()> {
+    if value.is_empty() {
+        return Err(AppError::msg(format!("{label} is required")));
+    }
+    let url = reqwest::Url::parse(value)
+        .map_err(|e| AppError::msg(format!("{label} is invalid: {e}")))?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err(AppError::msg(format!("{label} must use http or https")));
+    }
+    if url.host_str().is_none() {
+        return Err(AppError::msg(format!("{label} must include a host")));
+    }
+    Ok(())
 }
 
 #[tauri::command]

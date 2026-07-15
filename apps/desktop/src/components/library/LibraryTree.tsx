@@ -248,7 +248,6 @@ function PackSection({
       collapsible
       value={accordionValue}
       onValueChange={onAccordionChange}
-      className="border-t border-border"
     >
       <AccordionItem value="inactive" className="border-b-0">
         <AccordionTrigger className="px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground hover:no-underline">
@@ -343,7 +342,7 @@ export function LibraryTree({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="border-b border-border px-2 py-2">
+      <div className="px-2 py-2">
         <div className="relative">
           <Search className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input

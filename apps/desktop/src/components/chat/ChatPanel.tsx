@@ -365,15 +365,16 @@ export function ChatPanel() {
         </div>
       </ScrollArea>
 
-      <div className="shrink-0 border-t border-border px-3 pb-3 pt-4">
+      <div className="shrink-0 px-3 pb-3 pt-4">
         <MentionComposer
           candidates={mentionCandidates}
           disabled={isSending}
           canSend={!!sessionId && !isSending}
           placeholders={{
             emptyActive:
-              "Activate a pack in the Library to chat and use @…",
-            ready: "Ask about your knowledge… (@ for files/folders)",
+              "Type a message… Activate a pack to use @ mentions.",
+            ready:
+              "Type a message… Enter to send; Shift+Enter for a new line; @ to mention files or folders.",
           }}
           onSend={(query, focusPaths) => send.mutate({ query, focusPaths })}
         />
@@ -391,10 +392,6 @@ export function ChatPanel() {
             </Button>
           </div>
         )}
-        <p className="mt-1.5 text-[11px] text-muted-foreground">
-          Enter to send · Shift+Enter for a new line · @ for files/folders in
-          active packs
-        </p>
       </div>
     </div>
   );

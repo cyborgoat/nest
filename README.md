@@ -35,7 +35,7 @@ npm run tauri dev
 
 ## Knowledge Hub
 
-[NestJS](https://nestjs.com/) API served on port 8787:
+[NestJS](https://nestjs.com/) API served on `PORT` (`8787` by default). Configure the desktop app's **Settings → Hub base URL** to point at this service.
 
 ```bash
 cd apps/hub

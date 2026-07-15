@@ -8,6 +8,22 @@ use std::io::copy;
 use std::path::{Path, PathBuf};
 use zip::ZipArchive;
 
+fn hub_http_client(hub_base_url: &str) -> AppResult<reqwest::Client> {
+    let base = hub_base_url.trim().to_lowercase();
+    let is_loopback = base.starts_with("http://127.")
+        || base.starts_with("https://127.")
+        || base.starts_with("http://localhost")
+        || base.starts_with("https://localhost")
+        || base.starts_with("http://[::1]")
+        || base.starts_with("https://[::1]");
+
+    let mut builder = reqwest::Client::builder();
+    if is_loopback {
+        builder = builder.no_proxy();
+    }
+    Ok(builder.build()?)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PackProject {
     pub id: String,
@@ -19,10 +35,12 @@ pub struct PackProject {
 
 pub async fn list_packs_remote(hub_base_url: &str) -> AppResult<Vec<PackProject>> {
     let url = format!("{}/packs", hub_base_url.trim_end_matches('/'));
-    let client = reqwest::Client::new();
-    let resp = client.get(&url).send().await.map_err(|e| {
-        AppError::msg(format!("Knowledge Hub unreachable: {e}"))
-    })?;
+    let client = hub_http_client(hub_base_url)?;
+    let resp = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| AppError::msg(format!("Knowledge Hub unreachable: {e}")))?;
     if !resp.status().is_success() {
         return Err(AppError::msg(format!(
             "Knowledge Hub list failed: {}",
@@ -43,7 +61,16 @@ pub struct HubConnectionStatus {
 pub async fn check_hub_status(hub_base_url: &str) -> HubConnectionStatus {
     let base = hub_base_url.trim_end_matches('/').to_string();
     let url = format!("{base}/health");
-    let client = reqwest::Client::new();
+    let client = match hub_http_client(hub_base_url) {
+        Ok(client) => client,
+        Err(e) => {
+            return HubConnectionStatus {
+                online: false,
+                hub_base_url: base,
+                message: Some(format!("Knowledge Hub is not accessible: {e}")),
+            }
+        }
+    };
     match client.get(&url).send().await {
         Ok(resp) if resp.status().is_success() => HubConnectionStatus {
             online: true,
@@ -78,10 +105,12 @@ pub async fn download_pack_remote(
         Some(v) => format!("{base}/packs/{pack_id}/{v}/download"),
         None => format!("{base}/packs/{pack_id}/download"),
     };
-    let client = reqwest::Client::new();
-    let resp = client.get(&url).send().await.map_err(|e| {
-        AppError::msg(format!("Knowledge Hub unreachable: {e}"))
-    })?;
+    let client = hub_http_client(hub_base_url)?;
+    let resp = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| AppError::msg(format!("Knowledge Hub unreachable: {e}")))?;
     if !resp.status().is_success() {
         return Err(AppError::msg(format!(
             "Hub download failed: {}",
@@ -157,12 +186,7 @@ fn extract_zip_to_vault(zip_path: &Path, vault_root: &Path) -> AppResult<PathBuf
             copy(&mut file, &mut outfile)?;
         }
         if top.is_none() {
-            top = Some(
-                name.split('/')
-                    .next()
-                    .unwrap_or(&name)
-                    .to_string(),
-            );
+            top = Some(name.split('/').next().unwrap_or(&name).to_string());
         }
     }
     Ok(vault_root.join(top.unwrap_or_default()))
@@ -188,10 +212,7 @@ pub fn import_local_pack(source: &Path, vault_root: &Path) -> AppResult<PackMeta
         ));
     }
 
-    let tmp = vault_root.join(format!(
-        ".import-{}",
-        uuid::Uuid::new_v4()
-    ));
+    let tmp = vault_root.join(format!(".import-{}", uuid::Uuid::new_v4()));
     let cleanup = || {
         let _ = fs::remove_dir_all(&tmp);
     };
@@ -296,9 +317,7 @@ fn validate_pack_folder_name(name: &str) -> AppResult<()> {
         ));
     }
     if name.starts_with('.') {
-        return Err(AppError::msg(
-            "pack.json \"path\" cannot start with a dot",
-        ));
+        return Err(AppError::msg("pack.json \"path\" cannot start with a dot"));
     }
     Ok(())
 }
@@ -325,13 +344,9 @@ fn read_required_pack_meta(pack_root: &Path) -> AppResult<PackMeta> {
         )));
     }
     let raw = fs::read_to_string(&file)?;
-    let pack: PackMeta = serde_json::from_str(&raw).map_err(|e| {
-        AppError::msg(format!("Invalid pack.json: {e}"))
-    })?;
-    if pack.id.trim().is_empty()
-        || pack.name.trim().is_empty()
-        || pack.version.trim().is_empty()
-    {
+    let pack: PackMeta =
+        serde_json::from_str(&raw).map_err(|e| AppError::msg(format!("Invalid pack.json: {e}")))?;
+    if pack.id.trim().is_empty() || pack.name.trim().is_empty() || pack.version.trim().is_empty() {
         return Err(AppError::msg(
             "pack.json requires non-empty id, name, and version",
         ));

@@ -43,7 +43,7 @@ flowchart TB
 
 ## Knowledge Hub connectivity
 
-The desktop app uses the configured remote Hub (`Settings → Hub URL`, default `http://127.0.0.1:8787`).
+The desktop app uses the configured Hub base URL from Settings. The Hub service only owns the API port; host selection lives in the desktop setting.
 
 - Catalog and download use a **PyPI-style versioned registry** (`GET /packs`, `GET /packs/:id/:version/download`). See [pack-registry.md](pack-registry.md).
 - If the Hub is unreachable, the Hub panel shows an **Offline** status. Local **Import** (zip) still works.

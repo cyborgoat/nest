@@ -20,7 +20,7 @@ npm install
 npm run tauri dev
 ```
 
-Hub defaults to `http://127.0.0.1:8787`. Point desktop Settings → Hub URL there if needed.
+The Hub service listens on `PORT` (default `8787`). Configure the desktop app's **Settings → Hub base URL** to the address you want it to use, for example `http://127.0.0.1:8787` for local development.
 
 ## Environment
 

@@ -261,7 +261,7 @@ export default function App() {
             className={cn(
               "transition-[width,opacity] duration-200 ease-out",
               libraryVisible
-                ? "w-1.5 opacity-100"
+                ? "w-px opacity-100"
                 : "w-0 opacity-0 pointer-events-none",
             )}
           />
@@ -285,7 +285,7 @@ export default function App() {
             className={cn(
               "transition-[width,opacity] duration-200 ease-out",
               chatOpen
-                ? "w-1.5 opacity-100"
+                ? "w-px opacity-100"
                 : "w-0 opacity-0 pointer-events-none",
             )}
           />

@@ -18,7 +18,7 @@ async function bootstrap() {
     (config.get<string>('NEST_DEBUG') ?? '').trim().toLowerCase(),
   );
   await app.listen(port);
-  console.log(`Nest Knowledge Hub listening on http://127.0.0.1:${port}`);
+  console.log(`Nest Knowledge Hub listening on port ${port}`);
   console.log(`Fixtures path: ${fixturesPath}`);
   if (debug) {
     console.log('NEST_DEBUG is on');

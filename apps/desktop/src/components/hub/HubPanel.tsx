@@ -201,9 +201,9 @@ export function HubPanel() {
               )}
             </div>
             <p className="text-sm text-muted-foreground">
-              Install versioned packs from the remote Knowledge Hub (PyPI-style
-              registry) or import a pack zip. One active version per pack lives
-              in your vault.
+              Install versioned packs from the configured Knowledge Hub catalog
+              or import a pack zip. One active version per pack lives in your
+              vault.
             </p>
           </div>
           <Button
@@ -228,7 +228,7 @@ export function HubPanel() {
               </h3>
               <p className="mx-auto max-w-sm text-sm text-muted-foreground">
                 Start the Hub service and check the Hub URL in Settings to browse
-                available packs from the cloud. You can still import a local pack
+                available packs. You can still import a local pack
                 zip anytime.
               </p>
             </section>
