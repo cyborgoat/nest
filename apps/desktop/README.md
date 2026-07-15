@@ -12,7 +12,7 @@ npm run tauri dev
 - **Library** — read-only Markdown tree; activate/deactivate packs for chat; search
 - **Hub** — versioned catalog, download/upgrade, import local pack zips (`pack.json` required), remove (auto reindex)
 - **Chat** — RAG over active packs; `@` mention files/folders to focus; session tabs, history, pin/archive
-- **Settings** — OpenAI-compatible LLM + Hub URL (separate Test LLM / Test Hub)
+- **Settings** — personal profile, LLM, Hub URL, and manual re-index (auto-saves)
 
 See the [root README](../../README.md) and [docs/](../../docs/) for architecture, pack registry, chat sessions, and development checks.
 

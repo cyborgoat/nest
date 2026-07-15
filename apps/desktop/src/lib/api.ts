@@ -18,10 +18,9 @@ export const api = {
   settingsGet: () => invoke<AppSettings>("settings_get"),
   settingsSet: (settings: AppSettings) =>
     invoke<void>("settings_set", { settings }),
-  settingsTestLlm: () => invoke<string>("settings_test_llm"),
-  settingsTestHub: () => invoke<string>("settings_test_hub"),
 
   indexStatus: () => invoke<IndexStatus>("index_status"),
+  indexRebuild: () => invoke<IndexStatus>("index_rebuild"),
 
   chatCreateSession: (title?: string) =>
     invoke<ChatSession>("chat_create_session", { title: title ?? null }),

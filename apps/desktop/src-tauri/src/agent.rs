@@ -420,11 +420,12 @@ pub async fn run_agent_chat(
 }
 
 fn build_focus_context(state: &SharedState, focus_paths: &[String]) -> String {
+    let vault = state.vault_path();
     let mut parts = Vec::new();
     for path in focus_paths {
-        let full = state.vault_root.join(path);
+        let full = vault.join(path);
         if full.is_file() {
-            match vault::read_file(&state.vault_root, path) {
+            match vault::read_file(&vault, path) {
                 Ok(content) => {
                     let truncated = if content.len() > 4000 {
                         format!("{}…", &content[..4000])

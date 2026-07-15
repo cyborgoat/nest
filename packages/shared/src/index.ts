@@ -41,6 +41,12 @@ export type AppSettings = {
   chat_model: string;
   embedding_model: string;
   hub_base_url: string;
+  /** Display name for the local user. */
+  user_name: string;
+  /** Custom vault path; empty = default under app data. */
+  knowledge_dir: string;
+  /** Absolute path currently used for packs (read-only from UI). */
+  resolved_knowledge_dir: string;
 };
 
 export type Citation = {

@@ -14,53 +14,46 @@ use tauri::{AppHandle, Emitter, State};
 
 #[tauri::command]
 pub fn vault_list_tree(state: State<'_, SharedState>) -> AppResult<Vec<TreeNode>> {
-    vault::list_tree(&state.vault_root)
+    let vault = state.vault_path();
+    vault::list_tree(&vault)
 }
 
 #[tauri::command]
 pub fn vault_read_file(state: State<'_, SharedState>, path: String) -> AppResult<String> {
-    vault::read_file(&state.vault_root, &path)
+    let vault = state.vault_path();
+    vault::read_file(&vault, &path)
 }
 
 #[tauri::command]
 pub fn settings_get(state: State<'_, SharedState>) -> AppResult<AppSettings> {
-    let conn = state.db.lock();
-    db::get_settings(&conn)
+    let mut settings = {
+        let conn = state.db.lock();
+        db::get_settings(&conn)?
+    };
+    settings.resolved_knowledge_dir = state.vault_path().display().to_string();
+    Ok(settings)
 }
 
 #[tauri::command]
 pub fn settings_set(state: State<'_, SharedState>, mut settings: AppSettings) -> AppResult<()> {
     // Embedding model is fixed locally — not user-configurable.
     settings.embedding_model = embeddings::DEFAULT_EMBEDDING_MODEL.into();
+    settings.knowledge_dir = settings.knowledge_dir.trim().to_string();
+
+    let resolved = crate::state::resolve_knowledge_dir(
+        &state.app_data_dir,
+        &settings.knowledge_dir,
+    );
+    if !resolved.is_absolute() {
+        return Err(AppError::msg(
+            "Knowledge directory must be an absolute path (or leave empty for the default)",
+        ));
+    }
+    state.set_vault_path(resolved.clone())?;
+    settings.resolved_knowledge_dir = resolved.display().to_string();
+
     let conn = state.db.lock();
     db::save_settings(&conn, &settings)
-}
-
-#[tauri::command]
-pub async fn settings_test_llm(state: State<'_, SharedState>) -> AppResult<String> {
-    let settings = {
-        let conn = state.db.lock();
-        db::get_settings(&conn)?
-    };
-    llm::test_connection(&settings).await
-}
-
-#[tauri::command]
-pub async fn settings_test_hub(state: State<'_, SharedState>) -> AppResult<String> {
-    let settings = {
-        let conn = state.db.lock();
-        db::get_settings(&conn)?
-    };
-    let status = hub::check_hub_status(&settings.hub_base_url).await;
-    if status.online {
-        Ok(format!("Knowledge Hub OK ({})", status.hub_base_url))
-    } else {
-        Err(AppError::msg(
-            status
-                .message
-                .unwrap_or_else(|| "Knowledge Hub is not accessible".into()),
-        ))
-    }
 }
 
 #[tauri::command]
@@ -69,7 +62,8 @@ pub fn index_status(state: State<'_, SharedState>) -> AppResult<IndexStatus> {
     db::get_index_status(&conn, state.indexing())
 }
 
-/// Rebuild FTS + vector indexes (used after download / import / remove).
+/// Rebuild FTS + vector indexes (used after download / import / remove / manual).
+#[tauri::command]
 pub async fn index_rebuild(state: State<'_, SharedState>) -> AppResult<IndexStatus> {
     if state.indexing() {
         return Err(AppError::msg("Indexing already in progress"));
@@ -87,7 +81,8 @@ pub async fn index_rebuild(state: State<'_, SharedState>) -> AppResult<IndexStat
             db::set_index_meta(&conn, 0, 0, Some("Collecting Markdown…"))?;
         }
 
-        let pending = indexer::collect_pending_chunks(&state.vault_root)?;
+        let vault = state.vault_path();
+        let pending = indexer::collect_pending_chunks(&vault)?;
 
         {
             let conn = state.db.lock();
@@ -222,9 +217,10 @@ pub fn chat_list_messages(
         db::list_messages(&conn, &session_id)?
     };
     // Hide citations that point at removed vault files (packs deleted after the reply).
+    let vault = state.vault_path();
     for msg in &mut messages {
         if let Some(refs) = msg.citations.as_mut() {
-            refs.retain(|c| state.vault_root.join(&c.file_path).is_file());
+            refs.retain(|c| vault.join(&c.file_path).is_file());
             if refs.is_empty() {
                 msg.citations = None;
             }
@@ -396,10 +392,11 @@ pub async fn hub_list_packs(state: State<'_, SharedState>) -> AppResult<Vec<Pack
 
 #[tauri::command]
 pub fn hub_list_installed(state: State<'_, SharedState>) -> AppResult<Vec<InstalledPack>> {
+    let vault = state.vault_path();
     let conn = state.db.lock();
     let mut installed = db::list_sync_state(&conn)?;
     // Require real Markdown content — empty leftovers must not count as installed.
-    installed.retain(|p| pack_has_markdown(&state.vault_root, &p.local_path));
+    installed.retain(|p| pack_has_markdown(&vault, &p.local_path));
     Ok(installed)
 }
 
@@ -449,8 +446,9 @@ pub async fn hub_remove_pack(
         "remove_pack id={pack_id} local_path={local_path}"
     );
 
-    vault::remove_pack(&state.vault_root, &local_path)?;
-    vault::prune_empty_dirs(&state.vault_root)?;
+    let vault = state.vault_path();
+    vault::remove_pack(&vault, &local_path)?;
+    vault::prune_empty_dirs(&vault)?;
     {
         let conn = state.db.lock();
         db::purge_path_data(&conn, &local_path)?;
@@ -474,11 +472,12 @@ pub async fn hub_download_pack(
         db::get_settings(&conn)?
     };
 
+    let vault = state.vault_path();
     let pack = hub::download_pack_remote(
         &settings.hub_base_url,
         &pack_id,
         version.as_deref(),
-        &state.vault_root,
+        &vault,
     )
     .await?;
 
@@ -502,7 +501,8 @@ pub async fn hub_import_local_pack(
         source.display()
     );
 
-    let pack = hub::import_local_pack(&source, &state.vault_root)?;
+    let vault = state.vault_path();
+    let pack = hub::import_local_pack(&source, &vault)?;
     {
         let conn = state.db.lock();
         hub::record_sync(&conn, &pack)?;

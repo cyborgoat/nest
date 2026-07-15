@@ -51,10 +51,10 @@ The desktop app uses the configured remote Hub (`Settings → Hub URL`, default 
 
 ## Vault and indexing
 
-- Packs install into `{app_data}/vault/<pack-id>/` as a single version (upgrade replaces the tree).
+- Packs install into the configured **knowledge directory** (default `{app_data}/vault/<pack-id>/`; upgrade replaces the tree).
 - **Import local pack** accepts a `.zip` with `pack.json` (`id`, `name`, `description`, `version`; `path` optional and must equal `id`).
 - **Remove pack** deletes the tree, purges SQLite/FTS rows, and rebuilds the vector index.
-- Indexing runs automatically after download, import, and remove (no manual rebuild in the UI).
+- Indexing runs automatically after download, import, and remove; Settings also offers a manual re-index.
 
 ## Library: active / inactive packs
 
@@ -97,7 +97,7 @@ Under the OS app data directory for `com.cyborgoat.nest.app`:
 
 | Store | Purpose |
 |-------|---------|
-| `vault/` | Downloaded Markdown packs |
+| Knowledge directory (`vault/` by default) | Downloaded Markdown packs (path configurable in Settings) |
 | `nest.db` | Settings, sessions, messages, FTS chunks, sync state |
 | `nest-vectors.db` | Local vector index |
 

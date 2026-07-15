@@ -76,8 +76,9 @@ pub async fn retrieve(
 
     // Drop citations whose files were removed (stale vectors / FTS race).
     let before = merged.len();
+    let vault = state.vault_path();
     merged.retain(|c| {
-        let path = state.vault_root.join(&c.file_path);
+        let path = vault.join(&c.file_path);
         let ok = path.is_file();
         if !ok {
             crate::nest_debug!(
