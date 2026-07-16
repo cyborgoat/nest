@@ -61,6 +61,23 @@
   }
 }
 
+.tab-scroll {
+  scrollbar-width: thin;
+}
+
+.tab-scroll::-webkit-scrollbar {
+  height: 4px;
+}
+
+.tab-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.tab-scroll::-webkit-scrollbar-thumb {
+  background-color: var(--color-border);
+  border-radius: 9999px;
+}
+
 .markdown-body {
   @apply min-w-0 max-w-full break-words text-sm leading-relaxed text-foreground;
   overflow-wrap: anywhere;

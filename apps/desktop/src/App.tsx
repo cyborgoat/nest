@@ -1,18 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
-import {
-  BookMarked,
-  Cloud,
-  MessageSquare,
-  PanelLeft,
-  Settings2,
-} from "lucide-react";
+import type { TreeNode } from "@nest/shared";
+import { Cloud, MessageSquare, PanelLeft, Settings2 } from "lucide-react";
 import { useEffect, useRef, type ReactNode } from "react";
 import { usePanelRef } from "react-resizable-panels";
 import { ChatPanel } from "@/components/chat/ChatPanel";
-import { HubPanel } from "@/components/hub/HubPanel";
 import { LibraryTree } from "@/components/library/LibraryTree";
-import { SettingsPanel } from "@/components/settings/SettingsPanel";
-import { MarkdownViewer } from "@/components/viewer/MarkdownViewer";
+import { MainTabArea } from "@/components/main/MainTabArea";
 import { Button } from "@/components/ui/button";
 import {
   ResizableHandle,
@@ -27,16 +20,26 @@ import {
   cancelPanelAnimation,
 } from "@/lib/panel-animation";
 import { cn } from "@/lib/utils";
-import { useUiStore } from "@/stores/ui";
+import { HUB_TAB_ID, SETTINGS_TAB_ID, useUiStore } from "@/stores/ui";
 
 const LIBRARY_DEFAULT_PX = 260;
 const LIBRARY_MIN_PX = 180;
 const CHAT_DEFAULT_PX = 360;
 const CHAT_MIN_PX = 280;
 
+function collectFilePaths(nodes: TreeNode[]): string[] {
+  return nodes.flatMap((node) =>
+    node.kind === "folder"
+      ? collectFilePaths(node.children ?? [])
+      : [node.path],
+  );
+}
+
 export default function App() {
-  const activePanel = useUiStore((s) => s.activePanel);
-  const setActivePanel = useUiStore((s) => s.setActivePanel);
+  const activeMainTabId = useUiStore((s) => s.activeMainTabId);
+  const openHubTab = useUiStore((s) => s.openHubTab);
+  const openSettingsTab = useUiStore((s) => s.openSettingsTab);
+  const pruneMainFileTabs = useUiStore((s) => s.pruneMainFileTabs);
   const sidebarOpen = useUiStore((s) => s.sidebarOpen);
   const setSidebarOpen = useUiStore((s) => s.setSidebarOpen);
   const chatOpen = useUiStore((s) => s.chatOpen);
@@ -71,7 +74,12 @@ export default function App() {
     refetchInterval: (q) => (q.state.data?.is_indexing ? 1000 : 10_000),
   });
 
-  const libraryVisible = activePanel === "library" && sidebarOpen;
+  useEffect(() => {
+    if (!treeQuery.data) return;
+    pruneMainFileTabs(new Set(collectFilePaths(treeQuery.data)));
+  }, [treeQuery.data, pruneMainFileTabs]);
+
+  const libraryVisible = sidebarOpen;
 
   useEffect(() => {
     const panel = libraryPanelRef.current;
@@ -158,11 +166,8 @@ export default function App() {
         <div className="flex items-center gap-3">
           <Button
             size="icon"
-            variant={sidebarOpen && activePanel === "library" ? "secondary" : "ghost"}
-            className={cn(
-              "size-8",
-              activePanel !== "library" && "pointer-events-none opacity-40",
-            )}
+            variant={sidebarOpen ? "secondary" : "ghost"}
+            className="size-8"
             onClick={handleToggleSidebar}
             title={sidebarOpen ? "Collapse library" : "Expand library"}
             aria-label={sidebarOpen ? "Collapse library" : "Expand library"}
@@ -185,20 +190,14 @@ export default function App() {
         </div>
         <nav className="flex items-center gap-1">
           <NavButton
-            active={activePanel === "library"}
-            onClick={() => setActivePanel("library")}
-            icon={<BookMarked className="size-4" />}
-            label="Library"
-          />
-          <NavButton
-            active={activePanel === "hub"}
-            onClick={() => setActivePanel("hub")}
+            active={activeMainTabId === HUB_TAB_ID}
+            onClick={openHubTab}
             icon={<Cloud className="size-4" />}
             label="Hub"
           />
           <NavButton
-            active={activePanel === "settings"}
-            onClick={() => setActivePanel("settings")}
+            active={activeMainTabId === SETTINGS_TAB_ID}
+            onClick={openSettingsTab}
             icon={<Settings2 className="size-4" />}
             label="Settings"
           />
@@ -229,8 +228,7 @@ export default function App() {
             maxSize={420}
             className="overflow-hidden bg-sidebar"
             onResize={(size) => {
-              // Only persist user-driven resize while the library tab is active.
-              if (syncingLibrary.current || activePanel !== "library") return;
+              if (syncingLibrary.current) return;
               if (size.inPixels >= LIBRARY_MIN_PX) {
                 libraryLastSizeRef.current = size.inPixels;
               }
@@ -275,9 +273,7 @@ export default function App() {
             className="bg-card/60"
           >
             <main className="h-full min-w-0 overflow-hidden">
-              {activePanel === "library" && <MarkdownViewer />}
-              {activePanel === "hub" && <HubPanel />}
-              {activePanel === "settings" && <SettingsPanel />}
+              <MainTabArea />
             </main>
           </ResizablePanel>
 

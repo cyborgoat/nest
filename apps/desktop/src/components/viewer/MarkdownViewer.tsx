@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { BookOpen, Cloud, Lock, PackageOpen } from "lucide-react";
+import { Lock } from "lucide-react";
 import { motion } from "motion/react";
 import { Fragment } from "react";
 import { api } from "@/lib/api";
@@ -11,80 +11,15 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
-import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { useUiStore } from "@/stores/ui";
 
-export function MarkdownViewer() {
-  const selectedPath = useUiStore((s) => s.selectedPath);
-  const setActivePanel = useUiStore((s) => s.setActivePanel);
-
-  const treeQuery = useQuery({
-    queryKey: ["tree"],
-    queryFn: api.vaultListTree,
-  });
-
+export function MarkdownViewer({ path }: { path: string }) {
   const { data, isLoading, error } = useQuery({
-    queryKey: ["file", selectedPath],
-    queryFn: () => api.vaultReadFile(selectedPath!),
-    enabled: !!selectedPath,
+    queryKey: ["file", path],
+    queryFn: () => api.vaultReadFile(path),
   });
 
-  const vaultEmpty = !treeQuery.isLoading && (treeQuery.data?.length ?? 0) === 0;
-
-  if (treeQuery.isLoading) {
-    return (
-      <div className="flex h-full items-center justify-center p-8 text-sm text-muted-foreground">
-        Loading library…
-      </div>
-    );
-  }
-
-  if (vaultEmpty) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-4 p-8 text-center">
-        <motion.div
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="rounded-full bg-muted p-4"
-        >
-          <PackageOpen className="size-8 text-primary" />
-        </motion.div>
-        <div>
-          <h2 className="font-display text-xl">Your library is empty</h2>
-          <p className="mt-1 max-w-sm text-sm text-muted-foreground">
-            Download a knowledge pack from the Hub to get started.
-          </p>
-        </div>
-        <Button onClick={() => setActivePanel("hub")}>
-          <Cloud className="size-4" />
-          Open Hub
-        </Button>
-      </div>
-    );
-  }
-
-  if (!selectedPath) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
-        <motion.div
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="rounded-full bg-muted p-4"
-        >
-          <BookOpen className="size-8 text-primary" />
-        </motion.div>
-        <div>
-          <h2 className="font-display text-xl">Select a knowledge file</h2>
-          <p className="mt-1 max-w-sm text-sm text-muted-foreground">
-            Browse the library tree. Knowledge files are read-only after download.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  const segments = selectedPath.split("/").filter(Boolean);
+  const segments = path.split("/").filter(Boolean);
   const basePath = segments.slice(0, -1).join("/");
 
   return (
@@ -121,7 +56,7 @@ export function MarkdownViewer() {
           )}
           {data && (
             <motion.div
-              key={selectedPath}
+              key={path}
               initial={{ opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.2 }}

@@ -67,16 +67,16 @@ function TreeItem({
   onSetActive?: (active: boolean) => void;
   setActivePending?: boolean;
 }) {
-  const [open, setOpen] = useState(depth < 1 || !!forceOpen);
+  const [open, setOpen] = useState((packActive ? depth < 1 : false) || !!forceOpen);
   useEffect(() => {
     if (forceOpen) setOpen(true);
   }, [forceOpen]);
 
-  const selectedPath = useUiStore((s) => s.selectedPath);
-  const setSelectedPath = useUiStore((s) => s.setSelectedPath);
+  const activeMainTabId = useUiStore((s) => s.activeMainTabId);
+  const openFileTab = useUiStore((s) => s.openFileTab);
   const isFolder = node.kind === "folder";
   const isRoot = depth === 0 && isFolder;
-  const isSelected = selectedPath === node.path;
+  const isSelected = activeMainTabId === node.path;
 
   return (
     <div>
@@ -93,7 +93,10 @@ function TreeItem({
           className="flex min-w-0 flex-1 items-center gap-1.5 py-1.5 text-left"
           onClick={() => {
             if (isFolder) setOpen((v) => !v);
-            else setSelectedPath(node.path);
+            else openFileTab(node.path);
+          }}
+          onDoubleClick={() => {
+            if (!isFolder) openFileTab(node.path, { preview: false });
           }}
         >
           {isFolder ? (
@@ -195,6 +198,7 @@ function PackSection({
   collapsible = false,
   accordionValue,
   onAccordionChange,
+  resetKey = 0,
 }: {
   title: string;
   nodes: TreeNode[];
@@ -207,6 +211,8 @@ function PackSection({
   collapsible?: boolean;
   accordionValue?: string;
   onAccordionChange?: (value: string) => void;
+  /** Bumping this remounts every root TreeItem, collapsing any expanded folders. */
+  resetKey?: number;
 }) {
   const filtered = useMemo(() => filterTree(nodes, search), [nodes, search]);
   if (filtered.length === 0) return null;
@@ -215,7 +221,7 @@ function PackSection({
     <div className={cn("pb-2", !packActive && "opacity-90")}>
       {filtered.map((node) => (
         <TreeItem
-          key={node.path}
+          key={`${node.path}:${resetKey}`}
           node={node}
           forceOpen={forceOpen}
           packActive={packActive}
@@ -273,6 +279,7 @@ export function LibraryTree({
 }) {
   const [search, setSearch] = useState("");
   const [inactiveOpen, setInactiveOpen] = useState("");
+  const [inactiveResetKey, setInactiveResetKey] = useState(0);
   const queryClient = useQueryClient();
   const clearPathsUnder = useUiStore((s) => s.clearPathsUnder);
 
@@ -374,7 +381,11 @@ export function LibraryTree({
           forceOpen={forceOpen}
           collapsible
           accordionValue={inactiveOpen}
-          onAccordionChange={setInactiveOpen}
+          onAccordionChange={(value) => {
+            setInactiveOpen(value);
+            setInactiveResetKey((k) => k + 1);
+          }}
+          resetKey={inactiveResetKey}
           setActivePending={setActive.isPending}
           onSetActive={(packPath, active) => {
             const packId = byPath.get(packPath)?.pack_id ?? packPath;

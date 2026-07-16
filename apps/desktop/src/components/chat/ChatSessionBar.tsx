@@ -115,7 +115,7 @@ export function ChatSessionBar({ sessions, onResetChatUi }: Props) {
   return (
     <>
       <div className="flex h-10 items-stretch gap-1 border-b border-border px-1.5">
-        <div className="flex min-w-0 flex-1 items-stretch gap-0.5 overflow-x-auto">
+        <div className="tab-scroll flex min-w-0 flex-1 items-stretch gap-0.5 overflow-x-auto">
           {openSessions.map((session) => {
             const active = session.id === chatSessionId;
             return (

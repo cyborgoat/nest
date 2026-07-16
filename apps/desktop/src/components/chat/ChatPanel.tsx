@@ -26,7 +26,7 @@ const bubble =
   "min-w-0 max-w-full overflow-hidden break-words [overflow-wrap:anywhere]";
 
 export function ChatPanel() {
-  const setSelectedPath = useUiStore((s) => s.setSelectedPath);
+  const openFileTab = useUiStore((s) => s.openFileTab);
   const setStatusMessage = useUiStore((s) => s.setStatusMessage);
   const sessionId = useUiStore((s) => s.chatSessionId);
   const openChatTab = useUiStore((s) => s.openChatTab);
@@ -305,7 +305,7 @@ export function ChatPanel() {
                 msg.citations.length > 0 && (
                   <References
                     citations={msg.citations}
-                    onOpen={(path) => setSelectedPath(path)}
+                    onOpen={(path) => openFileTab(path)}
                   />
                 )}
             </div>
