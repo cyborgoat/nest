@@ -31,7 +31,6 @@ export function RemovePackButton({
           <Button
             size="icon"
             variant="destructive"
-            className="size-8"
             disabled={disabled}
             title="Remove pack"
             aria-label={`Remove ${name}`}

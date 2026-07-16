@@ -12,13 +12,16 @@ export const buttonVariants = cva(
         secondary: "bg-muted text-foreground hover:bg-muted/80",
         outline: "border border-border bg-card hover:bg-muted",
         ghost: "hover:bg-muted",
-        destructive: "bg-destructive text-white hover:bg-destructive/90",
+        destructive:
+          "bg-destructive text-destructive-foreground hover:bg-destructive/90",
       },
       size: {
         default: "h-9 px-3 py-2",
         sm: "h-8 rounded-md px-2.5 text-xs",
         lg: "h-10 rounded-md px-4",
         icon: "h-8 w-8",
+        "icon-sm": "h-7 w-7",
+        "icon-xs": "h-6 w-6",
       },
     },
     defaultVariants: {

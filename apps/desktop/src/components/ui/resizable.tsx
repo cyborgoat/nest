@@ -45,7 +45,7 @@ export function ResizableHandle({
       className={cn(
         "relative flex w-px shrink-0 items-center justify-center bg-border transition-colors hover:bg-primary/40",
         "aria-[orientation=horizontal]:h-px aria-[orientation=horizontal]:w-full",
-        "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         className,
       )}
       {...props}

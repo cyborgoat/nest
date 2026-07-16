@@ -4,6 +4,7 @@ import { motion } from "motion/react";
 import { RemovePackButton } from "@/components/hub/RemovePackButton";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 
 export function InstalledTab({
   installed,
@@ -34,15 +35,17 @@ export function InstalledTab({
 
   if (installed.length === 0) {
     return (
-      <div className="space-y-3 rounded-lg border border-dashed border-border bg-muted/40 px-4 py-6 text-center">
-        <Package className="mx-auto size-6 text-muted-foreground" />
-        <h3 className="text-sm font-medium text-foreground">
-          No packs in your vault yet
-        </h3>
-        <p className="mx-auto max-w-sm text-sm text-muted-foreground">
-          Download packs from the registry or import a knowledge pack zip from
-          your computer.
-        </p>
+      <EmptyState
+        variant="dashed"
+        icon={<Package className="size-6" />}
+        title="No packs in your vault yet"
+        description="Download packs from the registry or import a knowledge pack zip from your computer."
+        footnote={
+          hubOnline
+            ? undefined
+            : "The registry is unavailable while the Hub is offline."
+        }
+      >
         <div className="flex flex-wrap items-center justify-center gap-2">
           <Button
             size="sm"
@@ -58,12 +61,7 @@ export function InstalledTab({
             Import local .zip
           </Button>
         </div>
-        {!hubOnline && (
-          <p className="text-xs text-muted-foreground">
-            The registry is unavailable while the Hub is offline.
-          </p>
-        )}
-      </div>
+      </EmptyState>
     );
   }
 
@@ -82,14 +80,14 @@ export function InstalledTab({
           onRemove={() => onRemove(pack.pack_id)}
         />
       ))}
-      <button
-        type="button"
+      <Button
+        variant="outline"
         onClick={onOpenImport}
-        className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-border px-4 py-3 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="w-full border-dashed bg-transparent text-muted-foreground hover:text-foreground"
       >
         <FolderInput className="size-4" />
         Import another pack (.zip)…
-      </button>
+      </Button>
     </div>
   );
 }

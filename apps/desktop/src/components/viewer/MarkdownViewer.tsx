@@ -4,6 +4,7 @@ import { motion } from "motion/react";
 import { Fragment } from "react";
 import { api } from "@/lib/api";
 import { MarkdownBody } from "@/components/markdown/MarkdownBody";
+import { Badge } from "@/components/ui/badge";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -11,6 +12,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
+import { PanelHeader } from "@/components/ui/panel-header";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 export function MarkdownViewer({ path }: { path: string }) {
@@ -24,7 +26,15 @@ export function MarkdownViewer({ path }: { path: string }) {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex h-10 items-center justify-between border-b border-border px-4">
+      <PanelHeader
+        size="compact"
+        actions={
+          <Badge variant="muted">
+            <Lock className="size-3" />
+            Read-only
+          </Badge>
+        }
+      >
         <Breadcrumb className="min-w-0">
           <BreadcrumbList className="flex-nowrap">
             {segments.map((segment, i) => (
@@ -41,11 +51,7 @@ export function MarkdownViewer({ path }: { path: string }) {
             ))}
           </BreadcrumbList>
         </Breadcrumb>
-        <span className="ml-3 inline-flex shrink-0 items-center gap-1 rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
-          <Lock className="size-3" />
-          Read-only
-        </span>
-      </div>
+      </PanelHeader>
       <ScrollArea className="flex-1">
         <div className="max-w-3xl px-6 py-5">
           {isLoading && <p className="text-muted-foreground">Loading…</p>}

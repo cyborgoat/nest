@@ -8,6 +8,7 @@ import { ImportPackDialog } from "@/components/hub/ImportPackDialog";
 import { InstalledTab } from "@/components/hub/InstalledTab";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { PanelHeader } from "@/components/ui/panel-header";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
@@ -159,36 +160,31 @@ export function HubPanel() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="border-b border-border px-4 py-3">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="font-display text-xl">Knowledge Hub</h2>
-              {hubOnline && <Badge variant="accent">Online</Badge>}
-              {hubOffline && (
-                <Badge variant="destructive">
-                  <CloudOff className="size-3" />
-                  Offline
-                </Badge>
-              )}
-            </div>
-            <p className="text-sm text-muted-foreground">
-              Install versioned packs from the configured Knowledge Hub catalog
-              or import a pack zip. One active version per pack lives in your
-              vault.
-            </p>
-          </div>
+      <PanelHeader
+        title="Knowledge Hub"
+        description="Install versioned packs from the configured Knowledge Hub catalog or import a pack zip. One active version per pack lives in your vault."
+        badges={
+          <>
+            {hubOnline && <Badge variant="accent">Online</Badge>}
+            {hubOffline && (
+              <Badge variant="destructive">
+                <CloudOff className="size-3" />
+                Offline
+              </Badge>
+            )}
+          </>
+        }
+        actions={
           <Button
             size="sm"
             variant="outline"
-            className="shrink-0"
             onClick={() => setImportOpen(true)}
           >
             <FolderInput className="size-4" />
             Import
           </Button>
-        </div>
-      </div>
+        }
+      />
 
       <Tabs
         value={tab}

@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/accordion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { SectionLabel } from "@/components/ui/section-label";
 import {
   Tooltip,
   TooltipContent,
@@ -133,9 +134,9 @@ function TreeItem({
             <TooltipTrigger asChild>
               <Button
                 type="button"
-                size="icon"
+                size="icon-xs"
                 variant="ghost"
-                className="size-6 shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                className="shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
                 disabled={setActivePending}
                 aria-label={
                   packActive
@@ -235,14 +236,11 @@ function PackSection({
   if (!collapsible) {
     return (
       <section className="space-y-1">
-        <h3
-          className={cn(
-            "px-3 pt-2 text-[10px] font-semibold uppercase tracking-wide",
-            packActive ? "text-foreground/70" : "text-muted-foreground",
-          )}
+        <SectionLabel
+          className={cn("px-3 pt-2", packActive && "text-foreground/70")}
         >
           {title}
-        </h3>
+        </SectionLabel>
         {body}
       </section>
     );
@@ -256,7 +254,7 @@ function PackSection({
       onValueChange={onAccordionChange}
     >
       <AccordionItem value="inactive" className="border-b-0">
-        <AccordionTrigger className="px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground hover:no-underline">
+        <AccordionTrigger className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground hover:no-underline">
           <span>
             {title}
             <span className="ml-1.5 font-normal normal-case tracking-normal opacity-70">

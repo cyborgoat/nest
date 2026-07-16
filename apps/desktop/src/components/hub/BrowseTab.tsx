@@ -14,7 +14,15 @@ import { useEffect, useState } from "react";
 import { RemovePackButton } from "@/components/hub/RemovePackButton";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 export function BrowseTab({
   hubOffline,
@@ -47,42 +55,38 @@ export function BrowseTab({
 }) {
   if (hubOffline) {
     return (
-      <div className="space-y-4">
-        <section className="space-y-3 rounded-lg border border-dashed border-border bg-muted/40 px-4 py-5 text-center">
-          <CloudOff className="mx-auto size-6 text-muted-foreground" />
-          <h3 className="text-sm font-medium text-foreground">
-            Connect to the Knowledge Hub
-          </h3>
-          <div className="mx-auto grid max-w-lg gap-3 text-left sm:grid-cols-2">
-            <div className="space-y-1.5 rounded-md border border-border bg-card p-3">
-              <div className="flex items-center gap-1.5 text-sm font-medium">
-                <Globe className="size-4 text-primary" />
-                Browse the registry
-              </div>
-              <p className="text-sm text-muted-foreground">
-                Start the Hub service and check the Hub URL in Settings to
-                browse and download packs.
-              </p>
+      <EmptyState
+        variant="dashed"
+        icon={<CloudOff className="size-6" />}
+        title="Connect to the Knowledge Hub"
+        footnote="Packs already in your vault stay available in the Installed tab."
+      >
+        <div className="mx-auto grid max-w-lg gap-3 text-left sm:grid-cols-2">
+          <div className="space-y-1.5 rounded-md border border-border bg-card p-3">
+            <div className="flex items-center gap-1.5 text-sm font-medium">
+              <Globe className="size-4 text-primary" />
+              Browse the registry
             </div>
-            <div className="space-y-1.5 rounded-md border border-border bg-card p-3">
-              <div className="flex items-center gap-1.5 text-sm font-medium">
-                <FolderInput className="size-4 text-accent" />
-                Have a pack file?
-              </div>
-              <p className="text-sm text-muted-foreground">
-                No connection needed — import a knowledge pack zip directly.
-              </p>
-              <Button size="sm" variant="outline" onClick={onOpenImport}>
-                <FolderInput className="size-4" />
-                Import local .zip
-              </Button>
-            </div>
+            <p className="text-sm text-muted-foreground">
+              Start the Hub service and check the Hub URL in Settings to
+              browse and download packs.
+            </p>
           </div>
-          <p className="text-xs text-muted-foreground">
-            Packs already in your vault stay available in the Installed tab.
-          </p>
-        </section>
-      </div>
+          <div className="space-y-1.5 rounded-md border border-border bg-card p-3">
+            <div className="flex items-center gap-1.5 text-sm font-medium">
+              <FolderInput className="size-4 text-accent" />
+              Have a pack file?
+            </div>
+            <p className="text-sm text-muted-foreground">
+              No connection needed — import a knowledge pack zip directly.
+            </p>
+            <Button size="sm" variant="outline" onClick={onOpenImport}>
+              <FolderInput className="size-4" />
+              Import local .zip
+            </Button>
+          </div>
+        </div>
+      </EmptyState>
     );
   }
 
@@ -123,15 +127,16 @@ export function BrowseTab({
         </p>
       )}
       {packs?.length === 0 && (
-        <div className="space-y-3 rounded-lg border border-dashed border-border bg-muted/40 px-4 py-5 text-center">
-          <p className="text-sm text-muted-foreground">
-            The registry has no packs available yet.
-          </p>
+        <EmptyState
+          variant="dashed"
+          icon={<Package className="size-6" />}
+          title="The registry has no packs available yet"
+        >
           <Button size="sm" variant="outline" onClick={onOpenImport}>
             <FolderInput className="size-4" />
             Import local .zip
           </Button>
-        </div>
+        </EmptyState>
       )}
     </div>
   );
@@ -194,22 +199,26 @@ function PackRow({
           {project.description}
         </p>
         {versions.length > 1 && (
-          <label className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+          <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
             Version
-            <select
-              className="h-8 rounded-md border border-border bg-card px-2 text-sm text-foreground"
+            <Select
               value={selectedVersion}
-              onChange={(e) => setSelectedVersion(e.target.value)}
+              onValueChange={setSelectedVersion}
               disabled={busy}
             >
-              {versions.map((v) => (
-                <option key={v} value={v}>
-                  {v}
-                  {v === project.latest_version ? " (latest)" : ""}
-                </option>
-              ))}
-            </select>
-          </label>
+              <SelectTrigger aria-label="Version">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {versions.map((v) => (
+                  <SelectItem key={v} value={v}>
+                    {v}
+                    {v === project.latest_version ? " (latest)" : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         )}
       </div>
       <div className="relative flex shrink-0 items-center gap-2">

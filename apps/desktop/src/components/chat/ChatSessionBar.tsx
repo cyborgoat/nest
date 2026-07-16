@@ -10,9 +10,8 @@ import {
   PinOff,
   Plus,
   Trash2,
-  X,
 } from "lucide-react";
-import { useMemo, useState, type MouseEvent } from "react";
+import { useMemo, useState } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -23,7 +22,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -33,6 +32,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { TabStrip } from "@/components/ui/tab-strip";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useUiStore } from "@/stores/ui";
@@ -106,86 +106,49 @@ export function ChatSessionBar({ sessions, onResetChatUi }: Props) {
     onResetChatUi();
   };
 
-  const closeTab = (e: MouseEvent, sessionId: string) => {
-    e.stopPropagation();
-    closeChatTab(sessionId);
-    onResetChatUi();
-  };
-
   return (
     <>
-      <div className="flex h-10 items-stretch gap-1 border-b border-border px-1.5">
-        <div className="tab-scroll flex min-w-0 flex-1 items-stretch gap-0.5 overflow-x-auto">
-          {openSessions.map((session) => {
-            const active = session.id === chatSessionId;
-            return (
-              <button
-                key={session.id}
-                type="button"
-                onClick={() => selectSession(session)}
-                className={cn(
-                  "group relative flex max-w-40 shrink-0 items-center gap-1 px-2.5 text-xs transition-colors",
-                  active
-                    ? "text-foreground"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
-                title={session.title}
-              >
-                {session.pinned && (
-                  <Pin className="size-2.5 shrink-0 text-accent" />
-                )}
-                <span className="truncate">{session.title}</span>
-                <span
-                  role="button"
-                  tabIndex={0}
-                  onClick={(e) => closeTab(e, session.id)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      closeChatTab(session.id);
-                      onResetChatUi();
-                    }
-                  }}
-                  className="rounded p-0.5 opacity-0 hover:bg-muted group-hover:opacity-100"
-                  aria-label={`Close ${session.title}`}
+      <TabStrip
+        items={openSessions.map((session) => ({
+          id: session.id,
+          label: session.title,
+          icon: session.pinned ? (
+            <Pin className="size-2.5 shrink-0 text-accent" />
+          ) : undefined,
+        }))}
+        activeId={chatSessionId}
+        onSelect={(id) => {
+          const session = byId.get(id);
+          if (session) selectSession(session);
+        }}
+        onClose={(id) => {
+          closeChatTab(id);
+          onResetChatUi();
+        }}
+        emptyLabel="No open chats"
+        trailing={
+          <>
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              aria-label="New chat"
+              onClick={() => void newChat()}
+            >
+              <Plus className="size-4" />
+            </Button>
+
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  aria-label="Chat history"
                 >
-                  <X className="size-3" />
-                </span>
-                {active && (
-                  <span className="absolute inset-x-0 -bottom-px h-0.5 bg-primary" />
-                )}
-              </button>
-            );
-          })}
-          {openSessions.length === 0 && (
-            <span className="flex items-center px-2 text-xs text-muted-foreground">
-              No open chats
-            </span>
-          )}
-        </div>
-
-        <div className="flex shrink-0 items-center gap-0.5">
-          <Button
-            type="button"
-            size="icon"
-            variant="ghost"
-            aria-label="New chat"
-            onClick={() => void newChat()}
-          >
-            <Plus className="size-4" />
-          </Button>
-
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                type="button"
-                size="icon"
-                variant="ghost"
-                aria-label="Chat history"
-              >
-                <Clock className="size-4" />
-              </Button>
-            </DropdownMenuTrigger>
+                  <Clock className="size-4" />
+                </Button>
+              </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-72">
               <DropdownMenuLabel>History</DropdownMenuLabel>
               <DropdownMenuSeparator />
@@ -253,9 +216,10 @@ export function ChatSessionBar({ sessions, onResetChatUi }: Props) {
                 </>
               )}
             </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      </div>
+            </DropdownMenu>
+          </>
+        }
+      />
 
       <AlertDialog
         open={!!renameTarget}
@@ -319,7 +283,7 @@ export function ChatSessionBar({ sessions, onResetChatUi }: Props) {
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              className={cn("bg-destructive text-white hover:bg-destructive/90")}
+              className={cn(buttonVariants({ variant: "destructive" }))}
               onClick={() => {
                 if (!deleteTarget) return;
                 remove.mutate(deleteTarget.id);
@@ -371,9 +335,9 @@ function HistoryRow({
         <DropdownMenuTrigger asChild>
           <Button
             type="button"
-            size="icon"
+            size="icon-sm"
             variant="ghost"
-            className="size-7 shrink-0"
+            className="shrink-0"
             aria-label="Session actions"
             onClick={(e) => e.stopPropagation()}
           >

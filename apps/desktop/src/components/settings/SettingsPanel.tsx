@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PanelHeader } from "@/components/ui/panel-header";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { api } from "@/lib/api";
 
@@ -118,16 +119,13 @@ export function SettingsPanel() {
   const usingDefaultKnowledge = !form.knowledge_dir.trim();
 
   return (
-    <ScrollArea className="h-full">
-      <div className="mx-auto max-w-2xl space-y-8 px-8 py-6">
-        <div>
-          <h2 className="font-display text-xl">Settings</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Changes save automatically. Connection problems show up when you
-            chat or open the Hub.
-          </p>
-        </div>
-
+    <div className="flex h-full flex-col">
+      <PanelHeader
+        title="Settings"
+        description="Changes save automatically. Connection problems show up when you chat or open the Hub."
+      />
+      <ScrollArea className="min-h-0 flex-1">
+        <div className="mx-auto max-w-2xl space-y-6 px-6 py-5">
         <SettingsSection
           icon={User}
           title="Personal"
@@ -169,7 +167,6 @@ export function SettingsPanel() {
                   type="button"
                   variant="ghost"
                   size="sm"
-                  className="h-7 px-2 text-xs"
                   onClick={() => update("knowledge_dir", "")}
                 >
                   Reset to default
@@ -219,8 +216,9 @@ export function SettingsPanel() {
             />
           </Field>
         </SettingsSection>
-      </div>
-    </ScrollArea>
+        </div>
+      </ScrollArea>
+    </div>
   );
 }
 
@@ -246,7 +244,7 @@ function SettingsSection({
           <p className="mt-1 text-xs text-muted-foreground">{description}</p>
         ) : null}
       </div>
-      <div className="space-y-4 rounded-lg bg-card p-5">
+      <div className="space-y-4 rounded-lg border border-border bg-card p-4">
         {children}
       </div>
     </section>

@@ -32,8 +32,8 @@ export function AgentStatusIndicator({ activity }: { activity: AgentActivity }) 
         spread={3}
         className={
           isGenerating
-            ? "text-sm font-medium [--base-color:#8aa0ad] [--base-gradient-color:#0d6e6e]"
-            : "text-xs font-medium [--base-color:#8aa0ad] [--base-gradient-color:#0d6e6e]"
+            ? "text-sm font-medium [--base-color:var(--shimmer-base)] [--base-gradient-color:var(--color-primary)]"
+            : "text-xs font-medium [--base-color:var(--shimmer-base)] [--base-gradient-color:var(--color-primary)]"
         }
       >
         {labelFor(activity)}

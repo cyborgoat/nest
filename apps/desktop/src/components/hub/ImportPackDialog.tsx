@@ -167,7 +167,7 @@ export function ImportPackDialog({
             onClick={() => void pickZip()}
             disabled={importing}
             className={cn(
-              "flex w-full min-w-0 flex-col items-center justify-center gap-2 rounded-md border border-dashed px-4 py-8 text-center transition-colors",
+              "flex w-full min-w-0 flex-col items-center justify-center gap-2 rounded-lg border border-dashed px-4 py-8 text-center transition-colors",
               dragging
                 ? "border-primary bg-primary/5 text-foreground"
                 : "border-border bg-card text-muted-foreground hover:border-primary/50 hover:text-foreground",

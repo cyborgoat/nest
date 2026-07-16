@@ -7,8 +7,8 @@ export const badgeVariants = cva(
   {
     variants: {
       variant: {
-        accent: "bg-accent/15 text-accent",
-        destructive: "bg-destructive/15 text-destructive",
+        accent: "bg-accent/15 text-accent-text",
+        destructive: "bg-destructive/10 text-destructive",
         muted: "bg-muted text-muted-foreground",
         outline: "border border-border text-muted-foreground",
       },

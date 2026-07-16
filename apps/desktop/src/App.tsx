@@ -167,7 +167,6 @@ export default function App() {
           <Button
             size="icon"
             variant={sidebarOpen ? "secondary" : "ghost"}
-            className="size-8"
             onClick={handleToggleSidebar}
             title={sidebarOpen ? "Collapse library" : "Expand library"}
             aria-label={sidebarOpen ? "Collapse library" : "Expand library"}
@@ -202,15 +201,13 @@ export default function App() {
             label="Settings"
           />
           <Separator orientation="vertical" className="mx-1 h-6" />
-          <Button
-            size="sm"
-            variant={chatOpen ? "secondary" : "ghost"}
+          <NavButton
+            active={chatOpen}
             onClick={handleToggleChat}
+            icon={<MessageSquare className="size-4" />}
+            label="Chat"
             title={chatOpen ? "Collapse chat" : "Expand chat"}
-          >
-            <MessageSquare className="size-4" />
-            Chat
-          </Button>
+          />
         </nav>
       </header>
 
@@ -322,7 +319,7 @@ export default function App() {
         <span className="truncate pl-4">{statusMessage ?? "Ready"}</span>
       </footer>
 
-      <Toaster position="bottom-right" richColors closeButton />
+      <Toaster position="bottom-right" closeButton />
     </div>
   );
 }
@@ -332,18 +329,20 @@ function NavButton({
   onClick,
   icon,
   label,
+  title,
 }: {
   active: boolean;
   onClick: () => void;
   icon: ReactNode;
   label: string;
+  title?: string;
 }) {
   return (
     <Button
       size="sm"
       variant={active ? "secondary" : "ghost"}
       onClick={onClick}
-      className={cn(active && "bg-muted")}
+      title={title}
     >
       {icon}
       {label}

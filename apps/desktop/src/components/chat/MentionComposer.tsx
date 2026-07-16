@@ -184,8 +184,8 @@ export function MentionComposer({
           onKeyDown={onKeyDown}
         />
         <Button
-          size="icon"
-          className="absolute right-2 bottom-2 size-7"
+          size="icon-sm"
+          className="absolute right-2 bottom-2"
           disabled={!hasContent || !canSend || disabled}
           onClick={trySend}
           aria-label="Send"

@@ -1,24 +1,83 @@
 @import "tailwindcss";
 
-@theme {
+/*
+  Design tokens — "warm paper" palette anchored to the nest logo
+  (umber / copper / tan twigs).
+
+  Semantic roles:
+  - primary (copper)      = interaction: CTAs, active tab underline, file
+                            icons, markdown links, focus ring, selected tint
+  - accent (moss)         = status & wayfinding: Online/Update badges,
+                            pinned pin, folder icons, syntax strings
+  - destructive (terra)   = destructive actions and errors
+
+  Spacing canon: panel scroll bodies use p-4; reading-width bodies use
+  mx-auto max-w-2xl px-6 py-5. Button sizes: hero/dialog CTAs = default,
+  in-row/toolbar actions = sm, icon buttons = icon / icon-sm / icon-xs.
+
+  Raw values live on :root so a future `.dark { ... }` block can override
+  them; the @theme inline block below maps them into Tailwind utilities.
+*/
+:root {
+  /* surfaces */
+  --background: #f4efe7;
+  --card: #fbf8f4;
+  --panel: #f6f1e8;
+  --sidebar: #ece4d6;
+  --muted: #eae2d3;
+  /* ink */
+  --foreground: #2b2118;
+  --muted-foreground: #6f6152;
+  --border: #ded2bf;
+  /* brand */
+  --primary: #8f6339; /* AA floor for label/link contrast — adjust saturation, not lightness */
+  --primary-foreground: #fdf9f3;
+  --accent: #4f6e54;
+  --accent-foreground: #f6f3ea;
+  --accent-text: #3f5a44; /* moss for small text on tints */
+  --destructive: #b3402a;
+  --destructive-foreground: #fdf6f2;
+  --ring: var(--primary);
+  --overlay: rgb(43 33 24 / 0.45); /* umber dialog scrim (alpha baked in — use bg-overlay) */
+  --radius: 0.5rem;
+  /* markdown syntax highlighting */
+  --syntax-keyword: #7d5430;
+  --syntax-string: #4f6e54;
+  --syntax-number: #8f6339;
+  --syntax-comment: #6f6152;
+  --syntax-title: #2b2118;
+  --syntax-variable: #b3402a;
+  /* agent-status shimmer */
+  --shimmer-base: #a89a87;
+}
+/* future: .dark { --background: ...; } */
+
+@theme inline {
   --font-sans: "Source Sans 3", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
   --font-display: "Source Serif 4", "Georgia", serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
 
-  --color-background: #eef2f4;
-  --color-foreground: #152028;
-  --color-muted: #e2e8ec;
-  --color-muted-foreground: #556270;
-  --color-card: #f7f9fa;
-  --color-border: #cfd8de;
-  --color-primary: #0d6e6e;
-  --color-primary-foreground: #f2fffe;
-  --color-accent: #2457a6;
-  --color-accent-foreground: #f4f7ff;
-  --color-destructive: #b42318;
-  --color-ring: #0d6e6e;
-  --color-sidebar: #e4eaee;
-  --color-panel: #f4f7f8;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-card: var(--card);
+  --color-border: var(--border);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent-text: var(--accent-text);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-ring: var(--ring);
+  --color-overlay: var(--overlay);
+  --color-sidebar: var(--sidebar);
+  --color-panel: var(--panel);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
 
   --animate-accordion-down: accordion-down 0.22s ease-out;
   --animate-accordion-up: accordion-up 0.2s ease-out;
@@ -56,8 +115,16 @@
   body {
     @apply bg-background text-foreground font-sans antialiased;
     background-image:
-      linear-gradient(180deg, rgba(13, 110, 110, 0.06), transparent 28%),
-      linear-gradient(120deg, rgba(36, 87, 166, 0.04), transparent 40%);
+      linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--primary) 5%, transparent),
+        transparent 28%
+      ),
+      linear-gradient(
+        120deg,
+        color-mix(in srgb, var(--accent) 4%, transparent),
+        transparent 40%
+      );
   }
 }
 
@@ -137,36 +204,36 @@
 .markdown-body .hljs-selector-tag,
 .markdown-body .hljs-literal,
 .markdown-body .hljs-operator {
-  color: var(--color-accent);
+  color: var(--syntax-keyword);
 }
 
 .markdown-body .hljs-string,
 .markdown-body .hljs-attr,
 .markdown-body .hljs-regexp {
-  color: #3f7d4f;
+  color: var(--syntax-string);
 }
 
 .markdown-body .hljs-comment,
 .markdown-body .hljs-quote {
-  color: var(--color-muted-foreground);
+  color: var(--syntax-comment);
   font-style: italic;
 }
 
 .markdown-body .hljs-number {
-  color: var(--color-primary);
+  color: var(--syntax-number);
 }
 
 .markdown-body .hljs-title,
 .markdown-body .hljs-name,
 .markdown-body .hljs-section {
-  color: var(--color-foreground);
+  color: var(--syntax-title);
   font-weight: 600;
 }
 
 .markdown-body .hljs-variable,
 .markdown-body .hljs-template-variable,
 .markdown-body .hljs-type {
-  color: var(--color-destructive);
+  color: var(--syntax-variable);
 }
 
 .markdown-body img {
