@@ -45,6 +45,25 @@ cd apps/desktop/src-tauri && cargo check && cargo test
 cd apps/hub && npm run build
 ```
 
+## Releases
+
+`.github/workflows/release.yml` builds unsigned installers — macOS `.dmg` (Apple Silicon + Intel) and Windows `.msi`/NSIS `.exe` — and attaches them to a **draft** GitHub Release.
+
+To cut a release:
+
+1. Bump the version in all three files (they must match, the workflow fails otherwise):
+   - `apps/desktop/src-tauri/tauri.conf.json`
+   - `apps/desktop/package.json`
+   - `apps/desktop/src-tauri/Cargo.toml`
+2. Push to `main`. The workflow creates draft release `v{version}` and uploads the installers.
+3. Review the draft on GitHub and **Publish** it (publishing creates the `v{version}` tag).
+
+Notes:
+
+- The gate job skips (without failing) when `v{version}` is already tagged or has a release, so repeated pushes of the same version are no-ops.
+- The workflow can also be run manually from **Actions → Release → Run workflow** for testing.
+- Builds are unsigned: macOS users need right-click → Open (or `xattr -dr com.apple.quarantine`) on first launch; Windows shows a SmartScreen prompt.
+
 ## Fixtures
 
 `fixtures/knowledge` is a PyPI-style registry: `{pack-id}/{semver}/pack.json`. The Hub discovers releases by scanning those folders and serves ZIP downloads (`{id}-{version}.zip`). Validate with:

@@ -27,7 +27,7 @@ npm run tauri dev
 
 ### First-run tips
 
-1. Start the Knowledge Hub (`apps/hub`), then open **Hub** in the desktop app and download a pack — or use **Import** to add a local pack `.zip` (must include `pack.json`). Indexing runs automatically after download, import, and remove.
+1. Start the Knowledge Hub (`apps/hub`), then open **Hub** in the desktop app. The **Browse** tab lists the remote registry for download; the **Installed** tab manages everything in your vault (upgrade/remove, with origin badges). Use **Import** to add a local pack `.zip` (must include `pack.json`). Indexing runs automatically after download, import, and remove.
 2. Configure an OpenAI-compatible **Base URL**, **API key**, and chat model under **Settings**.
 3. In **Library**, keep packs **Active** for chat retrieval (use **+/−** to deactivate). Inactive packs stay browsable under a collapsible section.
 4. In **Chat**, ask questions over all active packs, or `@`-mention files/folders under active packs to narrow focus.
@@ -53,12 +53,16 @@ npm run start:dev
 | GET | `/packs/:id/download` | Latest ZIP |
 | GET | `/packs/:id/:version/download` | Pinned ZIP |
 
+## Releases
+
+Desktop installers (macOS `.dmg` for Apple Silicon + Intel, Windows `.msi`/`.exe`) are built by GitHub Actions. Bumping the app version in `apps/desktop` (all three of `src-tauri/tauri.conf.json`, `package.json`, `src-tauri/Cargo.toml`) and pushing to `main` creates a **draft** GitHub Release `v{version}` with the installers attached — review and publish it manually. See [Development → Releases](docs/development.md#releases).
+
 ## Documentation
 
 - [Architecture](docs/architecture.md) — vault, RAG, streaming
 - [Pack registry](docs/pack-registry.md) — PyPI-style multi-version Hub
 - [Chat sessions](docs/chat-sessions.md) — tabs, history, titles
-- [Development](docs/development.md) — env vars and sanity checks
+- [Development](docs/development.md) — env vars, sanity checks, releases
 
 ## Design notes
 

@@ -1,0 +1,124 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/desktop/src-tauri/tauri.conf.json"
+      - "apps/desktop/package.json"
+      - "apps/desktop/src-tauri/Cargo.toml"
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      should_release: ${{ steps.gate.outputs.should_release }}
+      release_id: ${{ steps.release.outputs.release_id }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version and verify version files agree
+        id: version
+        run: |
+          TAURI_V=$(jq -r .version apps/desktop/src-tauri/tauri.conf.json)
+          PKG_V=$(jq -r .version apps/desktop/package.json)
+          CARGO_V=$(grep -m1 '^version' apps/desktop/src-tauri/Cargo.toml | sed 's/version *= *"\(.*\)"/\1/')
+          if [ "$TAURI_V" != "$PKG_V" ] || [ "$TAURI_V" != "$CARGO_V" ]; then
+            echo "::error::Version mismatch: tauri.conf.json=$TAURI_V, package.json=$PKG_V, Cargo.toml=$CARGO_V. All three must match."
+            exit 1
+          fi
+          echo "version=$TAURI_V" >> "$GITHUB_OUTPUT"
+
+      - name: Check whether this version is already tagged or released
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="v${{ steps.version.outputs.version }}"
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" > /dev/null; then
+            echo "Tag $TAG already exists — skipping release."
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+          elif gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "Release $TAG already exists (possibly an unpublished draft) — skipping."
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create draft release
+        id: release
+        if: steps.gate.outputs.should_release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="v${{ steps.version.outputs.version }}"
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --draft \
+            --title "Nest $TAG" \
+            --target "$GITHUB_SHA" \
+            --notes "Unsigned builds. macOS: right-click > Open (or run \`xattr -dr com.apple.quarantine /Applications/Nest.app\`) on first launch. Windows: choose \"More info\" > \"Run anyway\" on the SmartScreen prompt."
+          RELEASE_ID=$(gh api "repos/$GITHUB_REPOSITORY/releases" \
+            --jq "[.[] | select(.tag_name == \"$TAG\" and .draft)][0].id")
+          echo "release_id=$RELEASE_ID" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: gate
+    if: needs.gate.outputs.should_release == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS (Apple Silicon)
+            runner: macos-latest
+            rust_target: aarch64-apple-darwin
+            args: --target aarch64-apple-darwin --bundles dmg
+          - name: macOS (Intel)
+            runner: macos-latest
+            rust_target: x86_64-apple-darwin
+            args: --target x86_64-apple-darwin --bundles dmg
+          - name: Windows (x64)
+            runner: windows-latest
+            rust_target: x86_64-pc-windows-msvc
+            args: --bundles msi,nsis
+    runs-on: ${{ matrix.runner }}
+    name: Build ${{ matrix.name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+          key: ${{ matrix.rust_target }}
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: apps/desktop
+
+      - name: Build installers and upload to draft release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: apps/desktop
+          releaseId: ${{ needs.gate.outputs.release_id }}
+          args: ${{ matrix.args }}
