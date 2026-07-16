@@ -29,7 +29,7 @@ impl Default for AppSettings {
             llm_api_key: String::new(),
             chat_model: "gpt-4o-mini".into(),
             embedding_model: crate::embeddings::DEFAULT_EMBEDDING_MODEL.into(),
-            hub_base_url: "http://127.0.0.1:8787".into(),
+            hub_base_url: String::new(),
             user_name: String::new(),
             knowledge_dir: String::new(),
             resolved_knowledge_dir: String::new(),

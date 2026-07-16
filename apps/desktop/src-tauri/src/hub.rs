@@ -34,6 +34,11 @@ pub struct PackProject {
 }
 
 pub async fn list_packs_remote(hub_base_url: &str) -> AppResult<Vec<PackProject>> {
+    if hub_base_url.trim().is_empty() {
+        return Err(AppError::msg(
+            "Knowledge Hub URL is not configured. Set it in Settings.",
+        ));
+    }
     let url = format!("{}/packs", hub_base_url.trim_end_matches('/'));
     let client = hub_http_client(hub_base_url)?;
     let resp = client
@@ -60,6 +65,13 @@ pub struct HubConnectionStatus {
 /// Probe `{hub}/health`. Used for the Hub panel online/offline indicator.
 pub async fn check_hub_status(hub_base_url: &str) -> HubConnectionStatus {
     let base = hub_base_url.trim_end_matches('/').to_string();
+    if base.is_empty() {
+        return HubConnectionStatus {
+            online: false,
+            hub_base_url: base,
+            message: Some("Knowledge Hub URL is not configured.".into()),
+        };
+    }
     let url = format!("{base}/health");
     let client = match hub_http_client(hub_base_url) {
         Ok(client) => client,
@@ -100,6 +112,11 @@ pub async fn download_pack_remote(
     version: Option<&str>,
     vault_root: &Path,
 ) -> AppResult<PackMeta> {
+    if hub_base_url.trim().is_empty() {
+        return Err(AppError::msg(
+            "Knowledge Hub URL is not configured. Set it in Settings.",
+        ));
+    }
     let base = hub_base_url.trim_end_matches('/');
     let url = match version {
         Some(v) => format!("{base}/packs/{pack_id}/{v}/download"),

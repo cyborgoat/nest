@@ -41,12 +41,17 @@ pub fn settings_get(state: State<'_, SharedState>) -> AppResult<AppSettings> {
 }
 
 #[tauri::command]
-pub fn settings_set(state: State<'_, SharedState>, mut settings: AppSettings) -> AppResult<()> {
+pub async fn settings_set(
+    state: State<'_, SharedState>,
+    mut settings: AppSettings,
+) -> AppResult<()> {
     // Embedding model is fixed locally — not user-configurable.
     settings.embedding_model = embeddings::DEFAULT_EMBEDDING_MODEL.into();
     settings.knowledge_dir = settings.knowledge_dir.trim().to_string();
     settings.hub_base_url = settings.hub_base_url.trim().trim_end_matches('/').to_string();
-    validate_http_base_url("Hub base URL", &settings.hub_base_url)?;
+    if !settings.hub_base_url.is_empty() {
+        validate_http_base_url("Hub base URL", &settings.hub_base_url)?;
+    }
 
     let resolved = crate::state::resolve_knowledge_dir(
         &state.app_data_dir,
@@ -57,17 +62,28 @@ pub fn settings_set(state: State<'_, SharedState>, mut settings: AppSettings) ->
             "Knowledge directory must be an absolute path (or leave empty for the default)",
         ));
     }
+
+    // Detect a directory switch before overwriting the in-memory vault path,
+    // so we know whether to trigger the same auto-reindex pack actions get.
+    let vault_changed = resolved != state.vault_path();
+
     state.set_vault_path(resolved.clone())?;
     settings.resolved_knowledge_dir = resolved.display().to_string();
 
-    let conn = state.db.lock();
-    db::save_settings(&conn, &settings)
+    {
+        let conn = state.db.lock();
+        db::save_settings(&conn, &settings)?;
+    }
+
+    if vault_changed {
+        index_rebuild(state).await?;
+    }
+
+    Ok(())
 }
 
+/// Only called with a non-empty value — hub_base_url is optional overall.
 fn validate_http_base_url(label: &str, value: &str) -> AppResult<()> {
-    if value.is_empty() {
-        return Err(AppError::msg(format!("{label} is required")));
-    }
     let url = reqwest::Url::parse(value)
         .map_err(|e| AppError::msg(format!("{label} is invalid: {e}")))?;
     if !matches!(url.scheme(), "http" | "https") {

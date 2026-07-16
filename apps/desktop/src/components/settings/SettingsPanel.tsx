@@ -1,12 +1,10 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { AppSettings } from "@nest/shared";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
   Bot,
   Cloud,
-  Database,
   FolderOpen,
-  RefreshCw,
   User,
   type LucideIcon,
 } from "lucide-react";
@@ -17,7 +15,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { api } from "@/lib/api";
-import { cn } from "@/lib/utils";
 
 /** Matches backend default; not shown in UI — always forced on save. */
 const DEFAULT_EMBEDDING_MODEL = "AllMiniLML6V2Q";
@@ -27,7 +24,7 @@ const EMPTY: AppSettings = {
   llm_api_key: "",
   chat_model: "gpt-4o-mini",
   embedding_model: DEFAULT_EMBEDDING_MODEL,
-  hub_base_url: "http://127.0.0.1:8787",
+  hub_base_url: "",
   user_name: "",
   knowledge_dir: "",
   resolved_knowledge_dir: "",
@@ -52,12 +49,6 @@ export function SettingsPanel() {
   const settingsQuery = useQuery({
     queryKey: ["settings"],
     queryFn: api.settingsGet,
-  });
-
-  const indexQuery = useQuery({
-    queryKey: ["index-status"],
-    queryFn: api.indexStatus,
-    refetchInterval: (q) => (q.state.data?.is_indexing ? 1000 : false),
   });
 
   useEffect(() => {
@@ -99,18 +90,6 @@ export function SettingsPanel() {
 
     return () => window.clearTimeout(timer);
   }, [form, queryClient]);
-
-  const reindex = useMutation({
-    mutationFn: () => api.indexRebuild(),
-    onSuccess: (status) => {
-      void queryClient.invalidateQueries({ queryKey: ["index-status"] });
-      toast.success("Index rebuilt", {
-        description: `${status.indexed_files} files · ${status.indexed_chunks} chunks`,
-      });
-    },
-    onError: (e: Error) =>
-      toast.error("Re-index failed", { description: e.message }),
-  });
 
   const update = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) =>
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -183,7 +162,7 @@ export function SettingsPanel() {
               <p className="text-xs text-muted-foreground">
                 {usingDefaultKnowledge
                   ? "Using the app default vault folder."
-                  : "Using a custom folder. Re-index after switching."}
+                  : "Using a custom folder. Re-indexes automatically."}
               </p>
               {!usingDefaultKnowledge && (
                 <Button
@@ -236,55 +215,9 @@ export function SettingsPanel() {
             <Input
               value={form.hub_base_url}
               onChange={(e) => update("hub_base_url", e.target.value)}
+              placeholder="http://127.0.0.1:8787"
             />
           </Field>
-          <p className="text-xs text-muted-foreground">
-            Default is{" "}
-            <span className="font-mono">http://127.0.0.1:8787</span>.
-          </p>
-        </SettingsSection>
-
-        <SettingsSection
-          icon={Database}
-          title="Local index"
-          description={`Hybrid FTS + FastEmbed (${DEFAULT_EMBEDDING_MODEL}). Auto-rebuilds on pack download, import, and remove.`}
-        >
-          <div className="rounded-md border border-border bg-panel p-3 text-sm">
-            <div className="flex items-center gap-2">
-              <Database className="size-4 text-primary" />
-              <span>
-                {indexQuery.data?.indexed_files ?? 0} files ·{" "}
-                {indexQuery.data?.indexed_chunks ?? 0} chunks
-              </span>
-            </div>
-            {indexQuery.data?.message && (
-              <p className="mt-1 text-xs text-muted-foreground">
-                {indexQuery.data.message}
-              </p>
-            )}
-            {indexQuery.data?.is_indexing && (
-              <p className="mt-1 text-xs text-accent">Indexing in progress…</p>
-            )}
-          </div>
-          <Button
-            type="button"
-            variant="outline"
-            disabled={
-              reindex.isPending || indexQuery.data?.is_indexing === true
-            }
-            onClick={() => reindex.mutate()}
-          >
-            <RefreshCw
-              className={cn(
-                "size-4",
-                (reindex.isPending || indexQuery.data?.is_indexing) &&
-                  "animate-spin",
-              )}
-            />
-            {reindex.isPending || indexQuery.data?.is_indexing
-              ? "Re-indexing…"
-              : "Re-index library"}
-          </Button>
         </SettingsSection>
       </div>
     </ScrollArea>

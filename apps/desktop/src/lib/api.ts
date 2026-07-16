@@ -21,7 +21,6 @@ export const api = {
     invoke<void>("settings_set", { settings }),
 
   indexStatus: () => invoke<IndexStatus>("index_status"),
-  indexRebuild: () => invoke<IndexStatus>("index_rebuild"),
 
   chatCreateSession: (title?: string) =>
     invoke<ChatSession>("chat_create_session", { title: title ?? null }),
