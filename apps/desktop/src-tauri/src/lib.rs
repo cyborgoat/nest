@@ -11,6 +11,7 @@ mod memory;
 mod retrieval;
 mod state;
 mod title;
+mod tray;
 mod vault;
 mod vector_store;
 
@@ -33,6 +34,7 @@ pub fn run() {
             nest_debug!("app", "app_data_dir={}", app_data.display());
             let state = AppState::new(app_data)?;
             app.manage(Arc::new(state) as SharedState);
+            tray::setup_tray(app.handle())?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

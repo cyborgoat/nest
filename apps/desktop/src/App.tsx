@@ -169,9 +169,12 @@ export default function App() {
             </Button>
           )}
           <div className="flex items-center gap-3">
-            <div className="flex size-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
-              <BookMarked className="size-4" />
-            </div>
+            <img
+              src="/nest-logo-transparent.png"
+              alt=""
+              className="size-8 object-contain"
+              draggable={false}
+            />
             <div>
               <h1 className="font-display text-lg leading-none tracking-tight">Nest</h1>
               <p className="text-[11px] text-muted-foreground">Knowledge workspace</p>
