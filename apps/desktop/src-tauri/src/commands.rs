@@ -25,6 +25,12 @@ pub fn vault_read_file(state: State<'_, SharedState>, path: String) -> AppResult
 }
 
 #[tauri::command]
+pub fn vault_read_image(state: State<'_, SharedState>, path: String) -> AppResult<String> {
+    let vault = state.vault_path();
+    vault::read_image_data_url(&vault, &path)
+}
+
+#[tauri::command]
 pub fn settings_get(state: State<'_, SharedState>) -> AppResult<AppSettings> {
     let mut settings = {
         let conn = state.db.lock();

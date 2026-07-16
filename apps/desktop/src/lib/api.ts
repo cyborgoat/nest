@@ -14,6 +14,7 @@ import type {
 export const api = {
   vaultListTree: () => invoke<TreeNode[]>("vault_list_tree"),
   vaultReadFile: (path: string) => invoke<string>("vault_read_file", { path }),
+  vaultReadImage: (path: string) => invoke<string>("vault_read_image", { path }),
 
   settingsGet: () => invoke<AppSettings>("settings_get"),
   settingsSet: (settings: AppSettings) =>

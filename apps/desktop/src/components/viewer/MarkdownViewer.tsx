@@ -85,6 +85,7 @@ export function MarkdownViewer() {
   }
 
   const segments = selectedPath.split("/").filter(Boolean);
+  const basePath = segments.slice(0, -1).join("/");
 
   return (
     <div className="flex h-full flex-col">
@@ -125,7 +126,7 @@ export function MarkdownViewer() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.2 }}
             >
-              <MarkdownBody>{data}</MarkdownBody>
+              <MarkdownBody basePath={basePath}>{data}</MarkdownBody>
             </motion.div>
           )}
         </div>

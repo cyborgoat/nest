@@ -1,7 +1,11 @@
 use crate::error::{AppError, AppResult};
+use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
+
+/// Images larger than this are rejected rather than serialized whole over IPC.
+const MAX_IMAGE_BYTES: u64 = 10 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -93,6 +97,41 @@ pub fn read_file(root: &Path, rel_path: &str) -> AppResult<String> {
         )));
     }
     Ok(fs::read_to_string(path)?)
+}
+
+fn image_mime_type(path: &Path) -> Option<&'static str> {
+    let ext = path.extension()?.to_str()?.to_ascii_lowercase();
+    Some(match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        "bmp" => "image/bmp",
+        _ => return None,
+    })
+}
+
+/// Read an image from the vault and return it as a `data:` URL, for inline
+/// rendering in markdown — never serves files outside the known image types.
+pub fn read_image_data_url(root: &Path, rel_path: &str) -> AppResult<String> {
+    let path = resolve_vault_path(root, rel_path)?;
+    if !path.is_file() {
+        return Err(AppError::msg(format!(
+            "This image is no longer in your library (removed or missing): {rel_path}"
+        )));
+    }
+    let mime = image_mime_type(&path)
+        .ok_or_else(|| AppError::msg(format!("Unsupported image type: {rel_path}")))?;
+    let size = fs::metadata(&path)?.len();
+    if size > MAX_IMAGE_BYTES {
+        return Err(AppError::msg(format!(
+            "Image is too large to display ({rel_path})"
+        )));
+    }
+    let bytes = fs::read(&path)?;
+    let encoded = general_purpose::STANDARD.encode(bytes);
+    Ok(format!("data:{mime};base64,{encoded}"))
 }
 
 /// Resolve a relative vault path and reject path traversal.
@@ -251,5 +290,32 @@ mod tests {
         prune_empty_dirs(&dir).unwrap();
         assert!(!dir.join("empty-pack").exists());
         assert!(dir.is_dir());
+    }
+
+    #[test]
+    fn read_image_data_url_encodes_known_image_types() {
+        let dir = env::temp_dir().join("nest-vault-image-ok");
+        let _ = fs::remove_dir_all(&dir);
+        ensure_dir(&dir).unwrap();
+        fs::write(dir.join("pic.png"), [1, 2, 3, 4]).unwrap();
+        let url = read_image_data_url(&dir, "pic.png").unwrap();
+        assert!(url.starts_with("data:image/png;base64,"));
+    }
+
+    #[test]
+    fn read_image_data_url_rejects_non_image_extensions() {
+        let dir = env::temp_dir().join("nest-vault-image-bad-ext");
+        let _ = fs::remove_dir_all(&dir);
+        ensure_dir(&dir).unwrap();
+        fs::write(dir.join("secret.md"), b"not an image").unwrap();
+        assert!(read_image_data_url(&dir, "secret.md").is_err());
+    }
+
+    #[test]
+    fn read_image_data_url_rejects_traversal() {
+        let dir = env::temp_dir().join("nest-vault-image-traversal");
+        let _ = fs::remove_dir_all(&dir);
+        ensure_dir(&dir).unwrap();
+        assert!(read_image_data_url(&dir, "../etc/passwd.png").is_err());
     }
 }

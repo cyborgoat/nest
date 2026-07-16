@@ -34,3 +34,4 @@ tokio-rusqlite = { version = "0.6", features = ["bundled"] }
 futures = "0.3.32"
 dotenvy = "0.15.7"
 tauri-plugin-dialog = "2"
+base64 = "0.22"

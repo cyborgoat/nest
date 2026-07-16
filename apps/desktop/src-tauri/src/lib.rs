@@ -40,6 +40,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::vault_list_tree,
             commands::vault_read_file,
+            commands::vault_read_image,
             commands::settings_get,
             commands::settings_set,
             commands::index_status,

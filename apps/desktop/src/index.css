@@ -116,6 +116,61 @@
   @apply bg-transparent p-0;
 }
 
+.markdown-body .hljs-keyword,
+.markdown-body .hljs-selector-tag,
+.markdown-body .hljs-literal,
+.markdown-body .hljs-operator {
+  color: var(--color-accent);
+}
+
+.markdown-body .hljs-string,
+.markdown-body .hljs-attr,
+.markdown-body .hljs-regexp {
+  color: #3f7d4f;
+}
+
+.markdown-body .hljs-comment,
+.markdown-body .hljs-quote {
+  color: var(--color-muted-foreground);
+  font-style: italic;
+}
+
+.markdown-body .hljs-number {
+  color: var(--color-primary);
+}
+
+.markdown-body .hljs-title,
+.markdown-body .hljs-name,
+.markdown-body .hljs-section {
+  color: var(--color-foreground);
+  font-weight: 600;
+}
+
+.markdown-body .hljs-variable,
+.markdown-body .hljs-template-variable,
+.markdown-body .hljs-type {
+  color: var(--color-destructive);
+}
+
+.markdown-body img {
+  @apply my-3 block max-w-full rounded-lg border border-border/60;
+  height: auto;
+}
+
+.markdown-body .mermaid-diagram {
+  @apply my-3 overflow-x-auto rounded-lg border border-border/60 bg-foreground/5 p-3;
+}
+
+.markdown-body .mermaid-diagram svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.markdown-body .mermaid-loading,
+.markdown-body .mermaid-error {
+  @apply my-3 rounded-lg border border-border/60 bg-foreground/5 p-3 text-xs text-muted-foreground;
+}
+
 .markdown-body blockquote {
   @apply border-l-2 border-primary/40 pl-3 italic text-muted-foreground mb-3;
 }
