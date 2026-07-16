@@ -114,7 +114,7 @@ export function ChatSessionBar({ sessions, onResetChatUi }: Props) {
 
   return (
     <>
-      <div className="flex min-h-10 items-stretch gap-1 border-b border-border px-1.5">
+      <div className="flex h-10 items-stretch gap-1 border-b border-border px-1.5">
         <div className="flex min-w-0 flex-1 items-stretch gap-0.5 overflow-x-auto">
           {openSessions.map((session) => {
             const active = session.id === chatSessionId;
@@ -124,10 +124,10 @@ export function ChatSessionBar({ sessions, onResetChatUi }: Props) {
                 type="button"
                 onClick={() => selectSession(session)}
                 className={cn(
-                  "group relative flex max-w-40 shrink-0 items-center gap-1 border-b-2 px-2.5 text-xs transition-colors",
+                  "group relative flex max-w-40 shrink-0 items-center gap-1 px-2.5 text-xs transition-colors",
                   active
-                    ? "border-primary text-foreground"
-                    : "border-transparent text-muted-foreground hover:text-foreground",
+                    ? "text-foreground"
+                    : "text-muted-foreground hover:text-foreground",
                 )}
                 title={session.title}
               >
@@ -151,6 +151,9 @@ export function ChatSessionBar({ sessions, onResetChatUi }: Props) {
                 >
                   <X className="size-3" />
                 </span>
+                {active && (
+                  <span className="absolute inset-x-0 -bottom-px h-0.5 bg-primary" />
+                )}
               </button>
             );
           })}
@@ -161,7 +164,7 @@ export function ChatSessionBar({ sessions, onResetChatUi }: Props) {
           )}
         </div>
 
-        <div className="flex shrink-0 items-center gap-0.5 py-1">
+        <div className="flex shrink-0 items-center gap-0.5">
           <Button
             type="button"
             size="icon"

@@ -1,4 +1,4 @@
-import { FileText, Folder, Send, X } from "lucide-react";
+import { FileText, Folder, Send } from "lucide-react";
 import {
   useEffect,
   useMemo,
@@ -81,7 +81,8 @@ export function MentionComposer({
     const before = value.slice(0, cursor);
     const at = before.lastIndexOf("@");
     if (at < 0) return;
-    const nextText = before.slice(0, at) + value.slice(cursor);
+    const token = `@${c.name} `;
+    const nextText = before.slice(0, at) + token + value.slice(cursor);
     setText(nextText);
     setRefs((prev) =>
       prev.some((r) => r.path === c.path) ? prev : [...prev, c],
@@ -89,32 +90,24 @@ export function MentionComposer({
     setMentionQuery(null);
     requestAnimationFrame(() => {
       el?.focus();
-      const pos = at;
+      const pos = at + token.length;
       el?.setSelectionRange(pos, pos);
     });
   };
 
-  const removeRef = (path: string) => {
-    setRefs((prev) => prev.filter((r) => r.path !== path));
-  };
-
   const trySend = () => {
     const trimmed = text.trim();
-    if ((!trimmed && refs.length === 0) || !canSend || disabled) return;
-    const focusPaths = refs.map((r) => r.path);
-    const label =
-      refs.length === 0
-        ? trimmed
-        : trimmed
-          ? `${trimmed}\n\n(focus: ${refs.map((r) => r.path).join(", ")})`
-          : `Focus: ${refs.map((r) => r.path).join(", ")}`;
-    onSend(label, focusPaths);
+    if (!trimmed || !canSend || disabled) return;
+    const focusPaths = refs
+      .filter((r) => trimmed.includes(`@${r.name}`))
+      .map((r) => r.path);
+    onSend(trimmed, focusPaths);
     setText("");
     setRefs([]);
     setMentionQuery(null);
   };
 
-  const hasContent = text.trim().length > 0 || refs.length > 0;
+  const hasContent = text.trim().length > 0;
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.nativeEvent.isComposing || e.keyCode === 229) return;
@@ -142,12 +135,6 @@ export function MentionComposer({
       }
     }
 
-    if (e.key === "Backspace" && text === "" && refs.length > 0) {
-      e.preventDefault();
-      setRefs((prev) => prev.slice(0, -1));
-      return;
-    }
-
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       trySend();
@@ -169,32 +156,6 @@ export function MentionComposer({
           disabled && "opacity-60",
         )}
       >
-        {refs.length > 0 && (
-          <div className="mb-1.5 flex flex-wrap gap-1.5">
-            {refs.map((r) => (
-              <span
-                key={r.path}
-                className="inline-flex max-w-full items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-[11px] text-foreground"
-                title={r.path}
-              >
-                {r.kind === "folder" ? (
-                  <Folder className="size-3 shrink-0 text-accent" />
-                ) : (
-                  <FileText className="size-3 shrink-0 text-primary" />
-                )}
-                <span className="truncate">{r.name}</span>
-                <button
-                  type="button"
-                  className="shrink-0 rounded-full p-0.5 hover:bg-background"
-                  onClick={() => removeRef(r.path)}
-                  aria-label={`Remove ${r.name}`}
-                >
-                  <X className="size-3" />
-                </button>
-              </span>
-            ))}
-          </div>
-        )}
         <textarea
           ref={textareaRef}
           value={text}
@@ -205,6 +166,7 @@ export function MentionComposer({
           onChange={(e) => {
             const value = e.target.value;
             setText(value);
+            setRefs((prev) => prev.filter((r) => value.includes(`@${r.name}`)));
             updateMentionFromText(value, e.target.selectionStart);
           }}
           onClick={(e) => {

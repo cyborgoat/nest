@@ -1,13 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ChatMessage, ChatSession, Citation } from "@nest/shared";
-import { AlertCircle, Sparkles, Square, X } from "lucide-react";
+import { AlertCircle, FileText, Folder, Square, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   AgentStatusIndicator,
   type AgentActivity,
 } from "@/components/chat/AgentStatusIndicator";
 import { ChatSessionBar } from "@/components/chat/ChatSessionBar";
-import { MentionComposer } from "@/components/chat/MentionComposer";
+import { MentionComposer, type MentionRef } from "@/components/chat/MentionComposer";
 import { collectMentionCandidates } from "@/components/library/LibraryTree";
 import { MarkdownBody } from "@/components/markdown/MarkdownBody";
 import {
@@ -67,6 +67,11 @@ export function ChatPanel() {
   const mentionCandidates = useMemo(
     () => collectMentionCandidates(treeQuery.data ?? [], activePackRoots),
     [treeQuery.data, activePackRoots],
+  );
+
+  const mentionByName = useMemo(
+    () => new Map(mentionCandidates.map((c) => [c.name, c])),
+    [mentionCandidates],
   );
 
   // Buffer tokens and flush once per animation frame — avoids one React render per token.
@@ -177,12 +182,6 @@ export function ChatPanel() {
     };
   }, []);
 
-  const activeLabel = useMemo(() => {
-    if (activePackRoots.length === 0) return "No active packs";
-    if (activePackRoots.length === 1) return activePackRoots[0];
-    return `${activePackRoots.length} active packs`;
-  }, [activePackRoots]);
-
   const send = useMutation({
     mutationFn: async ({
       query,
@@ -290,18 +289,12 @@ export function ChatPanel() {
     <div className="flex h-full flex-col">
       <ChatSessionBar sessions={sessions} onResetChatUi={resetChatUi} />
 
-      <div className="flex items-center gap-2 border-b border-border px-3 py-2 text-xs">
-        <Sparkles className="size-3.5 text-accent" />
-        <span className="text-muted-foreground">Knowledge:</span>
-        <span className="truncate font-medium">{activeLabel}</span>
-      </div>
-
       <ScrollArea className="flex-1 min-h-0">
         <div className="min-w-0 max-w-full space-y-4 overflow-x-hidden px-3 pt-3 pb-8">
           {(messagesQuery.data ?? []).map((msg: ChatMessage) => (
             <div key={msg.id} className="min-w-0 space-y-2">
               {msg.role === "user" ? (
-                <UserBubble>{msg.content}</UserBubble>
+                <UserBubble content={msg.content} mentions={mentionByName} />
               ) : (
                 <AssistantBubble>
                   <MarkdownBody className={bubble}>{msg.content}</MarkdownBody>
@@ -318,7 +311,9 @@ export function ChatPanel() {
             </div>
           ))}
 
-          {showOptimisticUser && <UserBubble>{pendingUser}</UserBubble>}
+          {showOptimisticUser && (
+            <UserBubble content={pendingUser ?? ""} mentions={mentionByName} />
+          )}
 
           {isSending && (
             <AssistantBubble>
@@ -397,7 +392,13 @@ export function ChatPanel() {
   );
 }
 
-function UserBubble({ children }: { children: ReactNode }) {
+function UserBubble({
+  content,
+  mentions,
+}: {
+  content: string;
+  mentions: Map<string, MentionRef>;
+}) {
   return (
     <div className="flex justify-end">
       <div
@@ -406,10 +407,31 @@ function UserBubble({ children }: { children: ReactNode }) {
           "max-w-[85%] rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground whitespace-pre-wrap",
         )}
       >
-        {children}
+        {renderWithMentions(content, mentions)}
       </div>
     </div>
   );
+}
+
+function renderWithMentions(content: string, mentions: Map<string, MentionRef>) {
+  return content.split(/(@[^\s]+)/g).map((part, i) => {
+    const ref = part.startsWith("@") ? mentions.get(part.slice(1)) : undefined;
+    if (!ref) return part;
+    return (
+      <span
+        key={i}
+        className="mx-0.5 inline-flex max-w-[10rem] items-center gap-1 rounded-full bg-primary-foreground/15 px-1.5 py-0.5 align-middle text-[11px] font-medium"
+        title={ref.path}
+      >
+        {ref.kind === "folder" ? (
+          <Folder className="size-2.5 shrink-0" />
+        ) : (
+          <FileText className="size-2.5 shrink-0" />
+        )}
+        <span className="truncate">{ref.name}</span>
+      </span>
+    );
+  });
 }
 
 function AssistantBubble({ children }: { children: ReactNode }) {

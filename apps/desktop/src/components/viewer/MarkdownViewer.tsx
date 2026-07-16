@@ -1,8 +1,16 @@
 import { useQuery } from "@tanstack/react-query";
 import { BookOpen, Cloud, Lock, PackageOpen } from "lucide-react";
 import { motion } from "motion/react";
+import { Fragment } from "react";
 import { api } from "@/lib/api";
 import { MarkdownBody } from "@/components/markdown/MarkdownBody";
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useUiStore } from "@/stores/ui";
@@ -76,14 +84,28 @@ export function MarkdownViewer() {
     );
   }
 
+  const segments = selectedPath.split("/").filter(Boolean);
+
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between border-b border-border px-4 py-3">
-        <div className="min-w-0">
-          <p className="truncate font-medium">{selectedPath.split("/").pop()}</p>
-          <p className="truncate text-xs text-muted-foreground">{selectedPath}</p>
-        </div>
-        <span className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+      <div className="flex h-10 items-center justify-between border-b border-border px-4">
+        <Breadcrumb className="min-w-0">
+          <BreadcrumbList className="flex-nowrap">
+            {segments.map((segment, i) => (
+              <Fragment key={i}>
+                {i > 0 && <BreadcrumbSeparator />}
+                <BreadcrumbItem className="min-w-0">
+                  {i === segments.length - 1 ? (
+                    <BreadcrumbPage>{segment}</BreadcrumbPage>
+                  ) : (
+                    <span className="truncate">{segment}</span>
+                  )}
+                </BreadcrumbItem>
+              </Fragment>
+            ))}
+          </BreadcrumbList>
+        </Breadcrumb>
+        <span className="ml-3 inline-flex shrink-0 items-center gap-1 rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
           <Lock className="size-3" />
           Read-only
         </span>

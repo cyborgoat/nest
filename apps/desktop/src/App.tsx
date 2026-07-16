@@ -155,19 +155,21 @@ export default function App() {
   return (
     <div className="flex h-full flex-col">
       <header className="flex items-center justify-between border-b border-border bg-panel/80 px-4 py-2.5 backdrop-blur">
-        <div className="flex items-center gap-2">
-          {activePanel === "library" && (
-            <Button
-              size="icon"
-              variant={sidebarOpen ? "secondary" : "ghost"}
-              className="size-8"
-              onClick={handleToggleSidebar}
-              title={sidebarOpen ? "Collapse library" : "Expand library"}
-              aria-label={sidebarOpen ? "Collapse library" : "Expand library"}
-            >
-              <PanelLeft className="size-4" />
-            </Button>
-          )}
+        <div className="flex items-center gap-3">
+          <Button
+            size="icon"
+            variant={sidebarOpen && activePanel === "library" ? "secondary" : "ghost"}
+            className={cn(
+              "size-8",
+              activePanel !== "library" && "pointer-events-none opacity-40",
+            )}
+            onClick={handleToggleSidebar}
+            title={sidebarOpen ? "Collapse library" : "Expand library"}
+            aria-label={sidebarOpen ? "Collapse library" : "Expand library"}
+          >
+            <PanelLeft className="size-4" />
+          </Button>
+          <Separator orientation="vertical" className="h-6" />
           <div className="flex items-center gap-3">
             <img
               src="/nest-logo-transparent.png"
@@ -237,9 +239,6 @@ export default function App() {
             }}
           >
             <aside className="flex h-full min-h-0 flex-col border-r border-border">
-              <div className="border-b border-border px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Library
-              </div>
               <div className="min-h-0 flex-1">
                 {treeQuery.isLoading ? (
                   <p className="p-4 text-sm text-muted-foreground">Loading…</p>
