@@ -46,7 +46,8 @@ flowchart TB
 The desktop app uses the configured Hub base URL from Settings. The Hub service only owns the API port; host selection lives in the desktop setting.
 
 - Catalog and download use a **PyPI-style versioned registry** (`GET /packs`, `GET /packs/:id/:version/download`). See [pack-registry.md](pack-registry.md).
-- If the Hub is unreachable, the Hub panel shows an **Offline** status. Local **Import** (zip) still works.
+- The Hub panel has two tabs: **Browse** (remote registry: search + download) and **Installed** (everything in the vault, with origin badges and upgrade/remove actions).
+- If the Hub is unreachable, the Hub panel shows an **Offline** status and Browse offers a connect/import empty state. The Installed tab and local **Import** (zip) still work.
 - Fixture folders under `fixtures/knowledge` are `{id}/{semver}/` trees served by the **Hub process** only — the desktop does not fall back to fixtures when offline.
 
 ## Vault and indexing
@@ -54,7 +55,7 @@ The desktop app uses the configured Hub base URL from Settings. The Hub service 
 - Packs install into the configured **knowledge directory** (default `{app_data}/vault/<pack-id>/`; upgrade replaces the tree).
 - **Import local pack** accepts a `.zip` with `pack.json` (`id`, `name`, `description`, `version`; `path` optional and must equal `id`).
 - **Remove pack** deletes the tree, purges SQLite/FTS rows, and rebuilds the vector index.
-- Indexing runs automatically after download, import, and remove; Settings also offers a manual re-index.
+- Indexing runs automatically after download, import, and remove.
 
 ## Library: active / inactive packs
 
