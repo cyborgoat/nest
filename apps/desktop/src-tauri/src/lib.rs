@@ -53,6 +53,7 @@ pub fn run() {
             commands::chat_send,
             commands::chat_cancel,
             commands::hub_status,
+            commands::hub_test_connection,
             commands::hub_list_packs,
             commands::hub_list_installed,
             commands::hub_set_pack_active,

@@ -421,6 +421,11 @@ pub async fn hub_status(state: State<'_, SharedState>) -> AppResult<hub::HubConn
 }
 
 #[tauri::command]
+pub async fn hub_test_connection(hub_base_url: String) -> AppResult<hub::HubConnectionStatus> {
+    Ok(hub::check_hub_status(&hub_base_url).await)
+}
+
+#[tauri::command]
 pub async fn hub_list_packs(state: State<'_, SharedState>) -> AppResult<Vec<PackProject>> {
     let settings = {
         let conn = state.db.lock();

@@ -1,10 +1,11 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { AppSettings } from "@nest/shared";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
   Bot,
   Cloud,
   FolderOpen,
+  LoaderCircle,
   User,
   type LucideIcon,
 } from "lucide-react";
@@ -44,6 +45,10 @@ function persistKey(settings: AppSettings): string {
 export function SettingsPanel() {
   const queryClient = useQueryClient();
   const [form, setForm] = useState<AppSettings>(EMPTY);
+  const [hubTestResult, setHubTestResult] = useState<{
+    online: boolean;
+    message: string;
+  } | null>(null);
   const hydrated = useRef(false);
   const lastSavedKey = useRef("");
 
@@ -92,8 +97,30 @@ export function SettingsPanel() {
     return () => window.clearTimeout(timer);
   }, [form, queryClient]);
 
-  const update = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) =>
+  const update = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
+    if (key === "hub_base_url") setHubTestResult(null);
     setForm((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const testHubConnection = useMutation({
+    mutationFn: () => api.hubTestConnection(form.hub_base_url),
+    onSuccess: (status) => {
+      const message = status.online
+        ? `Connected to ${status.hub_base_url}`
+        : status.message || "Knowledge Hub is not accessible.";
+      setHubTestResult({ online: status.online, message });
+      if (status.online) {
+        toast.success("Knowledge Hub connected", { description: message });
+      } else {
+        toast.error("Knowledge Hub connection failed", { description: message });
+      }
+    },
+    onError: (e) => {
+      const message = e instanceof Error ? e.message : String(e);
+      setHubTestResult({ online: false, message });
+      toast.error("Could not test Knowledge Hub", { description: message });
+    },
+  });
 
   const pickKnowledgeDir = async () => {
     try {
@@ -214,6 +241,32 @@ export function SettingsPanel() {
               onChange={(e) => update("hub_base_url", e.target.value)}
               placeholder="http://127.0.0.1:8787"
             />
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              {hubTestResult ? (
+                <p
+                  className={
+                    hubTestResult.online
+                      ? "text-xs text-primary"
+                      : "text-xs text-destructive"
+                  }
+                >
+                  {hubTestResult.message}
+                </p>
+              ) : (
+                <span />
+              )}
+              <Button
+                type="button"
+                size="sm"
+                disabled={testHubConnection.isPending}
+                onClick={() => testHubConnection.mutate()}
+              >
+                {testHubConnection.isPending && (
+                  <LoaderCircle className="size-3.5 animate-spin" />
+                )}
+                {testHubConnection.isPending ? "Testing…" : "Test connection"}
+              </Button>
+            </div>
           </Field>
         </SettingsSection>
         </div>

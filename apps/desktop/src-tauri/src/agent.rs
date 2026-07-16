@@ -150,21 +150,6 @@ fn not_found_reply() -> &'static str {
      pack that covers this topic, then ask again."
 }
 
-fn is_hard_llm_error(msg: &str) -> bool {
-    let m = msg.to_lowercase();
-    m.contains("api key")
-        || m.contains("unauthorized")
-        || m.contains("401")
-        || m.contains("403")
-        || m.contains("connection")
-        || m.contains("timed out")
-        || m.contains("timeout")
-        || m.contains("dns")
-        || m.contains("refused")
-        || m.contains("ssl")
-        || m.contains("tls")
-}
-
 async fn emit_soft_reply(
     app: &AppHandle,
     stream_event: &str,
@@ -342,24 +327,7 @@ pub async fn run_agent_chat(
                 }
                 let msg = e.to_string();
                 crate::nest_debug!("agent", "stream error: {msg}");
-                if is_hard_llm_error(&msg) {
-                    let _ = app.emit(
-                        stream_event,
-                        ChatStreamEvent::Error {
-                            message: msg.clone(),
-                        },
-                    );
-                    return Err(AppError::msg(msg));
-                }
-                // Soft failures (empty tool turns, max-turn noise, etc.):
-                // prefer a helpful reply over a hard UI error.
-                if full.trim().is_empty() {
-                    let reply = not_found_reply().to_string();
-                    emit_soft_reply(app, stream_event, &reply).await?;
-                    full = reply;
-                    break;
-                }
-                break;
+                return Err(AppError::msg(format!("LLM request failed: {msg}")));
             }
         }
     }
