@@ -1,15 +1,14 @@
 @import "tailwindcss";
 
 /*
-  Design tokens — "warm paper" palette anchored to the nest logo
-  (umber / copper / tan twigs).
+  Design tokens — a cool silver-and-white palette.
 
   Semantic roles:
-  - primary (copper)      = interaction: CTAs, active tab underline, file
+  - primary (graphite)    = interaction: CTAs, active tab underline, file
                             icons, markdown links, focus ring, selected tint
-  - accent (moss)         = status & wayfinding: Online/Update badges,
+  - accent (silver)       = status & wayfinding: Online/Update badges,
                             pinned pin, folder icons, syntax strings
-  - destructive (terra)   = destructive actions and errors
+  - destructive (red)     = destructive actions and errors
 
   Spacing canon: panel scroll bodies use p-4; reading-width bodies use
   mx-auto max-w-2xl px-6 py-5. Button sizes: hero/dialog CTAs = default,
@@ -20,35 +19,35 @@
 */
 :root {
   /* surfaces */
-  --background: #f4efe7;
-  --card: #fbf8f4;
-  --panel: #f6f1e8;
-  --sidebar: #ece4d6;
-  --muted: #eae2d3;
+  --background: #f7f7f8;
+  --card: #ffffff;
+  --panel: #fafafa;
+  --sidebar: #f1f1f3;
+  --muted: #ebebed;
   /* ink */
-  --foreground: #2b2118;
-  --muted-foreground: #6f6152;
-  --border: #ded2bf;
+  --foreground: #27272a;
+  --muted-foreground: #71717a;
+  --border: #dedee3;
   /* brand */
-  --primary: #8f6339; /* AA floor for label/link contrast — adjust saturation, not lightness */
-  --primary-foreground: #fdf9f3;
-  --accent: #4f6e54;
-  --accent-foreground: #f6f3ea;
-  --accent-text: #3f5a44; /* moss for small text on tints */
-  --destructive: #b3402a;
-  --destructive-foreground: #fdf6f2;
+  --primary: #52525b;
+  --primary-foreground: #ffffff;
+  --accent: #73737c;
+  --accent-foreground: #ffffff;
+  --accent-text: #52525b;
+  --destructive: #b42318;
+  --destructive-foreground: #ffffff;
   --ring: var(--primary);
-  --overlay: rgb(43 33 24 / 0.45); /* umber dialog scrim (alpha baked in — use bg-overlay) */
+  --overlay: rgb(39 39 42 / 0.38);
   --radius: 0.5rem;
   /* markdown syntax highlighting */
-  --syntax-keyword: #7d5430;
-  --syntax-string: #4f6e54;
-  --syntax-number: #8f6339;
-  --syntax-comment: #6f6152;
-  --syntax-title: #2b2118;
-  --syntax-variable: #b3402a;
+  --syntax-keyword: #52525b;
+  --syntax-string: #64748b;
+  --syntax-number: #71717a;
+  --syntax-comment: #8a8a93;
+  --syntax-title: #27272a;
+  --syntax-variable: #b42318;
   /* agent-status shimmer */
-  --shimmer-base: #a89a87;
+  --shimmer-base: #a1a1aa;
 }
 /* future: .dark { --background: ...; } */
 

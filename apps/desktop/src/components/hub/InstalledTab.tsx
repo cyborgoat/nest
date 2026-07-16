@@ -119,7 +119,7 @@ function InstalledPackRow({
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: index * 0.05 }}
-      className="relative border-b border-border pb-3"
+      className="group relative border-b border-border pb-3"
     >
       <RemovePackButton
         name={pack.name}

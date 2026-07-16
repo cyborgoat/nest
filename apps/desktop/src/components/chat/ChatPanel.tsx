@@ -298,16 +298,14 @@ export function ChatPanel() {
               ) : (
                 <AssistantBubble>
                   <MarkdownBody className={bubble}>{msg.content}</MarkdownBody>
+                  {msg.citations && msg.citations.length > 0 && (
+                    <References
+                      citations={msg.citations}
+                      onOpen={(path) => openFileTab(path)}
+                    />
+                  )}
                 </AssistantBubble>
               )}
-              {msg.role === "assistant" &&
-                msg.citations &&
-                msg.citations.length > 0 && (
-                  <References
-                    citations={msg.citations}
-                    onOpen={(path) => openFileTab(path)}
-                  />
-                )}
             </div>
           ))}
 
@@ -453,16 +451,11 @@ function References({
     <Accordion
       type="single"
       collapsible
-      className="rounded-md border border-border bg-panel px-2"
+      className="mt-3"
     >
       <AccordionItem value="references" className="border-none">
-        <AccordionTrigger className="py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground hover:no-underline hover:text-foreground">
-          <span className="inline-flex items-center gap-2">
-            References
-            <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium normal-case tracking-normal text-muted-foreground">
-              {citations.length}
-            </span>
-          </span>
+        <AccordionTrigger className="justify-start py-1 text-xs font-medium text-muted-foreground hover:no-underline hover:text-foreground">
+          <span>Found {citations.length} references</span>
         </AccordionTrigger>
         <AccordionContent className="pb-2">
           <ul className="space-y-1.5">

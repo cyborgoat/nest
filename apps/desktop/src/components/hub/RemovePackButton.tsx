@@ -40,7 +40,7 @@ export function RemovePackButton({
             <Button
               size="icon-xs"
               variant="ghost"
-              className="text-muted-foreground"
+              className="pointer-events-none text-muted-foreground opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100"
               aria-label={`Actions for ${name}`}
             >
               <MoreHorizontal className="size-3.5" />
