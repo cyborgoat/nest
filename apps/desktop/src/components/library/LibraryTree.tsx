@@ -5,6 +5,7 @@ import {
   FileText,
   Folder,
   Minus,
+  Package,
   Plus,
   Search,
 } from "lucide-react";
@@ -109,11 +110,18 @@ function TreeItem({
           ) : (
             <span className="inline-block w-3.5" />
           )}
-          {isFolder ? (
+          {isRoot ? (
+            <Package
+              className={cn(
+                "size-3.5 shrink-0",
+                packActive ? "text-primary" : "text-muted-foreground",
+              )}
+            />
+          ) : isFolder ? (
             <Folder
               className={cn(
                 "size-3.5 shrink-0",
-                packActive ? "text-accent" : "text-muted-foreground",
+                packActive ? "text-primary" : "text-muted-foreground",
               )}
             />
           ) : (

@@ -181,99 +181,105 @@ function PackRow({
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: index * 0.05 }}
-      className="group flex items-start justify-between gap-3 border-b border-border pb-3"
+      className="relative border-b border-border pb-3"
     >
+      {isInstalled && (
+        <RemovePackButton
+          name={project.name}
+          disabled={busy || removePending}
+          pending={removePending}
+          onConfirm={onRemove}
+        />
+      )}
       <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <Package className="size-4 text-primary" />
-          <h3 className="font-medium">{project.name}</h3>
-          <span className="text-xs text-muted-foreground">
-            latest {project.latest_version}
+        <div className="flex min-w-0 items-center gap-2 pr-7">
+          <Package className="size-4 shrink-0 text-primary" />
+          <h3 className="min-w-0 truncate font-medium">{project.name}</h3>
+          <span className="shrink-0 text-[11px] text-muted-foreground">
+            Version
           </span>
-          {isInstalled && (
-            <Badge variant="muted">installed {installed.version}</Badge>
-          )}
-          {updateAvailable && <Badge variant="accent">Update available</Badge>}
+          <Select
+            value={selectedVersion}
+            onValueChange={setSelectedVersion}
+            disabled={busy}
+          >
+            <SelectTrigger
+              aria-label={`Version for ${project.name}`}
+              className="h-5 w-16 shrink-0 gap-0.5 px-1 text-[11px]"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="min-w-0 text-[11px]">
+              {versions.map((v) => (
+                <SelectItem
+                  key={v}
+                  value={v}
+                  className="py-0.5 pl-1.5 pr-5 text-[11px]"
+                >
+                  {v}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
           {project.description}
         </p>
-        {versions.length > 1 && (
-          <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-            Version
-            <Select
-              value={selectedVersion}
-              onValueChange={setSelectedVersion}
-              disabled={busy}
-            >
-              <SelectTrigger aria-label="Version">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {versions.map((v) => (
-                  <SelectItem key={v} value={v}>
-                    {v}
-                    {v === project.latest_version ? " (latest)" : ""}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+        {isInstalled && (
+          <div className="mt-1 flex items-center gap-1.5">
+            <Badge variant="muted">Installed {installed.version}</Badge>
+            {updateAvailable && <Badge variant="accent">Update available</Badge>}
           </div>
         )}
-      </div>
-      <div className="relative flex shrink-0 items-center gap-2">
-        {selectedIsInstalled ? (
-          <>
-            <Button size="sm" variant="secondary" disabled>
-              <Check className="size-4" />
-              Installed
-            </Button>
-            {updateAvailable && (
-              <Button
-                size="sm"
-                disabled={busy}
-                onClick={() => onInstall(project.latest_version)}
-              >
-                <ArrowUpCircle className="size-4" />
-                Upgrade
-              </Button>
+        <div className="mt-2 flex justify-end">
+          <div className="flex shrink-0 items-center gap-1.5">
+            {selectedIsInstalled ? (
+              <>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="h-7 gap-1 px-2 text-[11px]"
+                  disabled
+                >
+                  <Check className="size-3.5" />
+                  Installed
+                </Button>
+                {updateAvailable && (
+                  <Button
+                    size="sm"
+                    className="h-7 gap-1 px-2 text-[11px]"
+                    disabled={busy}
+                    onClick={() => onInstall(project.latest_version)}
+                  >
+                    <ArrowUpCircle className="size-3.5" />
+                    Upgrade
+                  </Button>
+                )}
+              </>
+            ) : (
+              <>
+                <Button
+                  size="sm"
+                  className="h-7 gap-1 px-2 text-[11px]"
+                  disabled={busy}
+                  onClick={() => onInstall(selectedVersion)}
+                >
+                  {isInstalled ? (
+                    <>
+                      <ArrowUpCircle className="size-3.5" />
+                      Install {selectedVersion}
+                    </>
+                  ) : (
+                    <>
+                      <CloudDownload className="size-3.5" />
+                      Download
+                    </>
+                  )}
+                </Button>
+              </>
             )}
-            <RemovePackButton
-              name={project.name}
-              disabled={busy || removePending}
-              pending={removePending}
-              onConfirm={onRemove}
-            />
-          </>
-        ) : (
-          <>
-            <Button
-              size="sm"
-              disabled={busy}
-              onClick={() => onInstall(selectedVersion)}
-            >
-              {isInstalled ? (
-                <>
-                  <ArrowUpCircle className="size-4" />
-                  Install {selectedVersion}
-                </>
-              ) : (
-                <>
-                  <CloudDownload className="size-4" />
-                  Download
-                </>
-              )}
-            </Button>
-            {isInstalled && (
-              <RemovePackButton
-                name={project.name}
-                disabled={busy || removePending}
-                pending={removePending}
-                onConfirm={onRemove}
-              />
-            )}
-          </>
-        )}
+          </div>
+        </div>
       </div>
     </motion.div>
   );

@@ -1,4 +1,5 @@
-import { Trash2 } from "lucide-react";
+import { MoreHorizontal, Trash2 } from "lucide-react";
+import { useState } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -8,9 +9,14 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Button, buttonVariants } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 
 export function RemovePackButton({
@@ -24,40 +30,56 @@ export function RemovePackButton({
   pending: boolean;
   onConfirm: () => void;
 }) {
+  const [dialogOpen, setDialogOpen] = useState(false);
+
   return (
-    <div className="pointer-events-none absolute right-full top-1/2 mr-2 -translate-y-1/2 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100">
-      <AlertDialog>
-        <AlertDialogTrigger asChild>
-          <Button
-            size="icon"
-            variant="destructive"
-            disabled={disabled}
-            title="Remove pack"
-            aria-label={`Remove ${name}`}
-          >
-            <Trash2 className="size-4" />
-          </Button>
-        </AlertDialogTrigger>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Remove knowledge pack?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will permanently remove “{name}” from your local vault. This
-              action cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              className={cn(buttonVariants({ variant: "destructive" }))}
-              disabled={pending}
-              onClick={onConfirm}
+    <AlertDialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      <div className="absolute top-0 right-0">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              size="icon-xs"
+              variant="ghost"
+              className="text-muted-foreground"
+              aria-label={`Actions for ${name}`}
             >
-              {pending ? "Removing…" : "Remove"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </div>
+              <MoreHorizontal className="size-3.5" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="min-w-32">
+            <DropdownMenuItem
+              className="text-destructive focus:text-destructive"
+              disabled={disabled}
+              onSelect={() => {
+                window.setTimeout(() => setDialogOpen(true), 0);
+              }}
+            >
+              <Trash2 className="size-3.5" />
+              Remove pack
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Remove knowledge pack?</AlertDialogTitle>
+          <AlertDialogDescription>
+            This permanently deletes “{name}” from your local vault and cannot
+            be undone. The remote pack remains available and can be downloaded
+            again from the Hub.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            className={cn(buttonVariants({ variant: "destructive" }))}
+            disabled={pending}
+            onClick={onConfirm}
+          >
+            {pending ? "Removing…" : "Remove"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }

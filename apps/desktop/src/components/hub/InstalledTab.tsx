@@ -119,10 +119,16 @@ function InstalledPackRow({
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: index * 0.05 }}
-      className="group flex items-start justify-between gap-3 border-b border-border pb-3"
+      className="relative border-b border-border pb-3"
     >
+      <RemovePackButton
+        name={pack.name}
+        disabled={busy || removePending}
+        pending={removePending}
+        onConfirm={onRemove}
+      />
       <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 pr-7">
           <Package className="size-4 text-primary" />
           <h3 className="font-medium">{pack.name}</h3>
           <span className="text-xs text-muted-foreground">v{pack.version}</span>
@@ -141,25 +147,20 @@ function InstalledPackRow({
           Local folder · {pack.local_path}
         </p>
       </div>
-      <div className="relative flex shrink-0 items-center gap-2">
+      <div className="mt-2 flex justify-end gap-1.5">
         {updateAvailable && catalogEntry && (
           <Button
             size="sm"
+            className="h-7 gap-1 px-2 text-[11px]"
             disabled={busy}
             onClick={() =>
               onUpgrade(pack.pack_id, catalogEntry.latest_version, pack.version)
             }
           >
-            <ArrowUpCircle className="size-4" />
+            <ArrowUpCircle className="size-3.5" />
             Upgrade
           </Button>
         )}
-        <RemovePackButton
-          name={pack.name}
-          disabled={busy || removePending}
-          pending={removePending}
-          onConfirm={onRemove}
-        />
       </div>
     </motion.div>
   );
