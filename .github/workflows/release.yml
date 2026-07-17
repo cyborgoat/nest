@@ -84,11 +84,11 @@ jobs:
       matrix:
         include:
           - name: macOS (Apple Silicon)
-            runner: macos-latest
+            runner: macos-14
             rust_target: aarch64-apple-darwin
             args: --target aarch64-apple-darwin --bundles dmg
           - name: macOS (Intel)
-            runner: macos-latest
+            runner: macos-13
             rust_target: x86_64-apple-darwin
             args: --target x86_64-apple-darwin --bundles dmg
           - name: Windows (x64)
@@ -119,21 +119,45 @@ jobs:
         run: npm ci
         working-directory: apps/desktop
 
-      - name: Build installers and upload to draft release
-        uses: tauri-apps/tauri-action@v0
+      - name: Build installers and upload workflow artifacts
+        uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: apps/desktop
-          releaseId: ${{ needs.gate.outputs.release_id }}
           args: ${{ matrix.args }}
+          uploadWorkflowArtifacts: true
+          workflowArtifactNamePattern: "[platform]-[arch]-[bundle]"
 
   publish:
     needs: [gate, build]
-    if: needs.gate.outputs.release_is_draft == 'true'
     runs-on: ubuntu-latest
     steps:
+      - name: Download built installers
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Upload installers to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ needs.gate.outputs.tag }}"
+
+          mapfile -d '' FILES < <(find release-assets -type f -print0)
+          if [ "${#FILES[@]}" -eq 0 ]; then
+            echo "::error::No built installers were downloaded from workflow artifacts."
+            exit 1
+          fi
+
+          gh release upload "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber \
+            "${FILES[@]}"
+
       - name: Publish release
+        if: needs.gate.outputs.release_is_draft == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
