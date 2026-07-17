@@ -73,11 +73,11 @@ jobs:
       matrix:
         include:
           - name: macOS (Apple Silicon)
-            runner: macos-14
+            runner: macos-15
             rust_target: aarch64-apple-darwin
             args: --target aarch64-apple-darwin --bundles dmg
           - name: macOS (Intel)
-            runner: macos-13
+            runner: macos-15-intel
             rust_target: x86_64-apple-darwin
             args: --target x86_64-apple-darwin --bundles dmg
           - name: Windows (x64)
@@ -93,7 +93,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
           cache-dependency-path: apps/desktop/package-lock.json
 
