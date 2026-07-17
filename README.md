@@ -55,7 +55,7 @@ npm run start:dev
 
 ## Releases
 
-Desktop installers (macOS `.dmg` for Apple Silicon + Intel, Windows `.msi`/`.exe`) are built by GitHub Actions. Bumping the app version in `apps/desktop` (all three of `src-tauri/tauri.conf.json`, `package.json`, `src-tauri/Cargo.toml`) and pushing to `main` creates a **draft** GitHub Release `v{version}` with the installers attached — review and publish it manually. See [Development → Releases](docs/development.md#releases).
+Desktop installers (macOS `.dmg` for Apple Silicon + Intel, Windows `.msi`/`.exe`) are built by GitHub Actions from pushed version tags (`v*`). Bump the app version in `apps/desktop` (all three of `src-tauri/tauri.conf.json`, `package.json`, `src-tauri/Cargo.toml`) and push matching tag `v{version}` to build installers and publish release `v{version}` automatically. See [Development → Releases](docs/development.md#releases).
 
 ## Documentation
 

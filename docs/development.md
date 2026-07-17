@@ -47,7 +47,7 @@ cd apps/hub && npm run build
 
 ## Releases
 
-`.github/workflows/release.yml` builds unsigned installers — macOS `.dmg` (Apple Silicon + Intel) and Windows `.msi`/NSIS `.exe` — and attaches them to a **draft** GitHub Release.
+`.github/workflows/release.yml` builds unsigned installers — macOS `.dmg` (Apple Silicon + Intel) and Windows `.msi`/NSIS `.exe` — for a `v*` tag and publishes the GitHub Release for that tag when all builds succeed.
 
 To cut a release:
 
@@ -55,12 +55,13 @@ To cut a release:
    - `apps/desktop/src-tauri/tauri.conf.json`
    - `apps/desktop/package.json`
    - `apps/desktop/src-tauri/Cargo.toml`
-2. Push to `main`. The workflow creates draft release `v{version}` and uploads the installers.
-3. Review the draft on GitHub and **Publish** it (publishing creates the `v{version}` tag).
+2. Commit and push the version bump.
+3. Create and push tag `v{version}` (for example `git tag v1.2.3 && git push origin v1.2.3`).
+4. The workflow creates or reuses release `v{version}`, uploads installers from all runners, then publishes the release.
 
 Notes:
 
-- The gate job skips (without failing) when `v{version}` is already tagged or has a release, so repeated pushes of the same version are no-ops.
+- The workflow fails fast if the pushed tag does not exactly match the desktop version (`v{version}`) from the three version files.
 - The workflow can also be run manually from **Actions → Release → Run workflow** for testing.
 - Builds are unsigned: macOS users need right-click → Open (or `xattr -dr com.apple.quarantine`) on first launch; Windows shows a SmartScreen prompt.
 

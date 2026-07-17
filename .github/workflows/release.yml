@@ -2,15 +2,12 @@ name: Release
 
 on:
   push:
-    branches: [main]
-    paths:
-      - "apps/desktop/src-tauri/tauri.conf.json"
-      - "apps/desktop/package.json"
-      - "apps/desktop/src-tauri/Cargo.toml"
+    tags:
+      - "v*"
   workflow_dispatch:
 
 concurrency:
-  group: release
+  group: release-${{ github.ref_name }}
   cancel-in-progress: false
 
 permissions:
@@ -20,11 +17,21 @@ jobs:
   gate:
     runs-on: ubuntu-latest
     outputs:
+      tag: ${{ steps.tag.outputs.tag }}
       version: ${{ steps.version.outputs.version }}
-      should_release: ${{ steps.gate.outputs.should_release }}
       release_id: ${{ steps.release.outputs.release_id }}
+      release_is_draft: ${{ steps.release.outputs.release_is_draft }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Resolve release tag
+        id: tag
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=v$(jq -r .version apps/desktop/src-tauri/tauri.conf.json)" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Read version and verify version files agree
         id: version
@@ -36,44 +43,42 @@ jobs:
             echo "::error::Version mismatch: tauri.conf.json=$TAURI_V, package.json=$PKG_V, Cargo.toml=$CARGO_V. All three must match."
             exit 1
           fi
-          echo "version=$TAURI_V" >> "$GITHUB_OUTPUT"
 
-      - name: Check whether this version is already tagged or released
-        id: gate
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          TAG="v${{ steps.version.outputs.version }}"
-          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" > /dev/null; then
-            echo "Tag $TAG already exists — skipping release."
-            echo "should_release=false" >> "$GITHUB_OUTPUT"
-          elif gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            echo "Release $TAG already exists (possibly an unpublished draft) — skipping."
-            echo "should_release=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "should_release=true" >> "$GITHUB_OUTPUT"
+          EXPECTED_TAG="v$TAURI_V"
+          if [ "${{ steps.tag.outputs.tag }}" != "$EXPECTED_TAG" ]; then
+            echo "::error::Tag/version mismatch: tag=${{ steps.tag.outputs.tag }}, expected=$EXPECTED_TAG from desktop version files."
+            exit 1
           fi
 
-      - name: Create draft release
+          echo "version=$TAURI_V" >> "$GITHUB_OUTPUT"
+
+      - name: Create or reuse release
         id: release
-        if: steps.gate.outputs.should_release == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="v${{ steps.version.outputs.version }}"
-          gh release create "$TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --draft \
-            --title "Nest $TAG" \
-            --target "$GITHUB_SHA" \
-            --notes "Unsigned builds. macOS: right-click > Open (or run \`xattr -dr com.apple.quarantine /Applications/Nest.app\`) on first launch. Windows: choose \"More info\" > \"Run anyway\" on the SmartScreen prompt."
-          RELEASE_ID=$(gh api "repos/$GITHUB_REPOSITORY/releases" \
-            --jq "[.[] | select(.tag_name == \"$TAG\" and .draft)][0].id")
+          TAG="${{ steps.tag.outputs.tag }}"
+
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            RELEASE_ID=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json id --jq .id)
+            RELEASE_IS_DRAFT=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)
+          else
+            gh release create "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --draft \
+              --title "Nest $TAG" \
+              --target "$GITHUB_SHA" \
+              --notes "Unsigned builds. macOS: right-click > Open (or run \`xattr -dr com.apple.quarantine /Applications/Nest.app\`) on first launch. Windows: choose \"More info\" > \"Run anyway\" on the SmartScreen prompt."
+
+            RELEASE_ID=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json id --jq .id)
+            RELEASE_IS_DRAFT=true
+          fi
+
           echo "release_id=$RELEASE_ID" >> "$GITHUB_OUTPUT"
+          echo "release_is_draft=$RELEASE_IS_DRAFT" >> "$GITHUB_OUTPUT"
 
   build:
     needs: gate
-    if: needs.gate.outputs.should_release == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -122,3 +127,16 @@ jobs:
           projectPath: apps/desktop
           releaseId: ${{ needs.gate.outputs.release_id }}
           args: ${{ matrix.args }}
+
+  publish:
+    needs: [gate, build]
+    if: needs.gate.outputs.release_is_draft == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release edit "${{ needs.gate.outputs.tag }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --draft=false
