@@ -28,7 +28,7 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       release_is_draft: ${{ steps.release.outputs.release_is_draft }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ env.RELEASE_TAG }}
 
@@ -83,11 +83,11 @@ jobs:
     runs-on: ${{ matrix.runner }}
     name: Build ${{ matrix.name }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ env.RELEASE_TAG }}
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm

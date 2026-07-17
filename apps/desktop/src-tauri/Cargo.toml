@@ -1,6 +1,6 @@
 [package]
 name = "nest"
-version = "0.1.0"
+version = "0.1.1"
 description = "Nest — local-first knowledge workspace"
 authors = ["Nest"]
 edition = "2021"
