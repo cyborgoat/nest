@@ -5,6 +5,11 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing version tag to build, for example v0.1.0
+        required: true
+        type: string
 
 concurrency:
   group: release-${{ github.ref_name }}
@@ -13,25 +18,19 @@ concurrency:
 permissions:
   contents: write
 
+env:
+  RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+
 jobs:
   gate:
     runs-on: ubuntu-latest
     outputs:
-      tag: ${{ steps.tag.outputs.tag }}
       version: ${{ steps.version.outputs.version }}
-      release_id: ${{ steps.release.outputs.release_id }}
       release_is_draft: ${{ steps.release.outputs.release_is_draft }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Resolve release tag
-        id: tag
-        run: |
-          if [ "${{ github.ref_type }}" = "tag" ]; then
-            echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "tag=v$(jq -r .version apps/desktop/src-tauri/tauri.conf.json)" >> "$GITHUB_OUTPUT"
-          fi
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Read version and verify version files agree
         id: version
@@ -45,36 +44,26 @@ jobs:
           fi
 
           EXPECTED_TAG="v$TAURI_V"
-          if [ "${{ steps.tag.outputs.tag }}" != "$EXPECTED_TAG" ]; then
-            echo "::error::Tag/version mismatch: tag=${{ steps.tag.outputs.tag }}, expected=$EXPECTED_TAG from desktop version files."
+          if [ "${{ env.RELEASE_TAG }}" != "$EXPECTED_TAG" ]; then
+            echo "::error::Tag/version mismatch: tag=${{ env.RELEASE_TAG }}, expected=$EXPECTED_TAG from desktop version files."
             exit 1
           fi
 
           echo "version=$TAURI_V" >> "$GITHUB_OUTPUT"
 
-      - name: Create or reuse release
+      - name: Detect release draft state
         id: release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="${{ steps.tag.outputs.tag }}"
+          TAG="${{ env.RELEASE_TAG }}"
 
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            RELEASE_ID=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json id --jq .id)
             RELEASE_IS_DRAFT=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)
           else
-            gh release create "$TAG" \
-              --repo "$GITHUB_REPOSITORY" \
-              --draft \
-              --title "Nest $TAG" \
-              --target "$GITHUB_SHA" \
-              --notes "Unsigned builds. macOS: right-click > Open (or run \`xattr -dr com.apple.quarantine /Applications/Nest.app\`) on first launch. Windows: choose \"More info\" > \"Run anyway\" on the SmartScreen prompt."
-
-            RELEASE_ID=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json id --jq .id)
             RELEASE_IS_DRAFT=true
           fi
 
-          echo "release_id=$RELEASE_ID" >> "$GITHUB_OUTPUT"
           echo "release_is_draft=$RELEASE_IS_DRAFT" >> "$GITHUB_OUTPUT"
 
   build:
@@ -99,6 +88,8 @@ jobs:
     name: Build ${{ matrix.name }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       - uses: actions/setup-node@v4
         with:
@@ -119,48 +110,31 @@ jobs:
         run: npm ci
         working-directory: apps/desktop
 
-      - name: Build installers and upload workflow artifacts
+      - name: Build and upload release bundles
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: apps/desktop
+          tagName: ${{ env.RELEASE_TAG }}
+          releaseName: Nest ${{ env.RELEASE_TAG }}
+          releaseBody: |
+            Unsigned builds. macOS: right-click > Open (or run `xattr -dr com.apple.quarantine /Applications/Nest.app`) on first launch. Windows: choose "More info" > "Run anyway" on the SmartScreen prompt.
+          releaseDraft: ${{ needs.gate.outputs.release_is_draft }}
+          prerelease: false
+          generateReleaseNotes: true
+          releaseAssetNamePattern: Nest_${{ env.RELEASE_TAG }}_[platform]_[arch][setup][ext]
           args: ${{ matrix.args }}
-          uploadWorkflowArtifacts: true
-          workflowArtifactNamePattern: "[platform]-[arch]-[bundle]"
 
   publish:
     needs: [gate, build]
     runs-on: ubuntu-latest
     steps:
-      - name: Download built installers
-        uses: actions/download-artifact@v4
-        with:
-          path: release-assets
-          merge-multiple: true
-
-      - name: Upload installers to release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          TAG="${{ needs.gate.outputs.tag }}"
-
-          mapfile -d '' FILES < <(find release-assets -type f -print0)
-          if [ "${#FILES[@]}" -eq 0 ]; then
-            echo "::error::No built installers were downloaded from workflow artifacts."
-            exit 1
-          fi
-
-          gh release upload "$TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --clobber \
-            "${FILES[@]}"
-
       - name: Publish release
         if: needs.gate.outputs.release_is_draft == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release edit "${{ needs.gate.outputs.tag }}" \
+          gh release edit "${{ env.RELEASE_TAG }}" \
             --repo "$GITHUB_REPOSITORY" \
             --draft=false
