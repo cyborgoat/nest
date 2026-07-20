@@ -38,8 +38,8 @@ export function TabStrip({
   };
 
   return (
-    <div className="flex h-10 items-stretch gap-1 border-b border-border px-1.5">
-      <div className="tab-scroll flex min-w-0 flex-1 items-stretch gap-0.5 overflow-x-auto">
+    <div className="flex h-10 overflow-hidden items-stretch gap-1 border-b border-border px-1.5">
+      <div className="tab-scroll flex h-full min-w-0 flex-1 items-stretch gap-0.5 overflow-x-auto overflow-y-hidden">
         {items.map((item) => {
           const active = item.id === activeId;
           return (
@@ -51,7 +51,7 @@ export function TabStrip({
                 onItemDoubleClick ? () => onItemDoubleClick(item.id) : undefined
               }
               className={cn(
-                "group relative flex max-w-44 shrink-0 items-center gap-1.5 px-2.5 text-xs transition-colors",
+                "group relative flex h-full max-w-44 shrink-0 items-center gap-1.5 px-2.5 text-xs transition-colors",
                 active
                   ? "text-foreground"
                   : "text-muted-foreground hover:text-foreground",

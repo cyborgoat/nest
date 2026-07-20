@@ -157,9 +157,9 @@ const messages: Record<Locale, MessageTree> = {
     shell: {
       appName: "Nest",
       appSubtitle: "知识工作区",
-      hub: "资源库",
-      settings: "设置",
-      chat: "聊天",
+      hub: "Hub",
+      settings: "Settings",
+      chat: "Chat",
       collapseLibrary: "折叠资料库",
       expandLibrary: "展开资料库",
       collapseChat: "折叠聊天",
