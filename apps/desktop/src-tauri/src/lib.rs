@@ -2,6 +2,7 @@ mod agent;
 mod commands;
 mod db;
 mod debug;
+mod default_pack;
 mod embeddings;
 mod error;
 mod hub;

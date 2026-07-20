@@ -18,7 +18,7 @@ Copy `.env.example` to `.env` and adjust as needed:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | `8787` | HTTP listen port |
-| `FIXTURES_PATH` | `../../fixtures/knowledge` | Path to the knowledge fixtures root (absolute, or relative to `apps/hub`) |
+| `FIXTURES_PATH` | `../../examples/knowledge-packs` | Path to the knowledge examples root (absolute, or relative to `apps/hub`) |
 | `NEST_DEBUG` | `false` | Verbose Hub service logs when `true` / `1` / `yes` / `on` |
 
 ## Endpoints

@@ -7,12 +7,15 @@ flowchart TB
   subgraph desktop [Desktop Tauri + React]
     UI[React UI]
     CMD[Tauri commands]
+    Seed[Bundled default pack seed]
     Agent[Rig agent + vault_search]
     Retr[Hybrid retrieval]
     Vault[(vault/ Markdown)]
     SQL[(nest.db SQLite FTS)]
     Vec[(nest-vectors.db FastEmbed)]
     UI --> CMD
+    CMD --> Seed
+    Seed --> Vault
     CMD --> Agent
     CMD --> Vault
     Agent --> Retr
@@ -39,7 +42,7 @@ flowchart TB
 | Desktop backend | `apps/desktop/src-tauri` | Vault I/O, index, RAG, LLM, sessions |
 | Shared types | `packages/shared` | TypeScript contracts shared with the UI |
 | Knowledge Hub | `apps/hub` | Pack catalog + ZIP download |
-| Fixtures | `fixtures/knowledge` | PyPI-style registry `{id}/{semver}/`; see [pack-registry.md](pack-registry.md) |
+| Examples | `examples/knowledge-packs` | PyPI-style registry `{id}/{semver}/`; see [pack-registry.md](pack-registry.md) |
 
 ## Knowledge Hub connectivity
 
@@ -48,14 +51,19 @@ The desktop app uses the configured Hub base URL from Settings. The Hub service 
 - Catalog and download use a **PyPI-style versioned registry** (`GET /packs`, `GET /packs/:id/:version/download`). See [pack-registry.md](pack-registry.md).
 - The Hub panel has two tabs: **Browse** (remote registry: search + download) and **Installed** (everything in the vault, with origin badges and upgrade/remove actions).
 - If the Hub is unreachable, the Hub panel shows an **Offline** status and Browse offers a connect/import empty state. The Installed tab and local **Import** (zip) still work.
-- Fixture folders under `fixtures/knowledge` are `{id}/{semver}/` trees served by the **Hub process** only — the desktop does not fall back to fixtures when offline.
+- Example-pack folders under `examples/knowledge-packs` are `{id}/{semver}/` trees served by the **Hub process** only — the desktop does not fall back to them when offline.
+
+On first launch, desktop seeds a local bundled `getting-started` pack into the vault. This does not require Hub connectivity.
 
 ## Vault and indexing
 
 - Packs install into the configured **knowledge directory** (default `{app_data}/vault/<pack-id>/`; upgrade replaces the tree).
+- A bundled default `getting-started` pack is copied once into the vault on first launch, recorded in `sync_state`, and marked active by default.
 - **Import local pack** accepts a `.zip` with `pack.json` (`id`, `name`, `description`, `version`; `path` optional and must equal `id`).
 - **Remove pack** deletes the tree, purges SQLite/FTS rows, and rebuilds the vector index.
 - Indexing runs automatically after download, import, and remove.
+
+The bundled pack can be deleted by the user; a first-run marker prevents reseeding on later launches.
 
 ## Library: active / inactive packs
 
@@ -91,6 +99,15 @@ Hybrid retrieval in `retrieval.rs`:
 Results are filtered by the resolved retrieval prefixes. Default top-k is fixed in the backend (`DEFAULT_TOP_K`), not user-configurable. Embedding model is fixed to `AllMiniLML6V2Q`.
 
 Chat uses a Rig agent with multi-turn memory and a `vault_search` tool; completions go to the user’s OpenAI-compatible LLM (Settings).
+
+## Markdown rendering
+
+The desktop viewer renders Markdown with:
+
+- `remark-gfm` (tables, task lists, strikethrough, autolinks)
+- `rehype-highlight` syntax highlighting for common fenced-code languages
+- Mermaid rendering for fenced `mermaid` blocks
+- Local vault image resolution (`png`, `jpg`, `jpeg`, `gif`, `webp`, `svg`, `bmp`) via a safe Tauri command
 
 ## Persistence
 

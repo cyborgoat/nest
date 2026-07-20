@@ -34,25 +34,25 @@ describe('Knowledge Hub (e2e)', () => {
     const packs = res.body as PackProject[];
     expect(Array.isArray(packs)).toBe(true);
     expect(packs.length).toBeGreaterThan(0);
-    const gs = packs.find((p) => p.id === 'getting-started');
-    expect(gs).toBeDefined();
-    expect(gs!.latest_version).toBe('1.1.0');
-    expect(gs!.versions).toEqual(expect.arrayContaining(['1.0.0', '1.1.0']));
+    const cs = packs.find((p) => p.id === 'customer-support');
+    expect(cs).toBeDefined();
+    expect(cs!.latest_version).toBe('1.1.0');
+    expect(cs!.versions).toEqual(expect.arrayContaining(['1.0.0', '1.1.0']));
   });
 
   it('/packs/:id/:version (GET)', async () => {
     const res = await request(app.getHttpServer())
-      .get('/packs/getting-started/1.0.0')
+      .get('/packs/customer-support/1.0.0')
       .expect(200);
     const release = res.body as PackRelease;
-    expect(release.id).toBe('getting-started');
+    expect(release.id).toBe('customer-support');
     expect(release.version).toBe('1.0.0');
-    expect(release.path).toBe('getting-started');
+    expect(release.path).toBe('customer-support');
   });
 
   it('/packs/:id/download (GET) latest', async () => {
     const res = await request(app.getHttpServer())
-      .get('/packs/getting-started/download')
+      .get('/packs/customer-support/download')
       .buffer(true)
       .parse((response, callback) => {
         const chunks: Buffer[] = [];
@@ -70,7 +70,7 @@ describe('Knowledge Hub (e2e)', () => {
 
   it('/packs/:id/:version/download (GET)', async () => {
     const res = await request(app.getHttpServer())
-      .get('/packs/getting-started/1.0.0/download')
+      .get('/packs/customer-support/1.0.0/download')
       .buffer(true)
       .parse((response, callback) => {
         const chunks: Buffer[] = [];
@@ -81,7 +81,7 @@ describe('Knowledge Hub (e2e)', () => {
       })
       .expect(200);
     expect(res.headers['content-disposition']).toContain(
-      'getting-started-1.0.0.zip',
+      'customer-support-1.0.0.zip',
     );
     expect(res.headers['x-content-sha256']).toMatch(/^[a-f0-9]{64}$/);
   });

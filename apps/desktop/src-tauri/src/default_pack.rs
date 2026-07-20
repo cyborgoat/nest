@@ -1,0 +1,110 @@
+use crate::db;
+use crate::error::{AppError, AppResult};
+use crate::vault;
+use include_dir::{include_dir, Dir};
+use rusqlite::Connection;
+use serde::Deserialize;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+const DEFAULT_PACK_ID: &str = "getting-started";
+const DEFAULT_PACK_NAME: &str = "Getting Started";
+const FIRST_RUN_MARKER: &str = ".default-pack-seeded-v1";
+
+static DEFAULT_PACK_DIR: Dir<'_> =
+    include_dir!("$CARGO_MANIFEST_DIR/resources/default-packs/getting-started/1.0.0");
+
+#[derive(Debug, Deserialize)]
+struct EmbeddedPackMeta {
+    id: String,
+    name: String,
+    version: String,
+}
+
+pub fn ensure_seeded(conn: &Connection, app_data_dir: &Path, vault_root: &Path) -> AppResult<()> {
+    let marker = app_data_dir.join(FIRST_RUN_MARKER);
+    if marker.exists() {
+        return Ok(());
+    }
+
+    if db::get_sync_state(conn, DEFAULT_PACK_ID)?.is_some() {
+        write_marker(&marker)?;
+        return Ok(());
+    }
+
+    let pack_root = vault_root.join(DEFAULT_PACK_ID);
+    if !pack_root.exists() {
+        write_embedded_pack(&pack_root)?;
+    }
+
+    let meta = match read_pack_meta(&pack_root.join("pack.json")) {
+        Ok(meta) => meta,
+        Err(_) => {
+            if pack_root.exists() {
+                fs::remove_dir_all(&pack_root)?;
+            }
+            write_embedded_pack(&pack_root)?;
+            read_pack_meta(&pack_root.join("pack.json"))?
+        }
+    };
+
+    db::upsert_sync_state(conn, &meta.id, &meta.name, &meta.version, &meta.id)?;
+    write_marker(&marker)
+}
+
+fn write_embedded_pack(pack_root: &Path) -> AppResult<()> {
+    vault::ensure_dir(pack_root)?;
+    write_dir_recursive(&DEFAULT_PACK_DIR, PathBuf::new(), pack_root)
+}
+
+fn write_dir_recursive(dir: &Dir<'_>, rel: PathBuf, target_root: &Path) -> AppResult<()> {
+    let current = target_root.join(&rel);
+    vault::ensure_dir(&current)?;
+
+    for file in dir.files() {
+        let name = file
+            .path()
+            .file_name()
+            .ok_or_else(|| AppError::msg("Invalid bundled default-pack file path"))?;
+        let out = current.join(name);
+        fs::write(out, file.contents())?;
+    }
+
+    for child in dir.dirs() {
+        let name = child
+            .path()
+            .file_name()
+            .ok_or_else(|| AppError::msg("Invalid bundled default-pack directory path"))?;
+        let next_rel = rel.join(name);
+        write_dir_recursive(child, next_rel, target_root)?;
+    }
+
+    Ok(())
+}
+
+fn read_pack_meta(path: &Path) -> AppResult<EmbeddedPackMeta> {
+    let raw = fs::read_to_string(path)?;
+    let meta: EmbeddedPackMeta = serde_json::from_str(&raw)?;
+    if meta.id.trim().is_empty() || meta.version.trim().is_empty() {
+        return Err(AppError::msg("Bundled default pack has invalid metadata"));
+    }
+    if meta.id != DEFAULT_PACK_ID {
+        return Err(AppError::msg(format!(
+            "Bundled default pack id mismatch: expected {DEFAULT_PACK_ID}, found {}",
+            meta.id
+        )));
+    }
+    if meta.name.trim().is_empty() {
+        return Ok(EmbeddedPackMeta {
+            id: meta.id,
+            name: DEFAULT_PACK_NAME.into(),
+            version: meta.version,
+        });
+    }
+    Ok(meta)
+}
+
+fn write_marker(marker_path: &Path) -> AppResult<()> {
+    fs::write(marker_path, b"1")?;
+    Ok(())
+}

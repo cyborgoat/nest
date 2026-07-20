@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="420" viewBox="0 0 980 420" role="img" aria-label="Nest workflow diagram">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f7f7f8"/>
+      <stop offset="100%" stop-color="#ececef"/>
+    </linearGradient>
+  </defs>
+  <rect width="980" height="420" rx="18" fill="url(#bg)"/>
+  <text x="40" y="48" font-family="Arial, sans-serif" font-size="28" fill="#27272a">Nest: simple daily workflow</text>
+
+  <rect x="40" y="90" width="200" height="90" rx="12" fill="#ffffff" stroke="#d8d8de"/>
+  <text x="60" y="125" font-family="Arial, sans-serif" font-size="16" fill="#27272a">1. Choose packs</text>
+  <text x="60" y="148" font-family="Arial, sans-serif" font-size="13" fill="#5f5f68">activate what you need</text>
+
+  <rect x="290" y="90" width="200" height="90" rx="12" fill="#ffffff" stroke="#d8d8de"/>
+  <text x="310" y="125" font-family="Arial, sans-serif" font-size="16" fill="#27272a">2. Open Chat</text>
+  <text x="310" y="148" font-family="Arial, sans-serif" font-size="13" fill="#5f5f68">ask your question</text>
+
+  <rect x="540" y="90" width="200" height="90" rx="12" fill="#ffffff" stroke="#d8d8de"/>
+  <text x="560" y="125" font-family="Arial, sans-serif" font-size="16" fill="#27272a">3. Optional `@` focus</text>
+  <text x="560" y="148" font-family="Arial, sans-serif" font-size="13" fill="#5f5f68">narrow to files/folders</text>
+
+  <rect x="780" y="90" width="170" height="90" rx="12" fill="#ffffff" stroke="#d8d8de"/>
+  <text x="800" y="125" font-family="Arial, sans-serif" font-size="16" fill="#27272a">4. Review answer</text>
+  <text x="800" y="148" font-family="Arial, sans-serif" font-size="13" fill="#5f5f68">check citations</text>
+
+  <g stroke="#73737c" stroke-width="2" fill="none" marker-end="url(#arrow)">
+    <path d="M240 135 L290 135"/>
+    <path d="M490 135 L540 135"/>
+    <path d="M740 135 L780 135"/>
+  </g>
+
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L9,3 L0,6 z" fill="#73737c"/>
+    </marker>
+  </defs>
+</svg>

@@ -2,10 +2,12 @@
 
 Nest’s Knowledge Hub catalogs and distributes Markdown knowledge packs like a small **PyPI**: a stable project id, immutable SemVer releases, and one active install in the vault.
 
+Desktop also bundles one default pack (`getting-started`) for first launch. The bundled content follows the same pack structure.
+
 ## Layout
 
 ```text
-fixtures/knowledge/           # or FIXTURES_PATH / HUB_REGISTRY_PATH
+examples/knowledge-packs/     # or FIXTURES_PATH / HUB_REGISTRY_PATH
   getting-started/
     1.0.0/
       pack.json
@@ -65,7 +67,13 @@ Download zip layout: top-level folder `{id}/` including `pack.json` (vault paths
 - Do **not** stack `vault/<id>/<version>/` for RAG (avoids duplicate citations).
 - `sync_state` stores `pack_id`, installed `version`, and **`active`** (RAG inclusion; default `true` on install).
 - Local zip import still installs from embedded `pack.json`.
-- Example Import zip: `fixtures/examples/healthy-diet-1.0.0.zip`.
+- Example Import zip: `examples/zip-files/healthy-diet-1.0.0.zip`.
+
+Bundled default pack notes:
+
+- On first launch, desktop copies bundled `getting-started` files into `vault/getting-started/` and records that version in `sync_state`.
+- The user can remove it like any other pack.
+- A first-run marker avoids reinstalling it automatically after removal.
 
 ## Authoring
 

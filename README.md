@@ -2,13 +2,15 @@
 
 Local-first desktop knowledge workspace. Browse immutable Markdown knowledge packs and ask questions with retrieval-augmented chat over an OpenAI-compatible LLM.
 
+Nest ships with a bundled default knowledge pack (`getting-started`) on first launch so users can learn the app immediately, even before connecting to a Hub.
+
 ## Layout
 
 ```
 apps/desktop      Tauri v2 + React (Nest desktop client)
 apps/hub          NestJS Knowledge Hub (catalog + download)
 packages/shared   Shared TypeScript types
-fixtures/knowledge  Markdown packs served by the Knowledge Hub
+examples/knowledge-packs  Example Markdown packs served by the Knowledge Hub
 docs/             Architecture and development notes
 ```
 
@@ -27,11 +29,19 @@ npm run tauri dev
 
 ### First-run tips
 
-1. Start the Knowledge Hub (`apps/hub`), then open **Hub** in the desktop app. The **Browse** tab lists the remote registry for download; the **Installed** tab manages everything in your vault (upgrade/remove, with origin badges). Use **Import** to add a local pack `.zip` (must include `pack.json`). Indexing runs automatically after download, import, and remove.
+1. Open **Library** and start with the bundled **Getting Started** pack. It is preinstalled on first run, active by default, and can be removed any time.
 2. Configure an OpenAI-compatible **Base URL**, **API key**, and chat model under **Settings**.
-3. In **Library**, keep packs **Active** for chat retrieval (use **+/−** to deactivate). Inactive packs stay browsable under a collapsible section.
-4. In **Chat**, ask questions over all active packs, or `@`-mention files/folders under active packs to narrow focus.
-5. Chat supports **multiple sessions**: tabs for open chats, History for pin/archive/rename/delete. Session titles are generated after the first reply when still untitled.
+3. (Optional) Start the Knowledge Hub (`apps/hub`), then open **Hub** in the desktop app. The **Browse** tab lists the remote registry for download; the **Installed** tab manages everything in your vault (upgrade/remove, with origin badges). Use **Import** to add a local pack `.zip` (must include `pack.json`). Indexing runs automatically after download, import, and remove.
+4. In **Library**, keep packs **Active** for chat retrieval (use **+/−** to deactivate). Inactive packs stay browsable under a collapsible section.
+5. In **Chat**, ask questions over all active packs, or `@`-mention files/folders under active packs to narrow focus.
+6. Chat supports **multiple sessions**: tabs for open chats, History for pin/archive/rename/delete. Session titles are generated after the first reply when still untitled.
+
+### Markdown support in the app
+
+- GitHub Flavored Markdown (tables, task lists, strikethrough, autolinks)
+- Fenced code blocks with syntax highlighting (common languages)
+- Mermaid diagrams via fenced `mermaid` blocks
+- Relative and absolute image references, including inline SVG
 
 ## Knowledge Hub
 
@@ -72,6 +82,8 @@ Desktop installers (macOS `.dmg` for Apple Silicon + Intel, Windows `.msi`/`.exe
 - Active packs define the default RAG domain; `@` focus paths narrow retrieval further
 - Desktop Nest is a download-only client (no publishing)
 - Hub auth and multi-tenant cloud are deferred
+
+The bundled `getting-started` pack is seeded once per app data directory and is not reinstalled automatically after deletion.
 
 ## Data locations
 

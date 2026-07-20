@@ -45,6 +45,7 @@ cd apps/desktop && npx tsc --noEmit && npm run build
   and steals the user's focus — if the user is active (check tmux pane / recent
   commands), don't fight them; capture what you can and report the rest.
 
-## Fixtures
-Registry packs come from `fixtures/knowledge` (getting-started, llm-agents,
-software-engineering). `GET /packs` on the hub lists them.
+## Example packs
+Registry packs come from `examples/knowledge-packs` (customer-support,
+devops-operations, llm-agents, product-management, software-engineering).
+`GET /packs` on the hub lists them.

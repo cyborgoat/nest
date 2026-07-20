@@ -28,6 +28,7 @@ impl AppState {
         };
         let vault_root = resolve_knowledge_dir(&app_data_dir, &settings.knowledge_dir);
         vault::ensure_dir(&vault_root)?;
+        crate::default_pack::ensure_seeded(&db, &app_data_dir, &vault_root)?;
 
         Ok(Self {
             db: Mutex::new(db),

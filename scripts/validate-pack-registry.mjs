@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Validate PyPI-style knowledge pack registry under fixtures/knowledge.
+ * Validate PyPI-style knowledge pack registry under examples/knowledge-packs.
  * Usage: node scripts/validate-pack-registry.mjs [registryRoot]
  */
 import { createHash } from "node:crypto";
@@ -16,8 +16,8 @@ const registryRoot = rootArg
   ? rootArg
   : join(
       fileURLToPath(new URL("..", import.meta.url)),
-      "fixtures",
-      "knowledge",
+      "examples",
+      "knowledge-packs",
     );
 
 let errors = 0;

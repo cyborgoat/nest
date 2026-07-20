@@ -1,0 +1,7 @@
+{
+  "id": "devops-operations",
+  "name": "DevOps Operations",
+  "description": "Example pack: SRE runbooks, deployment procedures, and postmortem templates.",
+  "version": "1.0.0",
+  "yanked": false
+}

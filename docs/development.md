@@ -8,7 +8,7 @@
 ## Run
 
 ```bash
-# Terminal 1 — Knowledge Hub
+# Terminal 1 (optional) — Knowledge Hub
 cd apps/hub
 cp .env.example .env   # first time
 npm install
@@ -19,6 +19,8 @@ cd apps/desktop
 npm install
 npm run tauri dev
 ```
+
+The desktop app can start without the Hub and will still include a bundled first-run `getting-started` pack.
 
 The Hub service listens on `PORT` (default `8787`). Configure the desktop app's **Settings → Hub base URL** to the address you want it to use, for example `http://127.0.0.1:8787` for local development.
 
@@ -65,14 +67,22 @@ Notes:
 - The workflow can also be run manually from **Actions → Release → Run workflow** for testing.
 - Builds are unsigned: macOS users need right-click → Open (or `xattr -dr com.apple.quarantine`) on first launch; Windows shows a SmartScreen prompt.
 
-## Fixtures
+## Examples
 
-`fixtures/knowledge` is a PyPI-style registry: `{pack-id}/{semver}/pack.json`. The Hub discovers releases by scanning those folders and serves ZIP downloads (`{id}-{version}.zip`). Validate with:
+`examples/knowledge-packs` is a PyPI-style registry: `{pack-id}/{semver}/pack.json`. The Hub discovers releases by scanning those folders and serves ZIP downloads (`{id}-{version}.zip`). Validate with:
 
 ```bash
 node scripts/validate-pack-registry.mjs
 ```
 
-The desktop app does not use fixtures as an offline fallback. See [pack-registry.md](pack-registry.md).
+The desktop app does not use Hub examples as an offline fallback for Hub connectivity. Instead, it ships an embedded first-run `getting-started` pack from `apps/desktop/src-tauri/resources/default-packs/getting-started/1.0.0/`.
+
+Bundled pack behavior:
+
+- Seeded once per app-data directory on first launch
+- Recorded in `sync_state` as a normal installed pack
+- Active by default
+- Deletable by the user
+- Not automatically re-seeded after deletion
 
 Library **active** packs are the chat retrieval domain; inactive packs remain browsable. Chat `@` mentions focus files/folders under active packs — see [architecture.md](architecture.md).
