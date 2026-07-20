@@ -15,6 +15,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Toaster } from "@/components/ui/sonner";
 import { api } from "@/lib/api";
+import { I18nProvider, isLocale } from "@/lib/i18n";
 import {
   animatePanelSize,
   cancelPanelAnimation,
@@ -73,6 +74,57 @@ export default function App() {
     queryFn: api.indexStatus,
     refetchInterval: (q) => (q.state.data?.is_indexing ? 1000 : 10_000),
   });
+
+  const settingsQuery = useQuery({
+    queryKey: ["settings"],
+    queryFn: api.settingsGet,
+  });
+
+  const fontSizePt = settingsQuery.data?.font_size_pt ?? 10;
+  const displayLanguage = isLocale(settingsQuery.data?.display_language ?? "en")
+    ? settingsQuery.data?.display_language ?? "en"
+    : "en";
+
+  const shell =
+    displayLanguage === "zh"
+      ? {
+          appSubtitle: "知识工作区",
+          collapseLibrary: "折叠资料库",
+          expandLibrary: "展开资料库",
+          hub: "资源库",
+          settings: "设置",
+          chat: "聊天",
+          collapseChat: "折叠聊天",
+          expandChat: "展开聊天",
+          loading: "加载中…",
+          indexing: " · 索引中…",
+          ready: "就绪",
+          index: "索引",
+          files: "个文件",
+          chunks: "个块",
+        }
+      : {
+          appSubtitle: "Knowledge workspace",
+          collapseLibrary: "Collapse library",
+          expandLibrary: "Expand library",
+          hub: "Hub",
+          settings: "Settings",
+          chat: "Chat",
+          collapseChat: "Collapse chat",
+          expandChat: "Expand chat",
+          loading: "Loading…",
+          indexing: " · indexing…",
+          ready: "Ready",
+          index: "Index",
+          files: "files",
+          chunks: "chunks",
+        };
+
+  useEffect(() => {
+    document.documentElement.style.setProperty("--app-font-size", `${fontSizePt}pt`);
+    document.documentElement.lang = displayLanguage === "zh" ? "zh-CN" : "en";
+    document.documentElement.dataset.locale = displayLanguage;
+  }, [displayLanguage, fontSizePt]);
 
   useEffect(() => {
     if (!treeQuery.data) return;
@@ -161,15 +213,16 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <I18nProvider locale={displayLanguage}>
+      <div className="flex h-full flex-col">
       <header className="flex items-center justify-between border-b border-border bg-panel/80 px-4 py-2.5 backdrop-blur">
         <div className="flex items-center gap-3">
           <Button
             size="icon"
             variant={sidebarOpen ? "secondary" : "ghost"}
             onClick={handleToggleSidebar}
-            title={sidebarOpen ? "Collapse library" : "Expand library"}
-            aria-label={sidebarOpen ? "Collapse library" : "Expand library"}
+            title={sidebarOpen ? shell.collapseLibrary : shell.expandLibrary}
+            aria-label={sidebarOpen ? shell.collapseLibrary : shell.expandLibrary}
           >
             <PanelLeft className="size-4" />
           </Button>
@@ -183,7 +236,7 @@ export default function App() {
             />
             <div>
               <h1 className="font-display text-lg leading-none tracking-tight">Nest</h1>
-              <p className="text-[11px] text-muted-foreground">Knowledge workspace</p>
+              <p className="text-[11px] text-muted-foreground">{shell.appSubtitle}</p>
             </div>
           </div>
         </div>
@@ -192,21 +245,21 @@ export default function App() {
             active={activeMainTabId === HUB_TAB_ID}
             onClick={openHubTab}
             icon={<Cloud className="size-4" />}
-            label="Hub"
+            label={shell.hub}
           />
           <NavButton
             active={activeMainTabId === SETTINGS_TAB_ID}
             onClick={openSettingsTab}
             icon={<Settings2 className="size-4" />}
-            label="Settings"
+            label={shell.settings}
           />
           <Separator orientation="vertical" className="mx-1 h-6" />
           <NavButton
             active={chatOpen}
             onClick={handleToggleChat}
             icon={<MessageSquare className="size-4" />}
-            label="Chat"
-            title={chatOpen ? "Collapse chat" : "Expand chat"}
+            label={shell.chat}
+            title={chatOpen ? shell.collapseChat : shell.expandChat}
           />
         </nav>
       </header>
@@ -236,7 +289,7 @@ export default function App() {
             <aside className="flex h-full min-h-0 flex-col border-r border-border">
               <div className="min-h-0 flex-1">
                 {treeQuery.isLoading ? (
-                  <p className="p-4 text-sm text-muted-foreground">Loading…</p>
+                  <p className="p-4 text-sm text-muted-foreground">{shell.loading}</p>
                 ) : treeQuery.error ? (
                   <p className="p-4 text-sm text-destructive">
                     {(treeQuery.error as Error).message}
@@ -312,15 +365,16 @@ export default function App() {
 
       <footer className="flex items-center justify-between border-t border-border bg-panel/90 px-4 py-1.5 text-[11px] text-muted-foreground">
         <span>
-          Index: {indexQuery.data?.indexed_files ?? 0} files /{" "}
-          {indexQuery.data?.indexed_chunks ?? 0} chunks
-          {indexQuery.data?.is_indexing ? " · indexing…" : ""}
+          {shell.index}: {indexQuery.data?.indexed_files ?? 0} {shell.files} /{" "}
+          {indexQuery.data?.indexed_chunks ?? 0} {shell.chunks}
+          {indexQuery.data?.is_indexing ? shell.indexing : ""}
         </span>
-        <span className="truncate pl-4">{statusMessage ?? "Ready"}</span>
+        <span className="truncate pl-4">{statusMessage ?? shell.ready}</span>
       </footer>
 
       <Toaster position="bottom-right" closeButton />
-    </div>
+      </div>
+    </I18nProvider>
   );
 }
 

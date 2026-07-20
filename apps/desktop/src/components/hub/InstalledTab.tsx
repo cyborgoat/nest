@@ -6,6 +6,7 @@ import { RemovePackButton } from "@/components/hub/RemovePackButton";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
+import { useI18n } from "@/lib/i18n";
 
 export function InstalledTab({
   installed,
@@ -32,8 +33,9 @@ export function InstalledTab({
   onBrowse: () => void;
   onExport: (packId: string, destinationPath: string) => void;
 }) {
+  const { t } = useI18n();
   if (isLoading) {
-    return <p className="text-sm text-muted-foreground">Loading packs…</p>;
+    return <p className="text-sm text-muted-foreground">{t("hub.loadingPacks")}</p>;
   }
 
   if (installed.length === 0) {
@@ -41,12 +43,12 @@ export function InstalledTab({
       <EmptyState
         variant="dashed"
         icon={<Package className="size-6" />}
-        title="No packs in your vault yet"
-        description="Download packs, create one from a Markdown folder, or import a shared pack ZIP."
+        title={t("hub.registryEmpty")}
+        description={t("hub.havePackFileBody")}
         footnote={
           hubOnline
             ? undefined
-            : "The registry is unavailable while the Hub is offline."
+            : t("hub.offlineToastDescription")
         }
       >
         <div className="flex flex-wrap items-center justify-center gap-2">
@@ -54,14 +56,14 @@ export function InstalledTab({
             size="sm"
             onClick={onBrowse}
             disabled={!hubOnline}
-            title={hubOnline ? undefined : "Knowledge Hub is offline"}
+            title={hubOnline ? undefined : t("hub.offline")}
           >
             <Globe className="size-4" />
-            Browse registry
+            {t("hub.browseRegistry")}
           </Button>
           <Button size="sm" variant="outline" onClick={onOpenImport}>
             <FolderInput className="size-4" />
-            Import local pack
+            {t("hub.import")}
           </Button>
         </div>
       </EmptyState>
@@ -79,6 +81,7 @@ export function InstalledTab({
           catalogAvailable={catalogById != null}
           busy={busy}
           removePending={removePending}
+          t={t}
           onUpgrade={onUpgrade}
           onRemove={() => onRemove(pack.pack_id)}
           onExport={onExport}
@@ -90,7 +93,7 @@ export function InstalledTab({
         className="w-full border-dashed bg-transparent text-muted-foreground hover:text-foreground"
       >
         <FolderInput className="size-4" />
-        Import or create another pack…
+        {t("hub.importOrCreateAnother")}
       </Button>
     </div>
   );
@@ -103,6 +106,7 @@ function InstalledPackRow({
   catalogAvailable,
   busy,
   removePending,
+  t,
   onUpgrade,
   onRemove,
   onExport,
@@ -113,6 +117,7 @@ function InstalledPackRow({
   catalogAvailable: boolean;
   busy: boolean;
   removePending: boolean;
+  t: ReturnType<typeof useI18n>["t"];
   onUpgrade: (packId: string, version: string, previousVersion: string) => void;
   onRemove: () => void;
   onExport: (packId: string, destinationPath: string) => void;
@@ -140,17 +145,17 @@ function InstalledPackRow({
           <span className="text-xs text-muted-foreground">v{pack.version}</span>
           {catalogAvailable ? (
             catalogEntry ? (
-              <Badge variant="muted">From registry</Badge>
+              <Badge variant="muted">{t("hub.fromRegistry")}</Badge>
             ) : (
-              <Badge variant="accent">Imported locally</Badge>
+              <Badge variant="accent">{t("hub.importedLocally")}</Badge>
             )
           ) : (
-            <Badge variant="muted">In vault</Badge>
+            <Badge variant="muted">{t("hub.inVault")}</Badge>
           )}
-          {updateAvailable && <Badge variant="accent">Update available</Badge>}
+          {updateAvailable && <Badge variant="accent">{t("hub.updateAvailable")}</Badge>}
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
-          Local folder · {pack.local_path}
+          {t("hub.localFolder", { path: pack.local_path })}
         </p>
       </div>
       <div className="mt-2 flex justify-end gap-1.5">
@@ -161,7 +166,7 @@ function InstalledPackRow({
           disabled={busy}
           onClick={async () => {
             const destination = await save({
-              title: "Export knowledge pack",
+              title: t("hub.exportKnowledgePack"),
               defaultPath: `${pack.pack_id}-${pack.version}.zip`,
               filters: [{ name: "Knowledge pack", extensions: ["zip"] }],
             });
@@ -169,7 +174,7 @@ function InstalledPackRow({
           }}
         >
           <Download className="size-3.5" />
-          Export ZIP
+          {t("hub.exportZip")}
         </Button>
         {updateAvailable && catalogEntry && (
           <Button
@@ -181,7 +186,7 @@ function InstalledPackRow({
             }
           >
             <ArrowUpCircle className="size-3.5" />
-            Upgrade
+            {t("hub.upgrade")}
           </Button>
         )}
       </div>

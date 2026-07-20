@@ -111,6 +111,10 @@
     height: 100%;
   }
 
+  html {
+    font-size: var(--app-font-size, 10pt);
+  }
+
   body {
     @apply bg-background text-foreground font-sans antialiased;
     background-image:
@@ -145,7 +149,7 @@
 }
 
 .markdown-body {
-  @apply min-w-0 max-w-full break-words text-sm leading-relaxed text-foreground;
+  @apply min-w-0 max-w-full wrap-break-word text-sm leading-relaxed text-foreground;
   overflow-wrap: anywhere;
 }
 

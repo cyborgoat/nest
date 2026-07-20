@@ -12,9 +12,11 @@ import { PanelHeader } from "@/components/ui/panel-header";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
+import { useI18n } from "@/lib/i18n";
 import { useUiStore } from "@/stores/ui";
 
 export function HubPanel() {
+  const { t } = useI18n();
   const clearPathsUnder = useUiStore((s) => s.clearPathsUnder);
   const queryClient = useQueryClient();
   const [importOpen, setImportOpen] = useState(false);
@@ -39,13 +41,11 @@ export function HubPanel() {
     wasOnlineRef.current = online;
     // Toast on first known offline, or when connection drops.
     if (!online && prev !== false) {
-      toast.warning("Knowledge Hub offline", {
-        description:
-          hubStatusQuery.data.message ||
-          "Catalog unavailable. You can still create or import a local pack.",
+      toast.warning(t("hub.offlineToastTitle"), {
+        description: hubStatusQuery.data.message || t("hub.offlineToastDescription"),
       });
     }
-  }, [hubStatusQuery.data]);
+  }, [hubStatusQuery.data, t]);
 
   const packsQuery = useQuery({
     queryKey: ["packs"],
@@ -109,17 +109,25 @@ export function HubPanel() {
     onSuccess: (status, vars) => {
       invalidateAfterPackChange();
       if (vars.previousVersion && vars.previousVersion !== vars.version) {
-        toast.success("Pack upgraded", {
-          description: `${vars.packId} ${vars.previousVersion} → ${vars.version} (${status.indexed_files} files indexed)`,
+        toast.success(t("hub.packUpgraded"), {
+          description: t("hub.upgradeDescription", {
+            packId: vars.packId,
+            previousVersion: vars.previousVersion,
+            version: vars.version,
+            count: status.indexed_files,
+          }),
         });
       } else {
-        toast.success("Pack downloaded", {
-          description: `${vars.packId}@${vars.version}: ${status.indexed_files} files indexed`,
+        toast.success(t("hub.packDownloaded"), {
+          description: t("hub.downloadDescription", {
+            packId: vars.packId,
+            version: vars.version,
+            count: status.indexed_files,
+          }),
         });
       }
     },
-    onError: (e: Error) =>
-      toast.error("Download failed", { description: e.message }),
+    onError: (e: Error) => toast.error(t("hub.downloadFailed"), { description: e.message }),
   });
 
   const importLocal = useMutation({
@@ -127,12 +135,12 @@ export function HubPanel() {
     onSuccess: (status) => {
       setImportOpen(false);
       invalidateAfterPackChange();
-      toast.success("Pack imported", {
-        description: `${status.indexed_files} files indexed`,
+      toast.success(t("hub.packImported"), {
+        description: t("hub.indexedFiles", { count: status.indexed_files }),
       });
     },
     onError: (e: Error) =>
-      toast.error("Import failed", {
+      toast.error(t("hub.importFailed"), {
         description: e.message || String(e),
       }),
   });
@@ -143,16 +151,20 @@ export function HubPanel() {
     onSuccess: (status) => {
       setImportOpen(false);
       invalidateAfterPackChange();
-      toast.success("Knowledge pack created", { description: `${status.indexed_files} files indexed` });
+      toast.success(t("hub.packCreated"), {
+        description: t("hub.indexedFiles", { count: status.indexed_files }),
+      });
     },
-    onError: (e: Error) => toast.error("Could not create pack", { description: e.message || String(e) }),
+    onError: (e: Error) =>
+      toast.error(t("hub.createFailed"), { description: e.message || String(e) }),
   });
 
   const exportPack = useMutation({
     mutationFn: ({ packId, destinationPath }: { packId: string; destinationPath: string }) =>
       api.hubExportPack(packId, destinationPath),
-    onSuccess: () => toast.success("Knowledge pack exported"),
-    onError: (e: Error) => toast.error("Export failed", { description: e.message || String(e) }),
+    onSuccess: () => toast.success(t("hub.packExported")),
+    onError: (e: Error) =>
+      toast.error(t("hub.exportFailed"), { description: e.message || String(e) }),
   });
 
   const remove = useMutation({
@@ -163,12 +175,12 @@ export function HubPanel() {
         packId;
       clearPathsUnder(localPath);
       invalidateAfterPackChange();
-      toast.success("Pack removed", {
-        description: `${packId} deleted and search index refreshed`,
+      toast.success(t("hub.packRemoved"), {
+        description: t("hub.removedDescription", { packId }),
       });
     },
     onError: (e: Error) =>
-      toast.error("Remove failed", {
+      toast.error(t("hub.removeFailed"), {
         description: e.message || String(e),
       }),
   });
@@ -179,15 +191,15 @@ export function HubPanel() {
   return (
     <div className="flex h-full flex-col">
       <PanelHeader
-        title="Knowledge Hub"
-        description="Install versioned packs from the configured catalog, create one from a local folder, or import a shareable ZIP."
+        title={t("hub.title")}
+        description={t("hub.description")}
         badges={
           <>
-            {hubOnline && <Badge variant="accent">Online</Badge>}
+            {hubOnline && <Badge variant="accent">{t("hub.online")}</Badge>}
             {hubOffline && (
               <Badge variant="destructive">
                 <CloudOff className="size-3" />
-                Offline
+                {t("hub.offline")}
               </Badge>
             )}
           </>
@@ -199,7 +211,7 @@ export function HubPanel() {
             onClick={() => setImportOpen(true)}
           >
             <FolderInput className="size-4" />
-            Import
+            {t("hub.import")}
           </Button>
         }
       />
@@ -211,9 +223,9 @@ export function HubPanel() {
       >
         <div className="px-4 pt-3">
           <TabsList>
-            <TabsTrigger value="browse">Browse</TabsTrigger>
+            <TabsTrigger value="browse">{t("hub.browse")}</TabsTrigger>
             <TabsTrigger value="installed">
-              Installed ({installedCount})
+              {t("hub.installedCount", { count: installedCount })}
             </TabsTrigger>
           </TabsList>
         </div>

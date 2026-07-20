@@ -12,6 +12,10 @@ pub struct AppSettings {
     pub chat_model: String,
     pub embedding_model: String,
     pub hub_base_url: String,
+    #[serde(default = "default_font_size_pt")]
+    pub font_size_pt: u32,
+    #[serde(default = "default_display_language")]
+    pub display_language: String,
     #[serde(default)]
     pub user_name: String,
     /// Custom knowledge / vault directory. Empty means default `{app_data}/vault`.
@@ -30,11 +34,21 @@ impl Default for AppSettings {
             chat_model: "gpt-4o-mini".into(),
             embedding_model: crate::embeddings::DEFAULT_EMBEDDING_MODEL.into(),
             hub_base_url: String::new(),
+            font_size_pt: default_font_size_pt(),
+            display_language: default_display_language(),
             user_name: String::new(),
             knowledge_dir: String::new(),
             resolved_knowledge_dir: String::new(),
         }
     }
+}
+
+fn default_font_size_pt() -> u32 {
+    10
+}
+
+fn default_display_language() -> String {
+    "en".into()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -274,6 +288,16 @@ pub fn get_settings(conn: &Connection) -> AppResult<AppSettings> {
             "chat_model" => settings.chat_model = value,
             "embedding_model" | "embeddings_model" => settings.embedding_model = value,
             "hub_base_url" => settings.hub_base_url = value,
+            "font_size_pt" => {
+                if let Ok(parsed) = value.parse::<u32>() {
+                    settings.font_size_pt = parsed;
+                }
+            }
+            "display_language" => {
+                if value == "en" || value == "zh" {
+                    settings.display_language = value;
+                }
+            }
             "user_name" => settings.user_name = value,
             "knowledge_dir" => settings.knowledge_dir = value,
             // legacy "top_k" rows ignored — retrieval uses DEFAULT_TOP_K
@@ -290,6 +314,8 @@ pub fn save_settings(conn: &Connection, settings: &AppSettings) -> AppResult<()>
         ("chat_model", settings.chat_model.clone()),
         ("embedding_model", settings.embedding_model.clone()),
         ("hub_base_url", settings.hub_base_url.clone()),
+        ("font_size_pt", settings.font_size_pt.to_string()),
+        ("display_language", settings.display_language.clone()),
         ("user_name", settings.user_name.clone()),
         ("knowledge_dir", settings.knowledge_dir.trim().to_string()),
     ];

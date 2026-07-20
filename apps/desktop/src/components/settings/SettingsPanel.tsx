@@ -6,6 +6,7 @@ import {
   Cloud,
   FolderOpen,
   LoaderCircle,
+  Palette,
   User,
   type LucideIcon,
 } from "lucide-react";
@@ -15,11 +16,21 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PanelHeader } from "@/components/ui/panel-header";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { api } from "@/lib/api";
+import { useI18n } from "@/lib/i18n";
 
 /** Matches backend default; not shown in UI — always forced on save. */
 const DEFAULT_EMBEDDING_MODEL = "AllMiniLML6V2Q";
+const MIN_FONT_SIZE_PT = 6;
+const MAX_FONT_SIZE_PT = 24;
 
 const EMPTY: AppSettings = {
   llm_base_url: "https://api.openai.com/v1",
@@ -27,6 +38,8 @@ const EMPTY: AppSettings = {
   chat_model: "gpt-4o-mini",
   embedding_model: DEFAULT_EMBEDDING_MODEL,
   hub_base_url: "",
+  font_size_pt: 10,
+  display_language: "en",
   user_name: "",
   knowledge_dir: "",
   resolved_knowledge_dir: "",
@@ -43,8 +56,10 @@ function persistKey(settings: AppSettings): string {
 }
 
 export function SettingsPanel() {
+  const { t } = useI18n();
   const queryClient = useQueryClient();
   const [form, setForm] = useState<AppSettings>(EMPTY);
+  const [fontSizeDraft, setFontSizeDraft] = useState(String(EMPTY.font_size_pt));
   const [hubTestResult, setHubTestResult] = useState<{
     online: boolean;
     message: string;
@@ -61,9 +76,14 @@ export function SettingsPanel() {
     if (!settingsQuery.data || hydrated.current) return;
     const initial = withFixedEmbedding(settingsQuery.data);
     setForm(initial);
+    setFontSizeDraft(String(initial.font_size_pt));
     lastSavedKey.current = persistKey(initial);
     hydrated.current = true;
   }, [settingsQuery.data]);
+
+  useEffect(() => {
+    setFontSizeDraft(String(form.font_size_pt));
+  }, [form.font_size_pt]);
 
   useEffect(() => {
     if (!hydrated.current) return;
@@ -79,6 +99,8 @@ export function SettingsPanel() {
           lastSavedKey.current = persistKey(refreshed);
           setForm((prev) => ({
             ...prev,
+            font_size_pt: refreshed.font_size_pt,
+            display_language: refreshed.display_language,
             resolved_knowledge_dir: refreshed.resolved_knowledge_dir,
           }));
           queryClient.setQueryData(["settings"], refreshed);
@@ -87,7 +109,7 @@ export function SettingsPanel() {
           void queryClient.invalidateQueries({ queryKey: ["tree"] });
           void queryClient.invalidateQueries({ queryKey: ["installed-packs"] });
         } catch (e) {
-          toast.error("Could not save settings", {
+          toast.error(t("settings.couldNotSave"), {
             description: e instanceof Error ? e.message : String(e),
           });
         }
@@ -95,11 +117,34 @@ export function SettingsPanel() {
     }, 450);
 
     return () => window.clearTimeout(timer);
-  }, [form, queryClient]);
+  }, [form, queryClient, t]);
 
   const update = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
     if (key === "hub_base_url") setHubTestResult(null);
     setForm((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const commitFontSizeInput = () => {
+    const parsed = Number.parseInt(fontSizeDraft.trim(), 10);
+    const valid =
+      Number.isFinite(parsed) &&
+      parsed >= MIN_FONT_SIZE_PT &&
+      parsed <= MAX_FONT_SIZE_PT;
+
+    if (!valid) {
+      toast.warning(t("settings.fontSizeWarningTitle"), {
+        description: t("settings.fontSizeWarningDescription", {
+          min: MIN_FONT_SIZE_PT,
+          max: MAX_FONT_SIZE_PT,
+        }),
+      });
+      return;
+    }
+
+    if (parsed !== form.font_size_pt) {
+      update("font_size_pt", parsed);
+    }
+    setFontSizeDraft(String(parsed));
   };
 
   const testHubConnection = useMutation({
@@ -110,15 +155,15 @@ export function SettingsPanel() {
         : status.message || "Knowledge Hub is not accessible.";
       setHubTestResult({ online: status.online, message });
       if (status.online) {
-        toast.success("Knowledge Hub connected", { description: message });
+        toast.success(t("settings.connected"), { description: message });
       } else {
-        toast.error("Knowledge Hub connection failed", { description: message });
+        toast.error(t("settings.connectionFailed"), { description: message });
       }
     },
     onError: (e) => {
       const message = e instanceof Error ? e.message : String(e);
       setHubTestResult({ online: false, message });
-      toast.error("Could not test Knowledge Hub", { description: message });
+      toast.error(t("settings.couldNotTestHub"), { description: message });
     },
   });
 
@@ -133,7 +178,7 @@ export function SettingsPanel() {
         update("knowledge_dir", result);
       }
     } catch (e) {
-      toast.error("Could not open folder picker", {
+      toast.error(t("settings.couldNotOpenFolder"), {
         description: e instanceof Error ? e.message : String(e),
       });
     }
@@ -148,127 +193,194 @@ export function SettingsPanel() {
   return (
     <div className="flex h-full flex-col">
       <PanelHeader
-        title="Settings"
-        description="Changes save automatically. Connection problems show up when you chat or open the Hub."
+        title={t("settings.title")}
+        description={t("settings.description")}
       />
       <ScrollArea className="min-h-0 flex-1">
         <div className="mx-auto max-w-2xl space-y-6 px-6 py-5">
-        <SettingsSection
-          icon={User}
-          title="Personal"
-          description="How Nest addresses you and where packs are stored."
-        >
-          <Field label="Your name">
-            <Input
-              value={form.user_name}
-              onChange={(e) => update("user_name", e.target.value)}
-              placeholder="Optional"
-            />
-          </Field>
-          <Field label="Local knowledge directory">
-            <div className="flex min-w-0 gap-2">
+          <SettingsSection
+            icon={User}
+            title={t("settings.personal")}
+            description={t("settings.personalDescription")}
+          >
+            <Field
+              label={t("settings.yourName")}
+              description={t("settings.yourNameDescription")}
+            >
               <Input
-                value={displayKnowledgePath}
-                readOnly
-                title={displayKnowledgePath}
-                className="min-w-0 flex-1 font-mono text-xs"
+                value={form.user_name}
+                onChange={(e) => update("user_name", e.target.value)}
+                placeholder={t("settings.optional")}
               />
-              <Button
-                type="button"
-                variant="outline"
-                className="shrink-0"
-                onClick={() => void pickKnowledgeDir()}
-              >
-                <FolderOpen className="size-4" />
-                Browse
-              </Button>
-            </div>
-            <div className="mt-1.5 flex flex-wrap items-center gap-2">
-              <p className="text-xs text-muted-foreground">
-                {usingDefaultKnowledge
-                  ? "Using the app default vault folder."
-                  : "Using a custom folder. Re-indexes automatically."}
-              </p>
-              {!usingDefaultKnowledge && (
+            </Field>
+            <Field
+              label={t("settings.knowledgeDirectory")}
+              description={t("settings.knowledgeDirectoryDescription")}
+            >
+              <div className="flex min-w-0 gap-2">
+                <Input
+                  value={displayKnowledgePath}
+                  readOnly
+                  title={displayKnowledgePath}
+                  className="min-w-0 flex-1 font-mono text-xs"
+                />
                 <Button
                   type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => update("knowledge_dir", "")}
+                  variant="outline"
+                  className="shrink-0"
+                  onClick={() => void pickKnowledgeDir()}
                 >
-                  Reset to default
+                  <FolderOpen className="size-4" />
+                  {t("hub.browse")}
                 </Button>
-              )}
-            </div>
-          </Field>
-        </SettingsSection>
-
-        <SettingsSection
-          icon={Bot}
-          title="LLM"
-          description="OpenAI-compatible chat API used for answers and titles."
-        >
-          <Field label="Base URL">
-            <Input
-              value={form.llm_base_url}
-              onChange={(e) => update("llm_base_url", e.target.value)}
-            />
-          </Field>
-          <Field label="API key">
-            <Input
-              type="password"
-              value={form.llm_api_key}
-              onChange={(e) => update("llm_api_key", e.target.value)}
-              placeholder="sk-…"
-            />
-          </Field>
-          <Field label="Chat model">
-            <Input
-              value={form.chat_model}
-              onChange={(e) => update("chat_model", e.target.value)}
-            />
-          </Field>
-        </SettingsSection>
-
-        <SettingsSection
-          icon={Cloud}
-          title="Knowledge Hub"
-          description="Remote catalog for pack downloads."
-        >
-          <Field label="Hub base URL">
-            <Input
-              value={form.hub_base_url}
-              onChange={(e) => update("hub_base_url", e.target.value)}
-              placeholder="http://127.0.0.1:8787"
-            />
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              {hubTestResult ? (
-                <p
-                  className={
-                    hubTestResult.online
-                      ? "text-xs text-primary"
-                      : "text-xs text-destructive"
-                  }
-                >
-                  {hubTestResult.message}
+              </div>
+              <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                <p className="text-xs text-muted-foreground">
+                  {usingDefaultKnowledge
+                    ? t("settings.usingDefaultVault")
+                    : t("settings.usingCustomVault")}
                 </p>
-              ) : (
-                <span />
-              )}
-              <Button
-                type="button"
-                size="sm"
-                disabled={testHubConnection.isPending}
-                onClick={() => testHubConnection.mutate()}
-              >
-                {testHubConnection.isPending && (
-                  <LoaderCircle className="size-3.5 animate-spin" />
+                {!usingDefaultKnowledge && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => update("knowledge_dir", "")}
+                  >
+                    {t("settings.resetToDefault")}
+                  </Button>
                 )}
-                {testHubConnection.isPending ? "Testing…" : "Test connection"}
-              </Button>
-            </div>
-          </Field>
-        </SettingsSection>
+              </div>
+            </Field>
+          </SettingsSection>
+
+          <SettingsSection
+            icon={Palette}
+            title={t("settings.appearance")}
+            description={t("settings.appearanceDescription")}
+          >
+            <Field
+              label={t("settings.fontSize")}
+              description={t("settings.fontSizeDescription")}
+            >
+              <div className="space-y-2">
+                <Input
+                  type="text"
+                  inputMode="numeric"
+                  value={fontSizeDraft}
+                  onChange={(e) => setFontSizeDraft(e.target.value)}
+                  onBlur={commitFontSizeInput}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      commitFontSizeInput();
+                    }
+                  }}
+                  placeholder={`${MIN_FONT_SIZE_PT}-${MAX_FONT_SIZE_PT}`}
+                />
+              </div>
+            </Field>
+            <Field
+              label={t("settings.displayLanguage")}
+              description={t("settings.displayLanguageDescription")}
+            >
+              <Select
+                value={form.display_language}
+                onValueChange={(value) =>
+                  update("display_language", value as AppSettings["display_language"])
+                }
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="en">{t("settings.english")}</SelectItem>
+                  <SelectItem value="zh">{t("settings.chinese")}</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+          </SettingsSection>
+
+          <SettingsSection
+            icon={Bot}
+            title={t("settings.llm")}
+            description={t("settings.llmDescription")}
+          >
+            <Field
+              label={t("settings.baseUrl")}
+              description={t("settings.baseUrlDescription")}
+            >
+              <Input
+                value={form.llm_base_url}
+                onChange={(e) => update("llm_base_url", e.target.value)}
+              />
+            </Field>
+            <Field
+              label={t("settings.apiKey")}
+              description={t("settings.apiKeyDescription")}
+            >
+              <Input
+                type="password"
+                value={form.llm_api_key}
+                onChange={(e) => update("llm_api_key", e.target.value)}
+                placeholder="sk-…"
+              />
+            </Field>
+            <Field
+              label={t("settings.chatModel")}
+              description={t("settings.chatModelDescription")}
+            >
+              <Input
+                value={form.chat_model}
+                onChange={(e) => update("chat_model", e.target.value)}
+              />
+            </Field>
+          </SettingsSection>
+
+          <SettingsSection
+            icon={Cloud}
+            title={t("settings.knowledgeHub")}
+            description={t("settings.knowledgeHubDescription")}
+          >
+            <Field
+              label={t("settings.hubBaseUrl")}
+              description={t("settings.hubBaseUrlDescription")}
+            >
+              <Input
+                value={form.hub_base_url}
+                onChange={(e) => update("hub_base_url", e.target.value)}
+                placeholder="http://127.0.0.1:8787"
+              />
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                {hubTestResult ? (
+                  <p
+                    className={
+                      hubTestResult.online
+                        ? "text-xs text-primary"
+                        : "text-xs text-destructive"
+                    }
+                  >
+                    {hubTestResult.message}
+                  </p>
+                ) : (
+                  <span />
+                )}
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={testHubConnection.isPending}
+                  onClick={() => testHubConnection.mutate()}
+                >
+                  {testHubConnection.isPending && (
+                    <LoaderCircle className="size-3.5 animate-spin" />
+                  )}
+                  {testHubConnection.isPending
+                    ? t("settings.testing")
+                    : t("settings.testConnection")}
+                </Button>
+              </div>
+            </Field>
+          </SettingsSection>
         </div>
       </ScrollArea>
     </div>
@@ -306,14 +418,19 @@ function SettingsSection({
 
 function Field({
   label,
+  description,
   children,
 }: {
   label: string;
+  description?: string;
   children: ReactNode;
 }) {
   return (
     <div className="space-y-1.5">
       <Label>{label}</Label>
+      {description ? (
+        <p className="text-xs text-muted-foreground">{description}</p>
+      ) : null}
       {children}
     </div>
   );

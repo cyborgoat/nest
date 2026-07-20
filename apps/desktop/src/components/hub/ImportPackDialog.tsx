@@ -15,6 +15,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
+import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 type Props = {
@@ -43,6 +44,7 @@ export function ImportPackDialog({
   onCreateFromFolder,
   importing = false,
 }: Props) {
+  const { t } = useI18n();
   const [mode, setMode] = useState<"choose" | "zip" | "folder">("choose");
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [metadata, setMetadata] = useState<KnowledgePackMeta>(EMPTY);
@@ -75,7 +77,7 @@ export function ImportPackDialog({
         setDragging(false);
         const [path, ...rest] = event.payload.paths ?? [];
         if (!path || rest.length > 0 || !isZipPath(path)) {
-          setError("Drop one .zip knowledge pack.");
+          setError(t("hub.importFailed"));
           return;
         }
         setError(null);
@@ -94,7 +96,7 @@ export function ImportPackDialog({
   const selectZip = async () => {
     const result = await openDialog({
       multiple: false,
-      title: "Select a knowledge pack zip",
+      title: t("hub.selectZipTitle"),
       filters: [{ name: "Knowledge pack", extensions: ["zip"] }],
     });
     if (typeof result === "string" && result) {
@@ -105,7 +107,7 @@ export function ImportPackDialog({
 
   const selectFolder = async () => {
     try {
-      const path = await openDialog({ directory: true, multiple: false, title: "Select knowledge folder" });
+      const path = await openDialog({ directory: true, multiple: false, title: t("hub.selectFolderTitle") });
       if (typeof path !== "string" || !path) return;
       const defaults = await api.hubReadFolderPackDefaults(path);
       setSelectedPath(path);
@@ -127,11 +129,13 @@ export function ImportPackDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-xl overflow-hidden">
         <DialogHeader>
-          <DialogTitle>{mode === "folder" ? "Create knowledge pack" : "Import knowledge"}</DialogTitle>
+          <DialogTitle>
+            {mode === "folder" ? t("hub.createFromFolderTitle") : t("hub.chooseImportModeTitle")}
+          </DialogTitle>
           <DialogDescription>
             {mode === "folder"
-              ? "Review the pack details, then Nest copies this folder into your vault."
-              : "Create a pack from a Markdown folder or import an existing shareable ZIP."}
+              ? t("hub.havePackFileBody")
+              : t("hub.description")}
           </DialogDescription>
         </DialogHeader>
 
@@ -139,13 +143,13 @@ export function ImportPackDialog({
           <div className="grid gap-3 sm:grid-cols-2">
             <button type="button" className="rounded-lg border border-border p-4 text-left hover:border-primary/60" onClick={() => void selectFolder()}>
               <FolderInput className="size-6 text-primary" />
-              <p className="mt-3 font-medium">Create from folder</p>
-              <p className="mt-1 text-xs text-muted-foreground">Copy a Markdown folder into a new, self-contained knowledge pack.</p>
+              <p className="mt-3 font-medium">{t("hub.createFromFolderTitle")}</p>
+              <p className="mt-1 text-xs text-muted-foreground">{t("hub.havePackFileBody")}</p>
             </button>
             <button type="button" className="rounded-lg border border-border p-4 text-left hover:border-primary/60" onClick={() => setMode("zip")}>
               <FileArchive className="size-6 text-primary" />
-              <p className="mt-3 font-medium">Import pack ZIP</p>
-              <p className="mt-1 text-xs text-muted-foreground">Install a previously exported or shared Nest pack.</p>
+              <p className="mt-3 font-medium">{t("hub.importPackZipTitle")}</p>
+              <p className="mt-1 text-xs text-muted-foreground">{t("hub.description")}</p>
             </button>
           </div>
         )}
@@ -154,8 +158,8 @@ export function ImportPackDialog({
           <div className="space-y-3">
             <button type="button" onClick={() => void selectZip()} disabled={importing} className={cn("flex w-full flex-col items-center gap-2 rounded-lg border border-dashed px-4 py-8", dragging ? "border-primary bg-primary/5" : "border-border hover:border-primary/60")}>
               <FileArchive className="size-8 text-primary" />
-              <span className="font-medium">{dragging ? "Drop ZIP to select" : "Drag a pack ZIP here"}</span>
-              <span className="text-xs text-muted-foreground">or click to browse</span>
+              <span className="font-medium">{dragging ? t("hub.dropZipToSelect") : t("hub.dragPackZipHere")}</span>
+              <span className="text-xs text-muted-foreground">{t("hub.orClickToBrowse")}</span>
             </button>
             <SelectedPath path={selectedPath} />
           </div>
@@ -166,20 +170,20 @@ export function ImportPackDialog({
             <SelectedPath path={selectedPath} />
             {warning && <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700">{warning}</p>}
             <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Pack ID"><Input value={metadata.id} onChange={(e) => update("id", e.target.value)} /></Field>
-              <Field label="Version"><Input value={metadata.version} onChange={(e) => update("version", e.target.value)} placeholder="1.0.0" /></Field>
+              <Field label={t("hub.packId")}><Input value={metadata.id} onChange={(e) => update("id", e.target.value)} /></Field>
+              <Field label={t("hub.version")}><Input value={metadata.version} onChange={(e) => update("version", e.target.value)} placeholder="1.0.0" /></Field>
             </div>
-            <Field label="Name"><Input value={metadata.name} onChange={(e) => update("name", e.target.value)} /></Field>
-            <Field label="Description (optional)"><Input value={metadata.description} onChange={(e) => update("description", e.target.value)} /></Field>
+            <Field label={t("hub.name")}><Input value={metadata.name} onChange={(e) => update("name", e.target.value)} /></Field>
+            <Field label={t("hub.descriptionOptional")}><Input value={metadata.description} onChange={(e) => update("description", e.target.value)} /></Field>
           </div>
         )}
 
         {error && <p className="text-sm text-destructive">{error}</p>}
         <DialogFooter>
-          {mode !== "choose" && <Button type="button" variant="ghost" disabled={importing} onClick={() => { setMode("choose"); setError(null); }}>Back</Button>}
-          <Button type="button" variant="outline" disabled={importing} onClick={() => onOpenChange(false)}>Cancel</Button>
-          {mode === "zip" && <Button disabled={!selectedPath || importing} onClick={() => selectedPath && onImportZip(selectedPath)}>{importing && <Loader2 className="size-4 animate-spin" />}Import ZIP</Button>}
-          {mode === "folder" && <Button disabled={!selectedPath || !folderValid || importing} onClick={() => selectedPath && onCreateFromFolder(selectedPath, metadata)}>{importing && <Loader2 className="size-4 animate-spin" />}Create pack</Button>}
+          {mode !== "choose" && <Button type="button" variant="ghost" disabled={importing} onClick={() => { setMode("choose"); setError(null); }}>{t("importDialogBack")}</Button>}
+          <Button type="button" variant="outline" disabled={importing} onClick={() => onOpenChange(false)}>{t("importDialogCancel")}</Button>
+          {mode === "zip" && <Button disabled={!selectedPath || importing} onClick={() => selectedPath && onImportZip(selectedPath)}>{importing && <Loader2 className="size-4 animate-spin" />}{t("importDialogImportZip")}</Button>}
+          {mode === "folder" && <Button disabled={!selectedPath || !folderValid || importing} onClick={() => selectedPath && onCreateFromFolder(selectedPath, metadata)}>{importing && <Loader2 className="size-4 animate-spin" />}{t("importDialogCreatePack")}</Button>}
         </DialogFooter>
       </DialogContent>
     </Dialog>

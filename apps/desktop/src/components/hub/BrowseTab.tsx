@@ -16,6 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
+import { useI18n } from "@/lib/i18n";
 import {
   Select,
   SelectContent,
@@ -53,36 +54,36 @@ export function BrowseTab({
   onRemove: (packId: string) => void;
   onOpenImport: () => void;
 }) {
+  const { t } = useI18n();
   if (hubOffline) {
     return (
       <EmptyState
         variant="dashed"
         icon={<CloudOff className="size-6" />}
-        title="Connect to the Knowledge Hub"
-        footnote="Packs already in your vault stay available in the Installed tab."
+        title={t("hub.connectHub")}
+        footnote={t("hub.hubOfflineFootnote")}
       >
         <div className="mx-auto grid max-w-lg gap-3 text-left sm:grid-cols-2">
           <div className="space-y-1.5 rounded-md border border-border bg-card p-3">
             <div className="flex items-center gap-1.5 text-sm font-medium">
               <Globe className="size-4 text-primary" />
-              Browse the registry
+              {t("hub.browseRegistry")}
             </div>
             <p className="text-sm text-muted-foreground">
-              Start the Hub service and check the Hub URL in Settings to
-              browse and download packs.
+              {t("hub.browseRegistryBody")}
             </p>
           </div>
           <div className="space-y-1.5 rounded-md border border-border bg-card p-3">
             <div className="flex items-center gap-1.5 text-sm font-medium">
               <FolderInput className="size-4 text-accent" />
-              Have a pack file?
+              {t("hub.havePackFile")}
             </div>
             <p className="text-sm text-muted-foreground">
-              No connection needed — create a pack from a local folder or import a shared ZIP.
+              {t("hub.havePackFileBody")}
             </p>
             <Button size="sm" variant="outline" onClick={onOpenImport}>
               <FolderInput className="size-4" />
-              Import local pack
+              {t("hub.import")}
             </Button>
           </div>
         </div>
@@ -97,12 +98,12 @@ export function BrowseTab({
         <Input
           value={search}
           onChange={(e) => onSearchChange(e.target.value)}
-          placeholder="Search packs…"
+          placeholder={t("hub.searchPacks")}
           className="h-9 pl-8"
         />
       </div>
       {packsLoading && (
-        <p className="text-sm text-muted-foreground">Loading packs…</p>
+        <p className="text-sm text-muted-foreground">{t("hub.loadingPacks")}</p>
       )}
       {packsError && (
         <p className="text-sm text-destructive">{packsError.message}</p>
@@ -114,6 +115,7 @@ export function BrowseTab({
           project={pack}
           installed={installedById.get(pack.id)}
           busy={busy}
+          t={t}
           onInstall={(version) =>
             onInstall(pack.id, version, installedById.get(pack.id)?.version)
           }
@@ -123,18 +125,18 @@ export function BrowseTab({
       ))}
       {packs && packs.length > 0 && filteredPacks.length === 0 && (
         <p className="text-sm text-muted-foreground">
-          No packs match “{search}”.
+          {t("hub.noPacksMatch", { query: search })}
         </p>
       )}
       {packs?.length === 0 && (
         <EmptyState
           variant="dashed"
           icon={<Package className="size-6" />}
-          title="The registry has no packs available yet"
+          title={t("hub.registryEmpty")}
         >
           <Button size="sm" variant="outline" onClick={onOpenImport}>
             <FolderInput className="size-4" />
-            Import local pack
+            {t("hub.import")}
           </Button>
         </EmptyState>
       )}
@@ -147,6 +149,7 @@ function PackRow({
   project,
   installed,
   busy,
+  t,
   onInstall,
   onRemove,
   removePending,
@@ -155,6 +158,7 @@ function PackRow({
   project: PackProject;
   installed?: InstalledPack;
   busy: boolean;
+  t: ReturnType<typeof useI18n>["t"];
   onInstall: (version: string) => void;
   onRemove: () => void;
   removePending: boolean;
@@ -196,7 +200,7 @@ function PackRow({
           <Package className="size-4 shrink-0 text-primary" />
           <h3 className="min-w-0 truncate font-medium">{project.name}</h3>
           <span className="shrink-0 text-[11px] text-muted-foreground">
-            Version
+            {t("hub.version")}
           </span>
           <Select
             value={selectedVersion}
@@ -204,7 +208,7 @@ function PackRow({
             disabled={busy}
           >
             <SelectTrigger
-              aria-label={`Version for ${project.name}`}
+              aria-label={`${t("hub.version")} ${project.name}`}
               className="h-5 w-16 shrink-0 gap-0.5 px-1 text-[11px]"
             >
               <SelectValue />
@@ -227,8 +231,8 @@ function PackRow({
         </p>
         {isInstalled && (
           <div className="mt-1 flex items-center gap-1.5">
-            <Badge variant="muted">Installed {installed.version}</Badge>
-            {updateAvailable && <Badge variant="accent">Update available</Badge>}
+            <Badge variant="muted">{t("hub.installedLabel", { version: installed.version })}</Badge>
+            {updateAvailable && <Badge variant="accent">{t("hub.updateAvailable")}</Badge>}
           </div>
         )}
         <div className="mt-2 flex justify-end">
@@ -242,7 +246,7 @@ function PackRow({
                   disabled
                 >
                   <Check className="size-3.5" />
-                  Installed
+                  {t("hub.installedBadge")}
                 </Button>
                 {updateAvailable && (
                   <Button
@@ -252,7 +256,7 @@ function PackRow({
                     onClick={() => onInstall(project.latest_version)}
                   >
                     <ArrowUpCircle className="size-3.5" />
-                    Upgrade
+                    {t("hub.upgrade")}
                   </Button>
                 )}
               </>
@@ -267,12 +271,12 @@ function PackRow({
                   {isInstalled ? (
                     <>
                       <ArrowUpCircle className="size-3.5" />
-                      Install {selectedVersion}
+                      {t("hub.installVersion", { version: selectedVersion })}
                     </>
                   ) : (
                     <>
                       <CloudDownload className="size-3.5" />
-                      Download
+                      {t("hub.download")}
                     </>
                   )}
                 </Button>
