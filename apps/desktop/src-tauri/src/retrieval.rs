@@ -81,11 +81,7 @@ pub async fn retrieve(
         let path = vault.join(&c.file_path);
         let ok = path.is_file();
         if !ok {
-            crate::nest_debug!(
-                "retrieval",
-                "dropping stale citation path={}",
-                c.file_path
-            );
+            crate::nest_debug!("retrieval", "dropping stale citation path={}", c.file_path);
         }
         ok
     });

@@ -62,6 +62,8 @@ export type ChatMessage = {
   role: "user" | "assistant" | "system";
   content: string;
   citations?: Citation[];
+  thinking?: string;
+  thinking_seconds?: number;
   created_at: string;
 };
 

@@ -77,6 +77,8 @@ pub struct ChatMessage {
     pub role: String,
     pub content: String,
     pub citations: Option<Vec<Citation>>,
+    pub thinking: Option<String>,
+    pub thinking_seconds: Option<f64>,
     pub created_at: String,
 }
 
@@ -158,6 +160,8 @@ fn migrate(conn: &Connection) -> AppResult<()> {
             role TEXT NOT NULL,
             content TEXT NOT NULL,
             citations_json TEXT,
+            thinking TEXT,
+            thinking_seconds REAL,
             created_at TEXT NOT NULL,
             FOREIGN KEY(session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
         );
@@ -183,7 +187,21 @@ fn migrate(conn: &Connection) -> AppResult<()> {
         "#,
     )?;
     ensure_chat_session_columns(conn)?;
+    ensure_message_thinking_columns(conn)?;
     ensure_sync_state_active_column(conn)?;
+    Ok(())
+}
+
+fn ensure_message_thinking_columns(conn: &Connection) -> AppResult<()> {
+    if !table_has_column(conn, "chat_messages", "thinking")? {
+        conn.execute("ALTER TABLE chat_messages ADD COLUMN thinking TEXT", [])?;
+    }
+    if !table_has_column(conn, "chat_messages", "thinking_seconds")? {
+        conn.execute(
+            "ALTER TABLE chat_messages ADD COLUMN thinking_seconds REAL",
+            [],
+        )?;
+    }
     Ok(())
 }
 
@@ -284,7 +302,6 @@ pub fn save_settings(conn: &Connection, settings: &AppSettings) -> AppResult<()>
     }
     Ok(())
 }
-
 
 pub fn clear_chunks(conn: &Connection) -> AppResult<()> {
     conn.execute_batch(
@@ -621,6 +638,8 @@ pub fn add_message(
     role: &str,
     content: &str,
     citations: Option<&[Citation]>,
+    thinking: Option<&str>,
+    thinking_seconds: Option<f64>,
 ) -> AppResult<ChatMessage> {
     let id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
@@ -629,9 +648,9 @@ pub fn add_message(
         .transpose()?
         .unwrap_or_default();
     conn.execute(
-        "INSERT INTO chat_messages (id, session_id, role, content, citations_json, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![id, session_id, role, content, citations_json, now],
+        "INSERT INTO chat_messages (id, session_id, role, content, citations_json, thinking, thinking_seconds, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![id, session_id, role, content, citations_json, thinking, thinking_seconds, now],
     )?;
     conn.execute(
         "UPDATE chat_sessions SET updated_at = ?1 WHERE id = ?2",
@@ -642,13 +661,15 @@ pub fn add_message(
         role: role.to_string(),
         content: content.to_string(),
         citations: citations.map(|c| c.to_vec()),
+        thinking: thinking.map(str::to_string),
+        thinking_seconds,
         created_at: now,
     })
 }
 
 pub fn list_messages(conn: &Connection, session_id: &str) -> AppResult<Vec<ChatMessage>> {
     let mut stmt = conn.prepare(
-        "SELECT id, role, content, citations_json, created_at FROM chat_messages
+        "SELECT id, role, content, citations_json, thinking, thinking_seconds, created_at FROM chat_messages
          WHERE session_id = ?1 ORDER BY created_at ASC",
     )?;
     let rows = stmt.query_map(params![session_id], |row| {
@@ -663,7 +684,9 @@ pub fn list_messages(conn: &Connection, session_id: &str) -> AppResult<Vec<ChatM
             role: row.get(1)?,
             content: row.get(2)?,
             citations,
-            created_at: row.get(4)?,
+            thinking: row.get(4)?,
+            thinking_seconds: row.get(5)?,
+            created_at: row.get(6)?,
         })
     })?;
     Ok(rows.filter_map(|r| r.ok()).collect())
@@ -703,9 +726,8 @@ pub fn set_pack_active(conn: &Connection, pack_id: &str, active: bool) -> AppRes
 }
 
 pub fn list_active_pack_roots(conn: &Connection) -> AppResult<Vec<String>> {
-    let mut stmt = conn.prepare(
-        "SELECT local_path FROM sync_state WHERE active = 1 ORDER BY local_path",
-    )?;
+    let mut stmt =
+        conn.prepare("SELECT local_path FROM sync_state WHERE active = 1 ORDER BY local_path")?;
     let rows = stmt.query_map([], |row| row.get(0))?;
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
@@ -760,9 +782,9 @@ pub fn resolve_retrieval_prefixes(
     let allowed: Vec<String> = focus_paths
         .iter()
         .filter(|f| {
-            active.iter().any(|root| {
-                *f == root || f.starts_with(&format!("{root}/"))
-            })
+            active
+                .iter()
+                .any(|root| *f == root || f.starts_with(&format!("{root}/")))
         })
         .cloned()
         .collect();
@@ -779,9 +801,8 @@ pub fn purge_path_data(conn: &Connection, path: &str) -> AppResult<()> {
     let prefix = format!("{path}/%");
 
     // Collect chunk ids before deleting so FTS can be purged.
-    let mut stmt = conn.prepare(
-        "SELECT id FROM chunks WHERE file_path = ?1 OR file_path LIKE ?2",
-    )?;
+    let mut stmt =
+        conn.prepare("SELECT id FROM chunks WHERE file_path = ?1 OR file_path LIKE ?2")?;
     let ids: Vec<String> = stmt
         .query_map(params![exact, prefix], |row| row.get(0))?
         .filter_map(|r| r.ok())
@@ -806,13 +827,11 @@ pub fn purge_path_data(conn: &Connection, path: &str) -> AppResult<()> {
 }
 
 fn recount_index_meta(conn: &Connection) -> AppResult<()> {
-    let file_count: i64 = conn.query_row(
-        "SELECT COUNT(DISTINCT file_path) FROM chunks",
-        [],
-        |row| row.get(0),
-    )?;
-    let chunk_count: i64 =
-        conn.query_row("SELECT COUNT(*) FROM chunks", [], |row| row.get(0))?;
+    let file_count: i64 =
+        conn.query_row("SELECT COUNT(DISTINCT file_path) FROM chunks", [], |row| {
+            row.get(0)
+        })?;
+    let chunk_count: i64 = conn.query_row("SELECT COUNT(*) FROM chunks", [], |row| row.get(0))?;
     let now = Utc::now().to_rfc3339();
     conn.execute(
         "UPDATE index_meta SET indexed_files = ?1, indexed_chunks = ?2, last_indexed_at = ?3,

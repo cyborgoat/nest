@@ -92,6 +92,7 @@ export function ChatSessionBar({ sessions, onResetChatUi }: Props) {
 
   const newChat = async () => {
     try {
+      if (await activeSessionIsUntouchedPlaceholder()) return;
       const session = await api.chatCreateSession("New chat");
       openChatTab(session.id);
       onResetChatUi();
@@ -99,6 +100,13 @@ export function ChatSessionBar({ sessions, onResetChatUi }: Props) {
     } catch (e) {
       setStatusMessage(e instanceof Error ? e.message : String(e));
     }
+  };
+
+  const activeSessionIsUntouchedPlaceholder = async () => {
+    const active = chatSessionId ? byId.get(chatSessionId) : undefined;
+    if (!active || active.title !== "New chat") return false;
+    const messages = await api.chatListMessages(active.id);
+    return messages.length === 0;
   };
 
   const selectSession = (session: ChatSession) => {

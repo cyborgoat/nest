@@ -20,7 +20,7 @@ use serde::Deserialize;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 use thiserror::Error;
 
@@ -120,11 +120,12 @@ impl Tool for VaultSearchTool {
     }
 }
 
-/// Result of an agent chat run. `cancelled` is true when the user stopped generation.
+/// Result of a completed agent chat run.
 pub struct AgentChatResult {
     pub answer: String,
     pub citations: Vec<Citation>,
-    pub cancelled: bool,
+    pub thinking: Option<String>,
+    pub thinking_seconds: Option<f64>,
 }
 
 async fn emit_reading_files(app: &AppHandle, stream_event: &str, citations: &[Citation]) {
@@ -150,11 +151,7 @@ fn not_found_reply() -> &'static str {
      pack that covers this topic, then ask again."
 }
 
-async fn emit_soft_reply(
-    app: &AppHandle,
-    stream_event: &str,
-    reply: &str,
-) -> AppResult<()> {
+async fn emit_soft_reply(app: &AppHandle, stream_event: &str, reply: &str) -> AppResult<()> {
     let _ = app.emit(stream_event, ChatStreamEvent::Generating);
     let _ = app.emit(
         stream_event,
@@ -180,7 +177,7 @@ pub async fn run_agent_chat(
         return Err(AppError::msg("API key not configured"));
     }
 
-    state.clear_chat_cancel();
+    let mut cancel_rx = state.begin_chat_cancel();
 
     let citations_slot: Arc<Mutex<Vec<Citation>>> = Arc::new(Mutex::new(Vec::new()));
 
@@ -194,9 +191,7 @@ pub async fn run_agent_chat(
     let agent_query = if focus_context.is_empty() {
         query.to_string()
     } else {
-        format!(
-            "{query}\n\n---\nUser asked to focus on these vault paths:\n{focus_context}"
-        )
+        format!("{query}\n\n---\nUser asked to focus on these vault paths:\n{focus_context}")
     };
 
     let tool = VaultSearchTool {
@@ -219,13 +214,6 @@ pub async fn run_agent_chat(
         .map_err(|e| AppError::msg(format!("Failed to build OpenAI client: {e}")))?
         .completions_api();
 
-    let agent = openai
-        .agent(&settings.chat_model)
-        .preamble(agent_preamble())
-        .tool(tool)
-        .memory(memory)
-        .build();
-
     crate::nest_debug!(
         "agent",
         "start session={session_id} query_len={} focus={:?} retrieval={:?} history={}",
@@ -235,6 +223,9 @@ pub async fn run_agent_chat(
         prior_history.len()
     );
 
+    // Retrieval is deliberately completed before any LLM network request. The
+    // previous best-effort call discarded errors and only updated the UI, so a
+    // bundled build could silently bypass local search and start the model call.
     let eager = retrieval::retrieve(
         &app_data_dir,
         &state,
@@ -243,9 +234,12 @@ pub async fn run_agent_chat(
         &retrieval_prefixes,
         DEFAULT_TOP_K,
     )
-    .await
-    .unwrap_or_default();
+    .await?;
+    if *cancel_rx.borrow() {
+        return Err(AppError::msg("cancelled"));
+    }
     crate::nest_debug!("agent", "eager_retrieval hits={}", eager.len());
+    let preamble = agent_preamble_with_retrieval(&eager);
     if !eager.is_empty() {
         emit_reading_files(app, stream_event, &eager).await;
         *citations_slot.lock() = eager;
@@ -257,6 +251,13 @@ pub async fn run_agent_chat(
         );
     }
 
+    let agent = openai
+        .agent(&settings.chat_model)
+        .preamble(&preamble)
+        .tool(tool)
+        .memory(memory)
+        .build();
+
     let _ = app.emit(stream_event, ChatStreamEvent::Generating);
 
     let mut stream = agent
@@ -266,14 +267,26 @@ pub async fn run_agent_chat(
         .await;
 
     let mut full = String::new();
+    let mut thinking = String::new();
+    let mut thinking_started: Option<Instant> = None;
     let mut cancelled = false;
     let mut emitted_generating = true;
 
-    while let Some(item) = stream.next().await {
-        if state.chat_cancel_requested() {
+    loop {
+        if *cancel_rx.borrow() {
             cancelled = true;
             break;
         }
+        // Dropping the stream as soon as cancellation arrives aborts the
+        // underlying HTTP/SSE request instead of waiting for another token.
+        let item = tokio::select! {
+            item = stream.next() => item,
+            _ = cancel_rx.changed() => {
+                cancelled = true;
+                break;
+            }
+        };
+        let Some(item) = item else { break };
         match item {
             Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Text(
                 Text { text, .. },
@@ -308,6 +321,28 @@ pub async fn run_agent_chat(
                     },
                 );
             }
+            Ok(MultiTurnStreamItem::StreamAssistantItem(
+                StreamedAssistantContent::ReasoningDelta { reasoning, .. },
+            )) => {
+                if !reasoning.is_empty() {
+                    thinking_started.get_or_insert_with(Instant::now);
+                    thinking.push_str(&reasoning);
+                    let _ = app.emit(
+                        stream_event,
+                        ChatStreamEvent::Thinking { content: reasoning },
+                    );
+                }
+            }
+            Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Reasoning(
+                reasoning,
+            ))) => {
+                let content = reasoning.display_text();
+                if !content.is_empty() {
+                    thinking_started.get_or_insert_with(Instant::now);
+                    thinking = content.clone();
+                    let _ = app.emit(stream_event, ChatStreamEvent::Thinking { content });
+                }
+            }
             Ok(MultiTurnStreamItem::FinalResponse(resp)) => {
                 crate::nest_debug!(
                     "agent",
@@ -321,7 +356,7 @@ pub async fn run_agent_chat(
             }
             Ok(_) => {}
             Err(e) => {
-                if state.chat_cancel_requested() {
+                if *cancel_rx.borrow() {
                     cancelled = true;
                     break;
                 }
@@ -332,10 +367,9 @@ pub async fn run_agent_chat(
         }
     }
 
-    if state.chat_cancel_requested() {
+    if *cancel_rx.borrow() {
         cancelled = true;
     }
-    state.clear_chat_cancel();
 
     let citations = citations_slot.lock().clone();
     if !citations.is_empty() {
@@ -348,14 +382,9 @@ pub async fn run_agent_chat(
     }
 
     if cancelled {
-        if full.trim().is_empty() {
-            return Err(AppError::msg("cancelled"));
-        }
-        return Ok(AgentChatResult {
-            answer: full,
-            citations,
-            cancelled: true,
-        });
+        // A user interrupt is a normal control-flow outcome. Discard buffered
+        // tokens so `chat_send` never persists a partial assistant message.
+        return Err(AppError::msg("cancelled"));
     }
 
     if full.trim().is_empty() {
@@ -369,7 +398,8 @@ pub async fn run_agent_chat(
         return Ok(AgentChatResult {
             answer: reply,
             citations,
-            cancelled: false,
+            thinking: (!thinking.trim().is_empty()).then_some(thinking),
+            thinking_seconds: thinking_started.map(|start| start.elapsed().as_secs_f64()),
         });
     }
 
@@ -383,8 +413,20 @@ pub async fn run_agent_chat(
     Ok(AgentChatResult {
         answer: full,
         citations,
-        cancelled: false,
+        thinking: (!thinking.trim().is_empty()).then_some(thinking),
+        thinking_seconds: thinking_started.map(|start| start.elapsed().as_secs_f64()),
     })
+}
+
+fn agent_preamble_with_retrieval(citations: &[Citation]) -> String {
+    if citations.is_empty() {
+        return agent_preamble().to_string();
+    }
+    format!(
+        "{}\n\nThe following passages were retrieved locally for this request. Use them as the primary evidence; only call vault_search again if you need a different query.\n\n{}",
+        agent_preamble(),
+        format_citations_for_tool(citations),
+    )
 }
 
 fn build_focus_context(state: &SharedState, focus_paths: &[String]) -> String {

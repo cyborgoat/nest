@@ -1,4 +1,4 @@
-import { FileText, Folder, Send } from "lucide-react";
+import { FileText, Folder, Send, Square } from "lucide-react";
 import {
   useEffect,
   useMemo,
@@ -19,17 +19,19 @@ type Candidate = MentionRef;
 
 type Props = {
   candidates: Candidate[];
-  disabled?: boolean;
+  isGenerating?: boolean;
   placeholders?: { emptyActive: string; ready: string };
   onSend: (text: string, focusPaths: string[]) => void;
+  onStop?: () => void;
   canSend: boolean;
 };
 
 export function MentionComposer({
   candidates,
-  disabled,
+  isGenerating = false,
   placeholders,
   onSend,
+  onStop,
   canSend,
 }: Props) {
   const [text, setText] = useState("");
@@ -97,7 +99,7 @@ export function MentionComposer({
 
   const trySend = () => {
     const trimmed = text.trim();
-    if (!trimmed || !canSend || disabled) return;
+    if (!trimmed || !canSend || isGenerating) return;
     const focusPaths = refs
       .filter((r) => trimmed.includes(`@${r.name}`))
       .map((r) => r.path);
@@ -153,13 +155,12 @@ export function MentionComposer({
       <div
         className={cn(
           "relative min-h-[72px] rounded-md border border-border bg-card px-2 pt-2 pb-9",
-          disabled && "opacity-60",
         )}
       >
         <textarea
           ref={textareaRef}
           value={text}
-          disabled={disabled}
+          disabled={isGenerating}
           placeholder={placeholder}
           rows={2}
           className="w-full resize-none bg-transparent pr-8 text-sm outline-none placeholder:text-muted-foreground"
@@ -183,16 +184,30 @@ export function MentionComposer({
           }}
           onKeyDown={onKeyDown}
         />
-        <Button
-          size="icon-sm"
-          className="absolute right-2 bottom-2"
-          disabled={!hasContent || !canSend || disabled}
-          onClick={trySend}
-          aria-label="Send"
-          title="Send"
-        >
-          <Send className="size-3.5" />
-        </Button>
+        {isGenerating ? (
+          <Button
+            size="icon-sm"
+            variant="secondary"
+            className="absolute right-2 bottom-2 opacity-100"
+            disabled={false}
+            onClick={onStop}
+            aria-label="Stop generation"
+            title="Stop"
+          >
+            <Square className="size-3 fill-current" />
+          </Button>
+        ) : (
+          <Button
+            size="icon-sm"
+            className="absolute right-2 bottom-2"
+            disabled={!hasContent || !canSend || isGenerating}
+            onClick={trySend}
+            aria-label="Send"
+            title="Send"
+          >
+            <Send className="size-3.5" />
+          </Button>
+        )}
       </div>
 
       {mentionQuery != null && (

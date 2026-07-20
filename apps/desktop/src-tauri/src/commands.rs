@@ -1,15 +1,13 @@
-use crate::db::{
-    self, AppSettings, ChatMessage, ChatSession, IndexStatus, InstalledPack,
-};
+use crate::agent;
+use crate::db::{self, AppSettings, ChatMessage, ChatSession, IndexStatus, InstalledPack};
 use crate::embeddings;
 use crate::error::{AppError, AppResult};
 use crate::hub::{self, PackProject};
 use crate::indexer;
 use crate::llm;
 use crate::state::SharedState;
-use crate::vector_store::{self, KnowledgeChunk};
 use crate::vault::{self, TreeNode};
-use crate::agent;
+use crate::vector_store::{self, KnowledgeChunk};
 use tauri::{AppHandle, Emitter, State};
 
 #[tauri::command]
@@ -48,15 +46,17 @@ pub async fn settings_set(
     // Embedding model is fixed locally — not user-configurable.
     settings.embedding_model = embeddings::DEFAULT_EMBEDDING_MODEL.into();
     settings.knowledge_dir = settings.knowledge_dir.trim().to_string();
-    settings.hub_base_url = settings.hub_base_url.trim().trim_end_matches('/').to_string();
+    settings.hub_base_url = settings
+        .hub_base_url
+        .trim()
+        .trim_end_matches('/')
+        .to_string();
     if !settings.hub_base_url.is_empty() {
         validate_http_base_url("Hub base URL", &settings.hub_base_url)?;
     }
 
-    let resolved = crate::state::resolve_knowledge_dir(
-        &state.app_data_dir,
-        &settings.knowledge_dir,
-    );
+    let resolved =
+        crate::state::resolve_knowledge_dir(&state.app_data_dir, &settings.knowledge_dir);
     if !resolved.is_absolute() {
         return Err(AppError::msg(
             "Knowledge directory must be an absolute path (or leave empty for the default)",
@@ -125,12 +125,7 @@ pub async fn index_rebuild(state: State<'_, SharedState>) -> AppResult<IndexStat
 
         {
             let conn = state.db.lock();
-            db::set_index_meta(
-                &conn,
-                0,
-                pending.len() as u32,
-                Some("Building FTS index…"),
-            )?;
+            db::set_index_meta(&conn, 0, pending.len() as u32, Some("Building FTS index…"))?;
             indexer::persist_chunks(&conn, &pending)?;
             db::set_index_meta(
                 &conn,
@@ -287,7 +282,7 @@ pub async fn chat_send(
     // Persist the user turn first for durable history / UI refresh.
     {
         let conn = state.db.lock();
-        db::add_message(&conn, &session_id, "user", &query, None)?;
+        db::add_message(&conn, &session_id, "user", &query, None, None, None)?;
     }
 
     // Build prior turns for the agent, excluding the just-saved user message
@@ -350,17 +345,13 @@ pub async fn chat_send(
 
     crate::nest_debug!(
         "chat",
-        "chat_send ok answer_len={} citations={} cancelled={}",
+        "chat_send ok answer_len={} citations={} thinking={}",
         result.answer.len(),
         result.citations.len(),
-        result.cancelled
+        result.thinking.is_some()
     );
 
-    let answer = if result.cancelled && !result.answer.trim().is_empty() {
-        format!("{}\n\n_(stopped)_", result.answer.trim_end())
-    } else {
-        result.answer
-    };
+    let answer = result.answer;
 
     let message = {
         let conn = state.db.lock();
@@ -370,6 +361,8 @@ pub async fn chat_send(
             "assistant",
             &answer,
             Some(&result.citations),
+            result.thinking.as_deref(),
+            result.thinking_seconds,
         )?
     };
 
@@ -381,26 +374,24 @@ pub async fn chat_send(
     );
 
     // Best-effort title naming — do not block returning the assistant message.
-    if !result.cancelled {
-        let state_clone = state.inner().clone();
-        let sid = session_id.clone();
-        let settings_for_title = settings.clone();
-        tauri::async_runtime::spawn(async move {
-            let _ = crate::title::maybe_auto_title_after_reply(
-                &settings_for_title,
-                &sid,
-                || {
-                    let conn = state_clone.db.lock();
-                    crate::title::load_session_turns(&conn, &sid)
-                },
-                |title| {
-                    let conn = state_clone.db.lock();
-                    db::set_session_title_llm(&conn, &sid, title)
-                },
-            )
-            .await;
-        });
-    }
+    let state_clone = state.inner().clone();
+    let sid = session_id.clone();
+    let settings_for_title = settings.clone();
+    tauri::async_runtime::spawn(async move {
+        let _ = crate::title::maybe_auto_title_after_reply(
+            &settings_for_title,
+            &sid,
+            || {
+                let conn = state_clone.db.lock();
+                crate::title::load_session_turns(&conn, &sid)
+            },
+            |title| {
+                let conn = state_clone.db.lock();
+                db::set_session_title_llm(&conn, &sid, title)
+            },
+        )
+        .await;
+    });
 
     Ok(message)
 }
@@ -485,10 +476,7 @@ pub async fn hub_remove_pack(
         }
     };
 
-    crate::nest_debug!(
-        "hub",
-        "remove_pack id={pack_id} local_path={local_path}"
-    );
+    crate::nest_debug!("hub", "remove_pack id={pack_id} local_path={local_path}");
 
     let vault = state.vault_path();
     vault::remove_pack(&vault, &local_path)?;
@@ -517,13 +505,9 @@ pub async fn hub_download_pack(
     };
 
     let vault = state.vault_path();
-    let pack = hub::download_pack_remote(
-        &settings.hub_base_url,
-        &pack_id,
-        version.as_deref(),
-        &vault,
-    )
-    .await?;
+    let pack =
+        hub::download_pack_remote(&settings.hub_base_url, &pack_id, version.as_deref(), &vault)
+            .await?;
 
     {
         let conn = state.db.lock();
@@ -539,11 +523,7 @@ pub async fn hub_import_local_pack(
     source_path: String,
 ) -> AppResult<IndexStatus> {
     let source = std::path::PathBuf::from(source_path.trim());
-    crate::nest_debug!(
-        "hub",
-        "import_local_pack source={}",
-        source.display()
-    );
+    crate::nest_debug!("hub", "import_local_pack source={}", source.display());
 
     let vault = state.vault_path();
     let pack = hub::import_local_pack(&source, &vault)?;

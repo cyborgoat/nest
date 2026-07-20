@@ -70,6 +70,7 @@ export type ChatStreamEvent =
   | { type: "reading"; path: string }
   | { type: "generating" }
   | { type: "citations"; citations: import("@nest/shared").Citation[] }
+  | { type: "thinking"; content: string }
   | { type: "token"; content: string }
   | { type: "done"; message_id: string }
   | { type: "error"; message: string };

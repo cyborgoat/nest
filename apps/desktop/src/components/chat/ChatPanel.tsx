@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ChatMessage, ChatSession, Citation } from "@nest/shared";
-import { AlertCircle, FileText, Folder, Square, X } from "lucide-react";
+import { AlertCircle, ChevronDown, FileText, Folder, Lightbulb, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   AgentStatusIndicator,
@@ -16,7 +16,6 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
-import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { api, listenChatStream, type ChatStreamEvent } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -35,9 +34,11 @@ export function ChatPanel() {
 
   const [pendingUser, setPendingUser] = useState<string | null>(null);
   const [streaming, setStreaming] = useState("");
+  const [streamThinking, setStreamThinking] = useState("");
   const [agentActivity, setAgentActivity] = useState<AgentActivity>(null);
   const [isSending, setIsSending] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
+  const [isStopping, setIsStopping] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const bootstrapped = useRef(false);
 
@@ -76,6 +77,7 @@ export function ChatPanel() {
 
   // Buffer tokens and flush once per animation frame — avoids one React render per token.
   const streamBuf = useRef("");
+  const thinkingBuf = useRef("");
   const streamRaf = useRef<number | null>(null);
 
   const flushStream = () => {
@@ -84,6 +86,7 @@ export function ChatPanel() {
       streamRaf.current = null;
     }
     setStreaming(streamBuf.current);
+    setStreamThinking(thinkingBuf.current);
   };
 
   const clearStream = () => {
@@ -92,7 +95,9 @@ export function ChatPanel() {
       streamRaf.current = null;
     }
     streamBuf.current = "";
+    thinkingBuf.current = "";
     setStreaming("");
+    setStreamThinking("");
   };
 
   const appendStream = (chunk: string) => {
@@ -102,6 +107,11 @@ export function ChatPanel() {
       streamRaf.current = null;
       setStreaming(streamBuf.current);
     });
+  };
+
+  const appendThinking = (chunk: string) => {
+    thinkingBuf.current += chunk;
+    setStreamThinking(thinkingBuf.current);
   };
 
   const sessionsQuery = useQuery({
@@ -116,6 +126,7 @@ export function ChatPanel() {
     clearStream();
     setAgentActivity(null);
     setChatError(null);
+    setIsStopping(false);
   };
 
   useEffect(() => {
@@ -205,6 +216,8 @@ export function ChatPanel() {
               prev?.kind === "generating" ? prev : { kind: "generating" },
             );
             appendStream(event.content);
+          } else if (event.type === "thinking") {
+            appendThinking(event.content);
           } else if (event.type === "error") {
             setChatError(event.message);
             setStatusMessage(event.message);
@@ -222,6 +235,7 @@ export function ChatPanel() {
       setChatError(null);
       setPendingUser(query);
       setIsSending(true);
+      setIsStopping(false);
       clearStream();
       setAgentActivity({ kind: "generating" });
     },
@@ -252,14 +266,15 @@ export function ChatPanel() {
       setPendingUser(null);
       setAgentActivity(null);
       setIsSending(false);
+      setIsStopping(false);
       clearStream();
       void queryClient.invalidateQueries({ queryKey: ["chat-sessions"] });
     },
     onError: (e: Error) => {
       const message = e.message || "Chat request failed";
       if (message.toLowerCase().includes("cancelled")) {
-        setStatusMessage("Generation stopped");
         setIsSending(false);
+        setIsStopping(false);
         clearStream();
         setPendingUser(null);
         setAgentActivity(null);
@@ -273,6 +288,7 @@ export function ChatPanel() {
       setChatError(message);
       setStatusMessage(message);
       setIsSending(false);
+      setIsStopping(false);
       clearStream();
       setPendingUser(null);
       setAgentActivity(null);
@@ -298,6 +314,12 @@ export function ChatPanel() {
               ) : (
                 <AssistantBubble>
                   <MarkdownBody className={bubble}>{msg.content}</MarkdownBody>
+                  {msg.thinking && (
+                    <ThinkingDisclosure
+                      content={msg.thinking}
+                      seconds={msg.thinking_seconds}
+                    />
+                  )}
                   {msg.citations && msg.citations.length > 0 && (
                     <References
                       citations={msg.citations}
@@ -327,11 +349,19 @@ export function ChatPanel() {
                       className="ml-0.5 inline-block h-[1em] w-1.5 translate-y-[0.1em] animate-pulse rounded-sm bg-foreground/50 align-baseline"
                     />
                   </p>
+                  {streamThinking && (
+                    <ThinkingDisclosure content={streamThinking} isStreaming />
+                  )}
                 </>
               ) : (
-                <AgentStatusIndicator
-                  activity={agentActivity ?? { kind: "generating" }}
-                />
+                <>
+                  <AgentStatusIndicator
+                    activity={agentActivity ?? { kind: "generating" }}
+                  />
+                  {streamThinking && (
+                    <ThinkingDisclosure content={streamThinking} isStreaming />
+                  )}
+                </>
               )}
             </AssistantBubble>
           )}
@@ -361,7 +391,7 @@ export function ChatPanel() {
       <div className="shrink-0 px-3 pb-3 pt-4">
         <MentionComposer
           candidates={mentionCandidates}
-          disabled={isSending}
+          isGenerating={isSending}
           canSend={!!sessionId && !isSending}
           placeholders={{
             emptyActive:
@@ -370,21 +400,16 @@ export function ChatPanel() {
               "Type a message… Enter to send; Shift+Enter for a new line; @ to mention files or folders.",
           }}
           onSend={(query, focusPaths) => send.mutate({ query, focusPaths })}
+          onStop={() => {
+            if (isStopping) return;
+            setIsStopping(true);
+            void api.chatCancel().catch((e: unknown) => {
+              setIsStopping(false);
+              const message = e instanceof Error ? e.message : String(e);
+              setChatError(`Could not stop generation: ${message}`);
+            });
+          }}
         />
-        {isSending && (
-          <div className="mt-2 flex justify-end">
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={() => void api.chatCancel()}
-              aria-label="Stop generation"
-              title="Stop"
-            >
-              <Square className="size-3 fill-current" />
-              Stop
-            </Button>
-          </div>
-        )}
       </div>
     </div>
   );
@@ -436,6 +461,41 @@ function AssistantBubble({ children }: { children: ReactNode }) {
   return (
     <div className={cn(bubble, "mr-2 rounded-lg bg-muted px-3 py-2")}>
       {children}
+    </div>
+  );
+}
+
+function ThinkingDisclosure({
+  content,
+  seconds,
+  isStreaming = false,
+}: {
+  content: string;
+  seconds?: number;
+  isStreaming?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const label = isStreaming
+    ? "Thinking…"
+    : `Thought for ${(seconds ?? 0).toFixed(1)} seconds`;
+
+  return (
+    <div className="mt-3 border-t border-border/60 pt-2">
+      <button
+        type="button"
+        className="flex w-full items-center gap-1.5 text-left text-xs text-muted-foreground hover:text-foreground"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+      >
+        <Lightbulb className="size-3.5" />
+        <span>{label}</span>
+        <ChevronDown className={cn("ml-auto size-3.5 transition-transform", open && "rotate-180")} />
+      </button>
+      {open && (
+        <pre className="mt-2 h-40 overflow-y-auto whitespace-pre-wrap rounded-md bg-background/60 p-2 text-xs leading-relaxed text-muted-foreground">
+          {content}
+        </pre>
+      )}
     </div>
   );
 }

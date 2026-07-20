@@ -5,18 +5,20 @@ use rusqlite::Connection;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use tokio::sync::watch;
 
 pub struct AppState {
     pub db: Mutex<Connection>,
     pub app_data_dir: PathBuf,
     vault_root: Mutex<PathBuf>,
     pub is_indexing: AtomicBool,
-    pub chat_cancel: AtomicBool,
+    chat_cancel: watch::Sender<bool>,
 }
 
 impl AppState {
     pub fn new(app_data_dir: PathBuf) -> AppResult<Self> {
         vault::ensure_dir(&app_data_dir)?;
+        crate::embeddings::configure_cache(&app_data_dir)?;
         let db_path = app_data_dir.join("nest.db");
         let db = crate::db::open_db(&db_path)?;
 
@@ -32,7 +34,7 @@ impl AppState {
             app_data_dir,
             vault_root: Mutex::new(vault_root),
             is_indexing: AtomicBool::new(false),
-            chat_cancel: AtomicBool::new(false),
+            chat_cancel: watch::channel(false).0,
         })
     }
 
@@ -54,16 +56,16 @@ impl AppState {
         self.is_indexing.load(Ordering::SeqCst)
     }
 
-    pub fn clear_chat_cancel(&self) {
-        self.chat_cancel.store(false, Ordering::SeqCst);
+    /// Begin a chat generation with a fresh cancellation receiver. A watch
+    /// channel preserves a stop request even if it arrives before the stream is
+    /// waiting for the next token.
+    pub fn begin_chat_cancel(&self) -> watch::Receiver<bool> {
+        self.chat_cancel.send_replace(false);
+        self.chat_cancel.subscribe()
     }
 
     pub fn request_chat_cancel(&self) {
-        self.chat_cancel.store(true, Ordering::SeqCst);
-    }
-
-    pub fn chat_cancel_requested(&self) -> bool {
-        self.chat_cancel.load(Ordering::SeqCst)
+        self.chat_cancel.send_replace(true);
     }
 }
 

@@ -2,8 +2,21 @@
 
 use crate::error::{AppError, AppResult};
 use rig_fastembed::{Client as FastembedClient, EmbeddingModel, FastembedModel};
+use std::path::Path;
 
 pub const DEFAULT_EMBEDDING_MODEL: &str = "AllMiniLML6V2Q";
+
+/// Keep FastEmbed's model files in the app data directory. In a bundled app the
+/// process may not have the same working directory or home-directory setup as
+/// `tauri dev`; relying on FastEmbed's implicit cache made retrieval unreliable.
+pub fn configure_cache(app_data_dir: &Path) -> AppResult<()> {
+    if std::env::var_os("HF_HOME").is_none() {
+        let cache_dir = app_data_dir.join("fastembed-cache");
+        std::fs::create_dir_all(&cache_dir)?;
+        std::env::set_var("HF_HOME", cache_dir);
+    }
+    Ok(())
+}
 
 pub fn parse_model_id(id: &str) -> FastembedModel {
     match id.trim() {
