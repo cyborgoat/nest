@@ -1,4 +1,4 @@
-import { MoreHorizontal, Trash2 } from "lucide-react";
+import { Download, MoreHorizontal, Trash2 } from "lucide-react";
 import { useState } from "react";
 import {
   AlertDialog,
@@ -17,19 +17,25 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 export function RemovePackButton({
   name,
   disabled,
   pending,
+  onExport,
+  exportLabel,
   onConfirm,
 }: {
   name: string;
   disabled: boolean;
   pending: boolean;
+  onExport?: () => void;
+  exportLabel?: string;
   onConfirm: () => void;
 }) {
+  const { t } = useI18n();
   const [dialogOpen, setDialogOpen] = useState(false);
 
   return (
@@ -47,6 +53,12 @@ export function RemovePackButton({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="min-w-32">
+            {onExport && (
+              <DropdownMenuItem disabled={disabled} onSelect={() => void onExport()}>
+                <Download className="size-3.5" />
+                {exportLabel ?? "Export ZIP"}
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem
               className="text-destructive focus:text-destructive"
               disabled={disabled}
@@ -55,28 +67,26 @@ export function RemovePackButton({
               }}
             >
               <Trash2 className="size-3.5" />
-              Remove pack
+              {t("hub.uninstallPack")}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Remove knowledge pack?</AlertDialogTitle>
+          <AlertDialogTitle>{t("hub.uninstallPackTitle")}</AlertDialogTitle>
           <AlertDialogDescription>
-            This permanently deletes “{name}” from your local vault and cannot
-            be undone. The remote pack remains available and can be downloaded
-            again from the Hub.
+            {t("hub.uninstallPackDescription", { name })}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogCancel>{t("hub.cancel")}</AlertDialogCancel>
           <AlertDialogAction
             className={cn(buttonVariants({ variant: "destructive" }))}
             disabled={pending}
             onClick={onConfirm}
           >
-            {pending ? "Removing…" : "Remove"}
+            {pending ? t("hub.uninstalling") : t("hub.uninstall")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

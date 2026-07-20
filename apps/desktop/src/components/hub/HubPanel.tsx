@@ -247,6 +247,9 @@ export function HubPanel() {
                   download.mutate({ packId, version, previousVersion })
                 }
                 onRemove={(packId) => remove.mutate(packId)}
+                onExport={(packId, destinationPath) =>
+                  exportPack.mutate({ packId, destinationPath })
+                }
                 onOpenImport={() => setImportOpen(true)}
               />
             </div>

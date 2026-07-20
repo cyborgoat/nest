@@ -1,4 +1,5 @@
 import type { InstalledPack, PackProject } from "@nest/shared";
+import { save } from "@tauri-apps/plugin-dialog";
 import {
   ArrowUpCircle,
   Check,
@@ -38,6 +39,7 @@ export function BrowseTab({
   removePending,
   onInstall,
   onRemove,
+  onExport,
   onOpenImport,
 }: {
   hubOffline: boolean;
@@ -52,6 +54,7 @@ export function BrowseTab({
   removePending: boolean;
   onInstall: (packId: string, version: string, previousVersion?: string) => void;
   onRemove: (packId: string) => void;
+  onExport: (packId: string, destinationPath: string) => void;
   onOpenImport: () => void;
 }) {
   const { t } = useI18n();
@@ -120,6 +123,7 @@ export function BrowseTab({
             onInstall(pack.id, version, installedById.get(pack.id)?.version)
           }
           onRemove={() => onRemove(pack.id)}
+          onExport={onExport}
           removePending={removePending}
         />
       ))}
@@ -152,6 +156,7 @@ function PackRow({
   t,
   onInstall,
   onRemove,
+  onExport,
   removePending,
 }: {
   index: number;
@@ -161,6 +166,7 @@ function PackRow({
   t: ReturnType<typeof useI18n>["t"];
   onInstall: (version: string) => void;
   onRemove: () => void;
+  onExport: (packId: string, destinationPath: string) => void;
   removePending: boolean;
 }) {
   const [selectedVersion, setSelectedVersion] = useState(
@@ -192,6 +198,16 @@ function PackRow({
           name={project.name}
           disabled={busy || removePending}
           pending={removePending}
+          exportLabel={t("hub.exportZip")}
+          onExport={async () => {
+            if (!installed) return;
+            const destination = await save({
+              title: t("hub.exportKnowledgePack"),
+              defaultPath: `${installed.pack_id}-${installed.version}.zip`,
+              filters: [{ name: "Knowledge pack", extensions: ["zip"] }],
+            });
+            if (destination) onExport(installed.pack_id, destination);
+          }}
           onConfirm={onRemove}
         />
       )}

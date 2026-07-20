@@ -1,6 +1,6 @@
 import type { InstalledPack, PackProject } from "@nest/shared";
 import { save } from "@tauri-apps/plugin-dialog";
-import { ArrowUpCircle, Download, FolderInput, Globe, Package } from "lucide-react";
+import { ArrowUpCircle, FolderInput, Globe, Package } from "lucide-react";
 import { motion } from "motion/react";
 import { RemovePackButton } from "@/components/hub/RemovePackButton";
 import { Badge } from "@/components/ui/badge";
@@ -136,6 +136,15 @@ function InstalledPackRow({
         name={pack.name}
         disabled={busy || removePending}
         pending={removePending}
+        exportLabel={t("hub.exportZip")}
+        onExport={async () => {
+          const destination = await save({
+            title: t("hub.exportKnowledgePack"),
+            defaultPath: `${pack.pack_id}-${pack.version}.zip`,
+            filters: [{ name: "Knowledge pack", extensions: ["zip"] }],
+          });
+          if (destination) onExport(pack.pack_id, destination);
+        }}
         onConfirm={onRemove}
       />
       <div className="min-w-0 flex-1">
@@ -159,23 +168,6 @@ function InstalledPackRow({
         </p>
       </div>
       <div className="mt-2 flex justify-end gap-1.5">
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-7 gap-1 px-2 text-[11px]"
-          disabled={busy}
-          onClick={async () => {
-            const destination = await save({
-              title: t("hub.exportKnowledgePack"),
-              defaultPath: `${pack.pack_id}-${pack.version}.zip`,
-              filters: [{ name: "Knowledge pack", extensions: ["zip"] }],
-            });
-            if (destination) onExport(pack.pack_id, destination);
-          }}
-        >
-          <Download className="size-3.5" />
-          {t("hub.exportZip")}
-        </Button>
         {updateAvailable && catalogEntry && (
           <Button
             size="sm"
