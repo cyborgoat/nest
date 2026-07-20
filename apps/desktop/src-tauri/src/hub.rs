@@ -4,9 +4,10 @@ use crate::vault;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File};
-use std::io::copy;
+use std::io::{copy, Read, Write};
 use std::path::{Path, PathBuf};
-use zip::ZipArchive;
+use zip::write::SimpleFileOptions;
+use zip::{ZipArchive, ZipWriter};
 
 fn hub_http_client(hub_base_url: &str) -> AppResult<reqwest::Client> {
     let base = hub_base_url.trim().to_lowercase();
@@ -60,6 +61,25 @@ pub struct HubConnectionStatus {
     pub online: bool,
     pub hub_base_url: String,
     pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct FolderPackDefaults {
+    pub metadata: PackMeta,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LoosePackMeta {
+    #[serde(default)]
+    id: String,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    description: String,
+    #[serde(default)]
+    version: String,
 }
 
 /// Probe `{hub}/health`. Used for the Hub panel online/offline indicator.
@@ -213,6 +233,158 @@ pub fn record_sync(conn: &Connection, pack: &PackMeta) -> AppResult<()> {
     db::upsert_sync_state(conn, &pack.id, &pack.name, &pack.version, &pack.path)
 }
 
+/// Build editable metadata defaults for a source folder. A malformed root
+/// pack.json is non-fatal because the user can correct the form before import.
+pub fn folder_pack_defaults(source: &Path) -> AppResult<FolderPackDefaults> {
+    if !source.is_dir() {
+        return Err(AppError::msg("Select a folder to create a knowledge pack"));
+    }
+    let folder_name = source
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or("knowledge-pack")
+        .trim()
+        .to_string();
+    let generated_id = slugify_pack_id(&folder_name);
+    let mut metadata = PackMeta {
+        id: generated_id,
+        name: folder_name,
+        description: String::new(),
+        version: "1.0.0".into(),
+        path: String::new(),
+    };
+
+    let pack_json = source.join("pack.json");
+    if !pack_json.is_file() {
+        return Ok(FolderPackDefaults {
+            metadata,
+            warning: None,
+        });
+    }
+
+    match fs::read_to_string(&pack_json)
+        .map_err(AppError::from)
+        .and_then(|raw| {
+            serde_json::from_str::<LoosePackMeta>(&raw)
+                .map_err(|e| AppError::msg(format!("Invalid pack.json: {e}")))
+        }) {
+        Ok(existing) => {
+            if !existing.id.trim().is_empty() {
+                metadata.id = existing.id.trim().to_string();
+            }
+            if !existing.name.trim().is_empty() {
+                metadata.name = existing.name.trim().to_string();
+            }
+            metadata.description = existing.description.trim().to_string();
+            if !existing.version.trim().is_empty() {
+                metadata.version = existing.version.trim().to_string();
+            }
+            Ok(FolderPackDefaults {
+                metadata,
+                warning: None,
+            })
+        }
+        Err(error) => Ok(FolderPackDefaults {
+            metadata,
+            warning: Some(format!(
+                "Could not use the folder's pack.json ({error}). Fill in the pack details below."
+            )),
+        }),
+    }
+}
+
+/// Copy a source folder into the vault as a standalone, validated pack.
+pub fn create_pack_from_folder(
+    source: &Path,
+    submitted: PackMeta,
+    vault_root: &Path,
+) -> AppResult<PackMeta> {
+    if !source.is_dir() {
+        return Err(AppError::msg("Select a folder to create a knowledge pack"));
+    }
+    if !dir_has_markdown(source) {
+        return Err(AppError::msg(
+            "This folder has no Markdown (.md) files. Knowledge packs must include at least one.",
+        ));
+    }
+    let pack = normalize_pack_meta(submitted)?;
+    let destination = vault_root.join(&pack.path);
+    if source.canonicalize().ok() == destination.canonicalize().ok() && destination.exists() {
+        return Err(AppError::msg(
+            "This folder is already the installed knowledge pack",
+        ));
+    }
+
+    let staging = vault_root.join(format!(".creating-{}", uuid::Uuid::new_v4()));
+    let result = (|| {
+        vault::copy_dir_recursive(source, &staging)?;
+        write_pack_meta(&staging, &pack)?;
+        if destination.exists() {
+            fs::remove_dir_all(&destination)?;
+        }
+        fs::rename(&staging, &destination)?;
+        Ok(pack.clone())
+    })();
+    if staging.exists() {
+        let _ = fs::remove_dir_all(&staging);
+    }
+    result
+}
+
+/// Write an installed pack to a portable ZIP containing one top-level pack folder.
+pub fn export_pack(pack: &PackMeta, vault_root: &Path, destination: &Path) -> AppResult<()> {
+    let source = vault_root.join(&pack.path);
+    if !source.is_dir() || !dir_has_markdown(&source) {
+        return Err(AppError::msg(
+            "Installed pack content is missing or has no Markdown files",
+        ));
+    }
+    let pack = read_required_pack_meta(&source)?;
+    if destination
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("zip"))
+        != Some(true)
+    {
+        return Err(AppError::msg("Export destination must be a .zip file"));
+    }
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let file = File::create(destination)?;
+    let mut writer = ZipWriter::new(file);
+    let options = SimpleFileOptions::default();
+    for entry in walkdir::WalkDir::new(&source)
+        .into_iter()
+        .filter_map(|entry| entry.ok())
+    {
+        let path = entry.path();
+        if path == source {
+            continue;
+        }
+        let relative = path
+            .strip_prefix(&source)
+            .map_err(|e| AppError::msg(e.to_string()))?;
+        let name = format!(
+            "{}/{}",
+            pack.path,
+            relative.to_string_lossy().replace('\\', "/")
+        );
+        if entry.file_type().is_dir() {
+            writer.add_directory(name, options)?;
+        } else {
+            writer.start_file(name, options)?;
+            let mut input = File::open(path)?;
+            let mut bytes = Vec::new();
+            input.read_to_end(&mut bytes)?;
+            writer.write_all(&bytes)?;
+        }
+    }
+    writer.finish()?;
+    Ok(())
+}
+
 /// Import a local `.zip` knowledge pack (must include `pack.json`).
 pub fn import_local_pack(source: &Path, vault_root: &Path) -> AppResult<PackMeta> {
     if !source.is_file() {
@@ -339,6 +511,68 @@ fn validate_pack_folder_name(name: &str) -> AppResult<()> {
     Ok(())
 }
 
+fn slugify_pack_id(value: &str) -> String {
+    let mut slug = String::new();
+    let mut previous_dash = false;
+    for ch in value.trim().chars() {
+        if ch.is_ascii_alphanumeric() {
+            slug.push(ch.to_ascii_lowercase());
+            previous_dash = false;
+        } else if !previous_dash && !slug.is_empty() {
+            slug.push('-');
+            previous_dash = true;
+        }
+    }
+    let slug = slug.trim_matches('-');
+    if slug.is_empty() {
+        "knowledge-pack".into()
+    } else {
+        slug.into()
+    }
+}
+
+fn valid_semver(version: &str) -> bool {
+    let core = version
+        .trim()
+        .split_once(['-', '+'])
+        .map(|(core, _)| core)
+        .unwrap_or(version.trim());
+    core.split('.').count() == 3
+        && core
+            .split('.')
+            .all(|part| !part.is_empty() && part.chars().all(|ch| ch.is_ascii_digit()))
+}
+
+fn normalize_pack_meta(pack: PackMeta) -> AppResult<PackMeta> {
+    let id = pack.id.trim().to_string();
+    let name = pack.name.trim().to_string();
+    let version = pack.version.trim().to_string();
+    if id.is_empty() || name.is_empty() || version.is_empty() {
+        return Err(AppError::msg("Pack ID, name, and version are required"));
+    }
+    validate_pack_folder_name(&id)?;
+    if !valid_semver(&version) {
+        return Err(AppError::msg(
+            "Pack version must use SemVer (for example 1.0.0)",
+        ));
+    }
+    Ok(PackMeta {
+        id: id.clone(),
+        name,
+        description: pack.description.trim().to_string(),
+        version,
+        path: id,
+    })
+}
+
+fn write_pack_meta(pack_root: &Path, pack: &PackMeta) -> AppResult<()> {
+    fs::write(
+        pack_root.join("pack.json"),
+        format!("{}\n", serde_json::to_string_pretty(pack)?),
+    )?;
+    Ok(())
+}
+
 fn dir_has_markdown(dir: &Path) -> bool {
     walkdir::WalkDir::new(dir)
         .into_iter()
@@ -368,25 +602,21 @@ fn read_required_pack_meta(pack_root: &Path) -> AppResult<PackMeta> {
             "pack.json requires non-empty id, name, and version",
         ));
     }
-    let path = {
-        let p = pack.path.trim();
-        if p.is_empty() {
-            pack.id.trim().to_string()
-        } else {
-            p.to_string()
-        }
+    let path = if pack.path.trim().is_empty() {
+        pack.id.trim().to_string()
+    } else {
+        pack.path.trim().to_string()
     };
     if path != pack.id.trim() {
         return Err(AppError::msg(
             "pack.json \"path\" must equal \"id\" (or be omitted)",
         ));
     }
-    validate_pack_folder_name(&path)?;
-    Ok(PackMeta {
-        id: pack.id.trim().to_string(),
-        name: pack.name.trim().to_string(),
-        description: pack.description.trim().to_string(),
-        version: pack.version.trim().to_string(),
+    normalize_pack_meta(PackMeta {
+        id: pack.id,
+        name: pack.name,
+        description: pack.description,
+        version: pack.version,
         path,
     })
 }

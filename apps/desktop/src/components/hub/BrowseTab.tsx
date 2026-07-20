@@ -78,11 +78,11 @@ export function BrowseTab({
               Have a pack file?
             </div>
             <p className="text-sm text-muted-foreground">
-              No connection needed — import a knowledge pack zip directly.
+              No connection needed — create a pack from a local folder or import a shared ZIP.
             </p>
             <Button size="sm" variant="outline" onClick={onOpenImport}>
               <FolderInput className="size-4" />
-              Import local .zip
+              Import local pack
             </Button>
           </div>
         </div>
@@ -134,7 +134,7 @@ export function BrowseTab({
         >
           <Button size="sm" variant="outline" onClick={onOpenImport}>
             <FolderInput className="size-4" />
-            Import local .zip
+            Import local pack
           </Button>
         </EmptyState>
       )}

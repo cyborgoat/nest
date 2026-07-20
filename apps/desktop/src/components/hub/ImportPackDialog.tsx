@@ -1,6 +1,7 @@
-import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { FileArchive, Loader2 } from "lucide-react";
+import type { KnowledgePackMeta } from "@nest/shared";
+import { FileArchive, FolderInput, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -11,227 +12,185 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 type Props = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onImport: (sourcePath: string) => void;
+  onImportZip: (sourcePath: string) => void;
+  onCreateFromFolder: (sourcePath: string, metadata: KnowledgePackMeta) => void;
   importing?: boolean;
 };
 
-function isZipPath(p: string) {
-  return p.toLowerCase().endsWith(".zip");
+const EMPTY: KnowledgePackMeta = {
+  id: "",
+  name: "",
+  description: "",
+  version: "1.0.0",
+};
+
+function isZipPath(path: string) {
+  return path.toLowerCase().endsWith(".zip");
 }
 
 export function ImportPackDialog({
   open,
   onOpenChange,
-  onImport,
+  onImportZip,
+  onCreateFromFolder,
   importing = false,
 }: Props) {
+  const [mode, setMode] = useState<"choose" | "zip" | "folder">("choose");
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [metadata, setMetadata] = useState<KnowledgePackMeta>(EMPTY);
+  const [warning, setWarning] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
-  const [dropError, setDropError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) {
+      setMode("choose");
       setSelectedPath(null);
+      setMetadata(EMPTY);
+      setWarning(null);
+      setError(null);
       setDragging(false);
-      setDropError(null);
     }
   }, [open]);
 
   useEffect(() => {
-    if (!open) return;
-
+    if (!open || mode !== "zip") return;
     let cancelled = false;
     let unlisten: (() => void) | undefined;
-
-    void getCurrentWebview()
-      .onDragDropEvent((event) => {
-        if (cancelled) return;
-        if (event.payload.type === "enter" || event.payload.type === "over") {
-          setDragging(true);
+    void getCurrentWebview().onDragDropEvent((event) => {
+      if (cancelled) return;
+      if (event.payload.type === "enter" || event.payload.type === "over") {
+        setDragging(true);
+      } else if (event.payload.type === "leave") {
+        setDragging(false);
+      } else if (event.payload.type === "drop") {
+        setDragging(false);
+        const [path, ...rest] = event.payload.paths ?? [];
+        if (!path || rest.length > 0 || !isZipPath(path)) {
+          setError("Drop one .zip knowledge pack.");
           return;
         }
-        if (event.payload.type === "leave") {
-          setDragging(false);
-          return;
-        }
-        if (event.payload.type === "drop") {
-          setDragging(false);
-          const paths = event.payload.paths ?? [];
-          if (paths.length === 0) {
-            setDropError("No file was dropped.");
-            return;
-          }
-          if (paths.length > 1) {
-            setDropError("Drop a single .zip pack (not multiple items).");
-            return;
-          }
-          const path = paths[0];
-          if (!isZipPath(path)) {
-            setDropError("Knowledge packs must be a .zip file.");
-            return;
-          }
-          setDropError(null);
-          setSelectedPath(path);
-        }
-      })
-      .then((fn) => {
-        if (cancelled) fn();
-        else unlisten = fn;
-      });
-
+        setError(null);
+        setSelectedPath(path);
+      }
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlisten = fn;
+    });
     return () => {
       cancelled = true;
       unlisten?.();
     };
-  }, [open]);
+  }, [open, mode]);
 
-  const pickZip = async () => {
-    try {
-      const result = await openFileDialog({
-        multiple: false,
-        title: "Select a knowledge pack zip",
-        filters: [{ name: "Knowledge pack", extensions: ["zip"] }],
-      });
-      if (typeof result === "string" && result) {
-        if (!isZipPath(result)) {
-          setDropError("Knowledge packs must be a .zip file.");
-          return;
-        }
-        setDropError(null);
-        setSelectedPath(result);
-      }
-    } catch (e) {
-      setDropError(e instanceof Error ? e.message : String(e));
+  const selectZip = async () => {
+    const result = await openDialog({
+      multiple: false,
+      title: "Select a knowledge pack zip",
+      filters: [{ name: "Knowledge pack", extensions: ["zip"] }],
+    });
+    if (typeof result === "string" && result) {
+      setSelectedPath(result);
+      setError(null);
     }
   };
+
+  const selectFolder = async () => {
+    try {
+      const path = await openDialog({ directory: true, multiple: false, title: "Select knowledge folder" });
+      if (typeof path !== "string" || !path) return;
+      const defaults = await api.hubReadFolderPackDefaults(path);
+      setSelectedPath(path);
+      setMetadata(defaults.metadata);
+      setWarning(defaults.warning ?? null);
+      setError(null);
+      setMode("folder");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const update = <K extends keyof KnowledgePackMeta>(key: K, value: KnowledgePackMeta[K]) =>
+    setMetadata((current) => ({ ...current, [key]: value }));
+
+  const folderValid = metadata.id.trim() && metadata.name.trim() && metadata.version.trim();
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-xl overflow-hidden">
         <DialogHeader>
-          <DialogTitle>Import local pack</DialogTitle>
+          <DialogTitle>{mode === "folder" ? "Create knowledge pack" : "Import knowledge"}</DialogTitle>
           <DialogDescription>
-            Add a Markdown knowledge pack zip from your computer. Nest extracts
-            it into your vault and indexes it for chat.
+            {mode === "folder"
+              ? "Review the pack details, then Nest copies this folder into your vault."
+              : "Create a pack from a Markdown folder or import an existing shareable ZIP."}
           </DialogDescription>
         </DialogHeader>
 
-        <div className="min-w-0 space-y-4 overflow-hidden text-sm">
-          <div className="rounded-md border border-border bg-muted/40 px-3 py-3">
-            <p className="font-medium text-foreground">Import guide</p>
-            <ul className="mt-2 list-disc space-y-1.5 pl-5 text-muted-foreground">
-              <li>
-                Import a <span className="text-foreground">.zip</span> file —
-                not a loose folder.
-              </li>
-              <li>
-                The zip must include a required{" "}
-                <span className="font-mono text-xs">pack.json</span> at the pack
-                root (same layout as Hub downloads / fixtures).
-              </li>
-              <li>
-                <span className="font-mono text-xs">pack.json</span> must set{" "}
-                <span className="font-mono text-xs">id</span>,{" "}
-                <span className="font-mono text-xs">name</span>,{" "}
-                <span className="font-mono text-xs">description</span>, and{" "}
-                <span className="font-mono text-xs">version</span> (SemVer).{" "}
-                <span className="font-mono text-xs">path</span> is optional and
-                must equal <span className="font-mono text-xs">id</span> if set.
-              </li>
-              <li>
-                Include at least one{" "}
-                <span className="font-mono text-xs">.md</span> file. Nested
-                subfolders are fine.
-              </li>
-              <li>
-                Re-importing the same pack{" "}
-                <span className="font-mono text-xs">id</span> replaces the
-                previous copy. Packs are stored read-only in the vault.
-              </li>
-            </ul>
-            <p className="mt-3 break-words text-xs text-muted-foreground">
-              Example zip layout:{" "}
-              <span className="font-mono">my-topic/pack.json</span>,{" "}
-              <span className="font-mono">my-topic/README.md</span>,{" "}
-              <span className="font-mono">my-topic/guides/intro.md</span>
-            </p>
+        {mode === "choose" && (
+          <div className="grid gap-3 sm:grid-cols-2">
+            <button type="button" className="rounded-lg border border-border p-4 text-left hover:border-primary/60" onClick={() => void selectFolder()}>
+              <FolderInput className="size-6 text-primary" />
+              <p className="mt-3 font-medium">Create from folder</p>
+              <p className="mt-1 text-xs text-muted-foreground">Copy a Markdown folder into a new, self-contained knowledge pack.</p>
+            </button>
+            <button type="button" className="rounded-lg border border-border p-4 text-left hover:border-primary/60" onClick={() => setMode("zip")}>
+              <FileArchive className="size-6 text-primary" />
+              <p className="mt-3 font-medium">Import pack ZIP</p>
+              <p className="mt-1 text-xs text-muted-foreground">Install a previously exported or shared Nest pack.</p>
+            </button>
           </div>
+        )}
 
-          <button
-            type="button"
-            onClick={() => void pickZip()}
-            disabled={importing}
-            className={cn(
-              "flex w-full min-w-0 flex-col items-center justify-center gap-2 rounded-lg border border-dashed px-4 py-8 text-center transition-colors",
-              dragging
-                ? "border-primary bg-primary/5 text-foreground"
-                : "border-border bg-card text-muted-foreground hover:border-primary/50 hover:text-foreground",
-            )}
-          >
-            <FileArchive className="size-8 text-primary" />
-            <span className="text-sm font-medium text-foreground">
-              {dragging ? "Drop zip to select" : "Drag & drop a pack .zip"}
-            </span>
-            <span className="text-xs">or click to browse</span>
-          </button>
+        {mode === "zip" && (
+          <div className="space-y-3">
+            <button type="button" onClick={() => void selectZip()} disabled={importing} className={cn("flex w-full flex-col items-center gap-2 rounded-lg border border-dashed px-4 py-8", dragging ? "border-primary bg-primary/5" : "border-border hover:border-primary/60")}>
+              <FileArchive className="size-8 text-primary" />
+              <span className="font-medium">{dragging ? "Drop ZIP to select" : "Drag a pack ZIP here"}</span>
+              <span className="text-xs text-muted-foreground">or click to browse</span>
+            </button>
+            <SelectedPath path={selectedPath} />
+          </div>
+        )}
 
-          {selectedPath && (
-            <div className="flex min-w-0 items-start gap-2 overflow-hidden rounded-md border border-border px-3 py-2">
-              <FileArchive className="mt-0.5 size-4 shrink-0 text-accent" />
-              <div className="min-w-0 flex-1 overflow-hidden">
-                <p className="text-xs font-medium text-muted-foreground">
-                  Selected zip
-                </p>
-                <p className="truncate font-medium" title={selectedPath}>
-                  {selectedPath.split(/[/\\]/).pop() || selectedPath}
-                </p>
-                <p
-                  className="truncate font-mono text-[11px] text-muted-foreground"
-                  title={selectedPath}
-                >
-                  {selectedPath}
-                </p>
-              </div>
+        {mode === "folder" && (
+          <div className="space-y-3">
+            <SelectedPath path={selectedPath} />
+            {warning && <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700">{warning}</p>}
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Pack ID"><Input value={metadata.id} onChange={(e) => update("id", e.target.value)} /></Field>
+              <Field label="Version"><Input value={metadata.version} onChange={(e) => update("version", e.target.value)} placeholder="1.0.0" /></Field>
             </div>
-          )}
+            <Field label="Name"><Input value={metadata.name} onChange={(e) => update("name", e.target.value)} /></Field>
+            <Field label="Description (optional)"><Input value={metadata.description} onChange={(e) => update("description", e.target.value)} /></Field>
+          </div>
+        )}
 
-          {dropError && (
-            <p className="break-words text-sm text-destructive">{dropError}</p>
-          )}
-        </div>
-
+        {error && <p className="text-sm text-destructive">{error}</p>}
         <DialogFooter>
-          <Button
-            type="button"
-            variant="outline"
-            disabled={importing}
-            onClick={() => onOpenChange(false)}
-          >
-            Cancel
-          </Button>
-          <Button
-            type="button"
-            disabled={!selectedPath || importing}
-            onClick={() => {
-              if (selectedPath) onImport(selectedPath);
-            }}
-          >
-            {importing ? (
-              <>
-                <Loader2 className="size-4 animate-spin" />
-                Importing…
-              </>
-            ) : (
-              "Import pack"
-            )}
-          </Button>
+          {mode !== "choose" && <Button type="button" variant="ghost" disabled={importing} onClick={() => { setMode("choose"); setError(null); }}>Back</Button>}
+          <Button type="button" variant="outline" disabled={importing} onClick={() => onOpenChange(false)}>Cancel</Button>
+          {mode === "zip" && <Button disabled={!selectedPath || importing} onClick={() => selectedPath && onImportZip(selectedPath)}>{importing && <Loader2 className="size-4 animate-spin" />}Import ZIP</Button>}
+          {mode === "folder" && <Button disabled={!selectedPath || !folderValid || importing} onClick={() => selectedPath && onCreateFromFolder(selectedPath, metadata)}>{importing && <Loader2 className="size-4 animate-spin" />}Create pack</Button>}
         </DialogFooter>
       </DialogContent>
     </Dialog>
   );
+}
+
+function SelectedPath({ path }: { path: string | null }) {
+  if (!path) return null;
+  return <p className="truncate rounded-md border border-border px-3 py-2 font-mono text-xs text-muted-foreground" title={path}>{path}</p>;
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return <div className="space-y-1"><Label>{label}</Label>{children}</div>;
 }

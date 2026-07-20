@@ -26,6 +26,19 @@ export type InstalledPack = {
   active: boolean;
 };
 
+/** Editable metadata used when creating a knowledge pack from a local folder. */
+export type KnowledgePackMeta = {
+  id: string;
+  name: string;
+  description: string;
+  version: string;
+};
+
+export type KnowledgePackDefaults = {
+  metadata: KnowledgePackMeta;
+  warning?: string;
+};
+
 export type TreeNodeKind = "folder" | "file";
 
 export type TreeNode = {

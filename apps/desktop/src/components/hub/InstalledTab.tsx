@@ -1,5 +1,6 @@
 import type { InstalledPack, PackProject } from "@nest/shared";
-import { ArrowUpCircle, FolderInput, Globe, Package } from "lucide-react";
+import { save } from "@tauri-apps/plugin-dialog";
+import { ArrowUpCircle, Download, FolderInput, Globe, Package } from "lucide-react";
 import { motion } from "motion/react";
 import { RemovePackButton } from "@/components/hub/RemovePackButton";
 import { Badge } from "@/components/ui/badge";
@@ -17,6 +18,7 @@ export function InstalledTab({
   onRemove,
   onOpenImport,
   onBrowse,
+  onExport,
 }: {
   installed: InstalledPack[];
   isLoading: boolean;
@@ -28,6 +30,7 @@ export function InstalledTab({
   onRemove: (packId: string) => void;
   onOpenImport: () => void;
   onBrowse: () => void;
+  onExport: (packId: string, destinationPath: string) => void;
 }) {
   if (isLoading) {
     return <p className="text-sm text-muted-foreground">Loading packs…</p>;
@@ -39,7 +42,7 @@ export function InstalledTab({
         variant="dashed"
         icon={<Package className="size-6" />}
         title="No packs in your vault yet"
-        description="Download packs from the registry or import a knowledge pack zip from your computer."
+        description="Download packs, create one from a Markdown folder, or import a shared pack ZIP."
         footnote={
           hubOnline
             ? undefined
@@ -58,7 +61,7 @@ export function InstalledTab({
           </Button>
           <Button size="sm" variant="outline" onClick={onOpenImport}>
             <FolderInput className="size-4" />
-            Import local .zip
+            Import local pack
           </Button>
         </div>
       </EmptyState>
@@ -78,6 +81,7 @@ export function InstalledTab({
           removePending={removePending}
           onUpgrade={onUpgrade}
           onRemove={() => onRemove(pack.pack_id)}
+          onExport={onExport}
         />
       ))}
       <Button
@@ -86,7 +90,7 @@ export function InstalledTab({
         className="w-full border-dashed bg-transparent text-muted-foreground hover:text-foreground"
       >
         <FolderInput className="size-4" />
-        Import another pack (.zip)…
+        Import or create another pack…
       </Button>
     </div>
   );
@@ -101,6 +105,7 @@ function InstalledPackRow({
   removePending,
   onUpgrade,
   onRemove,
+  onExport,
 }: {
   index: number;
   pack: InstalledPack;
@@ -110,6 +115,7 @@ function InstalledPackRow({
   removePending: boolean;
   onUpgrade: (packId: string, version: string, previousVersion: string) => void;
   onRemove: () => void;
+  onExport: (packId: string, destinationPath: string) => void;
 }) {
   const updateAvailable =
     catalogEntry != null && catalogEntry.latest_version !== pack.version;
@@ -148,6 +154,23 @@ function InstalledPackRow({
         </p>
       </div>
       <div className="mt-2 flex justify-end gap-1.5">
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 gap-1 px-2 text-[11px]"
+          disabled={busy}
+          onClick={async () => {
+            const destination = await save({
+              title: "Export knowledge pack",
+              defaultPath: `${pack.pack_id}-${pack.version}.zip`,
+              filters: [{ name: "Knowledge pack", extensions: ["zip"] }],
+            });
+            if (destination) onExport(pack.pack_id, destination);
+          }}
+        >
+          <Download className="size-3.5" />
+          Export ZIP
+        </Button>
         {updateAvailable && catalogEntry && (
           <Button
             size="sm"

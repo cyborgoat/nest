@@ -60,6 +60,9 @@ pub fn run() {
             commands::hub_remove_pack,
             commands::hub_download_pack,
             commands::hub_import_local_pack,
+            commands::hub_read_folder_pack_defaults,
+            commands::hub_create_pack_from_folder,
+            commands::hub_export_pack,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Nest");

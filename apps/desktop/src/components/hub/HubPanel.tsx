@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { InstalledPack, PackProject } from "@nest/shared";
+import type { InstalledPack, KnowledgePackMeta, PackProject } from "@nest/shared";
 import { CloudOff, FolderInput } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -42,7 +42,7 @@ export function HubPanel() {
       toast.warning("Knowledge Hub offline", {
         description:
           hubStatusQuery.data.message ||
-          "Catalog unavailable. You can still import a local pack zip.",
+          "Catalog unavailable. You can still create or import a local pack.",
       });
     }
   }, [hubStatusQuery.data]);
@@ -137,6 +137,24 @@ export function HubPanel() {
       }),
   });
 
+  const createFromFolder = useMutation({
+    mutationFn: ({ sourcePath, metadata }: { sourcePath: string; metadata: KnowledgePackMeta }) =>
+      api.hubCreatePackFromFolder(sourcePath, metadata),
+    onSuccess: (status) => {
+      setImportOpen(false);
+      invalidateAfterPackChange();
+      toast.success("Knowledge pack created", { description: `${status.indexed_files} files indexed` });
+    },
+    onError: (e: Error) => toast.error("Could not create pack", { description: e.message || String(e) }),
+  });
+
+  const exportPack = useMutation({
+    mutationFn: ({ packId, destinationPath }: { packId: string; destinationPath: string }) =>
+      api.hubExportPack(packId, destinationPath),
+    onSuccess: () => toast.success("Knowledge pack exported"),
+    onError: (e: Error) => toast.error("Export failed", { description: e.message || String(e) }),
+  });
+
   const remove = useMutation({
     mutationFn: (packId: string) => api.hubRemovePack(packId),
     onSuccess: (_status, packId) => {
@@ -155,14 +173,14 @@ export function HubPanel() {
       }),
   });
 
-  const busy = download.isPending || remove.isPending;
+  const busy = download.isPending || remove.isPending || createFromFolder.isPending || importLocal.isPending || exportPack.isPending;
   const installedCount = installedQuery.data?.length ?? 0;
 
   return (
     <div className="flex h-full flex-col">
       <PanelHeader
         title="Knowledge Hub"
-        description="Install versioned packs from the configured Knowledge Hub catalog or import a pack zip. One active version per pack lives in your vault."
+        description="Install versioned packs from the configured catalog, create one from a local folder, or import a shareable ZIP."
         badges={
           <>
             {hubOnline && <Badge variant="accent">Online</Badge>}
@@ -238,6 +256,7 @@ export function HubPanel() {
                 onRemove={(packId) => remove.mutate(packId)}
                 onOpenImport={() => setImportOpen(true)}
                 onBrowse={() => setTab("browse")}
+                onExport={(packId, destinationPath) => exportPack.mutate({ packId, destinationPath })}
               />
             </div>
           </ScrollArea>
@@ -247,8 +266,9 @@ export function HubPanel() {
       <ImportPackDialog
         open={importOpen}
         onOpenChange={setImportOpen}
-        importing={importLocal.isPending}
-        onImport={(path) => importLocal.mutate(path)}
+        importing={importLocal.isPending || createFromFolder.isPending}
+        onImportZip={(path) => importLocal.mutate(path)}
+        onCreateFromFolder={(sourcePath, metadata) => createFromFolder.mutate({ sourcePath, metadata })}
       />
     </div>
   );

@@ -7,6 +7,8 @@ import type {
   HubConnectionStatus,
   IndexStatus,
   InstalledPack,
+  KnowledgePackDefaults,
+  KnowledgePackMeta,
   PackProject,
   TreeNode,
 } from "@nest/shared";
@@ -64,6 +66,12 @@ export const api = {
     }),
   hubImportLocalPack: (sourcePath: string) =>
     invoke<IndexStatus>("hub_import_local_pack", { sourcePath }),
+  hubReadFolderPackDefaults: (sourcePath: string) =>
+    invoke<KnowledgePackDefaults>("hub_read_folder_pack_defaults", { sourcePath }),
+  hubCreatePackFromFolder: (sourcePath: string, metadata: KnowledgePackMeta) =>
+    invoke<IndexStatus>("hub_create_pack_from_folder", { sourcePath, metadata }),
+  hubExportPack: (packId: string, destinationPath: string) =>
+    invoke<void>("hub_export_pack", { packId, destinationPath }),
 };
 
 export type ChatStreamEvent =

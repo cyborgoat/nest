@@ -1,5 +1,7 @@
 use crate::agent;
-use crate::db::{self, AppSettings, ChatMessage, ChatSession, IndexStatus, InstalledPack};
+use crate::db::{
+    self, AppSettings, ChatMessage, ChatSession, IndexStatus, InstalledPack, PackMeta,
+};
 use crate::embeddings;
 use crate::error::{AppError, AppResult};
 use crate::hub::{self, PackProject};
@@ -533,4 +535,55 @@ pub async fn hub_import_local_pack(
     }
 
     index_rebuild(state).await
+}
+
+#[tauri::command]
+pub fn hub_read_folder_pack_defaults(source_path: String) -> AppResult<hub::FolderPackDefaults> {
+    hub::folder_pack_defaults(std::path::Path::new(source_path.trim()))
+}
+
+#[tauri::command]
+pub async fn hub_create_pack_from_folder(
+    state: State<'_, SharedState>,
+    source_path: String,
+    metadata: PackMeta,
+) -> AppResult<IndexStatus> {
+    let vault = state.vault_path();
+    let pack =
+        hub::create_pack_from_folder(std::path::Path::new(source_path.trim()), metadata, &vault)?;
+    {
+        let conn = state.db.lock();
+        hub::record_sync(&conn, &pack)?;
+    }
+    index_rebuild(state).await
+}
+
+#[tauri::command]
+pub fn hub_export_pack(
+    state: State<'_, SharedState>,
+    pack_id: String,
+    destination_path: String,
+) -> AppResult<()> {
+    let pack = {
+        let conn = state.db.lock();
+        let installed = db::get_sync_state(&conn, pack_id.trim())?
+            .ok_or_else(|| AppError::msg(format!("Pack not installed: {}", pack_id.trim())))?;
+        PackMeta {
+            id: installed.pack_id,
+            name: installed.name,
+            description: String::new(),
+            version: installed.version,
+            path: installed.local_path,
+        }
+    };
+    let mut destination = std::path::PathBuf::from(destination_path.trim());
+    if !destination
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("zip"))
+        .unwrap_or(false)
+    {
+        destination.set_extension("zip");
+    }
+    hub::export_pack(&pack, &state.vault_path(), &destination)
 }
