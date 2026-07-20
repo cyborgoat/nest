@@ -161,7 +161,7 @@ function InstalledPackRow({
           ) : (
             <Badge variant="muted">{t("hub.inVault")}</Badge>
           )}
-          {updateAvailable && <Badge variant="accent">{t("hub.updateAvailable")}</Badge>}
+          {updateAvailable && <Badge variant="update">{t("hub.updateAvailable")}</Badge>}
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
           {t("hub.localFolder", { path: pack.local_path })}
@@ -171,7 +171,7 @@ function InstalledPackRow({
         {updateAvailable && catalogEntry && (
           <Button
             size="sm"
-            className="h-7 gap-1 px-2 text-[11px]"
+            className="h-7 gap-1 bg-[#e4f4e8] px-2 text-[11px] text-[#23663a] hover:bg-[#d7eddc]"
             disabled={busy}
             onClick={() =>
               onUpgrade(pack.pack_id, catalogEntry.latest_version, pack.version)

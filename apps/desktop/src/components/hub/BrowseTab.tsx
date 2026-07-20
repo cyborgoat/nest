@@ -1,6 +1,7 @@
 import type { InstalledPack, PackProject } from "@nest/shared";
 import { save } from "@tauri-apps/plugin-dialog";
 import {
+  ArrowDownCircle,
   ArrowUpCircle,
   Check,
   CloudDownload,
@@ -13,6 +14,16 @@ import {
 import { motion } from "motion/react";
 import { useEffect, useState } from "react";
 import { RemovePackButton } from "@/components/hub/RemovePackButton";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -172,6 +183,7 @@ function PackRow({
   const [selectedVersion, setSelectedVersion] = useState(
     project.latest_version,
   );
+  const [downgradeConfirmOpen, setDowngradeConfirmOpen] = useState(false);
   const versions = project.versions.length
     ? project.versions
     : [project.latest_version];
@@ -185,122 +197,191 @@ function PackRow({
     isInstalled && installed.version !== project.latest_version;
   const selectedIsInstalled =
     isInstalled && installed.version === selectedVersion;
+  const selectedVersionDelta = installed
+    ? compareSemVer(selectedVersion, installed.version)
+    : 0;
+  const isDowngrade = isInstalled && selectedVersionDelta < 0;
+  const isUpgrade = isInstalled && selectedVersionDelta > 0;
+  const requestInstall = () => {
+    if (isDowngrade) {
+      setDowngradeConfirmOpen(true);
+      return;
+    }
+    onInstall(selectedVersion);
+  };
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: index * 0.05 }}
-      className="group relative border-b border-border pb-3"
-    >
-      {isInstalled && (
-        <RemovePackButton
-          name={project.name}
-          disabled={busy || removePending}
-          pending={removePending}
-          exportLabel={t("hub.exportZip")}
-          onExport={async () => {
-            if (!installed) return;
-            const destination = await save({
-              title: t("hub.exportKnowledgePack"),
-              defaultPath: `${installed.pack_id}-${installed.version}.zip`,
-              filters: [{ name: "Knowledge pack", extensions: ["zip"] }],
-            });
-            if (destination) onExport(installed.pack_id, destination);
-          }}
-          onConfirm={onRemove}
-        />
-      )}
-      <div className="min-w-0 flex-1">
-        <div className="flex min-w-0 items-center gap-2 pr-7">
-          <Package className="size-4 shrink-0 text-primary" />
-          <h3 className="min-w-0 truncate font-medium">{project.name}</h3>
-          <span className="shrink-0 text-[11px] text-muted-foreground">
-            {t("hub.version")}
-          </span>
-          <Select
-            value={selectedVersion}
-            onValueChange={setSelectedVersion}
-            disabled={busy}
-          >
-            <SelectTrigger
-              aria-label={`${t("hub.version")} ${project.name}`}
-              className="h-5 w-16 shrink-0 gap-0.5 px-1 text-[11px]"
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent className="min-w-0 text-[11px]">
-              {versions.map((v) => (
-                <SelectItem
-                  key={v}
-                  value={v}
-                  className="py-0.5 pl-1.5 pr-5 text-[11px]"
-                >
-                  {v}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {project.description}
-        </p>
+    <AlertDialog open={downgradeConfirmOpen} onOpenChange={setDowngradeConfirmOpen}>
+      <motion.div
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: index * 0.05 }}
+        className="group relative border-b border-border pb-3"
+      >
         {isInstalled && (
-          <div className="mt-1 flex items-center gap-1.5">
-            <Badge variant="muted">{t("hub.installedLabel", { version: installed.version })}</Badge>
-            {updateAvailable && <Badge variant="accent">{t("hub.updateAvailable")}</Badge>}
-          </div>
+          <RemovePackButton
+            name={project.name}
+            disabled={busy || removePending}
+            pending={removePending}
+            exportLabel={t("hub.exportZip")}
+            onExport={async () => {
+              if (!installed) return;
+              const destination = await save({
+                title: t("hub.exportKnowledgePack"),
+                defaultPath: `${installed.pack_id}-${installed.version}.zip`,
+                filters: [{ name: "Knowledge pack", extensions: ["zip"] }],
+              });
+              if (destination) onExport(installed.pack_id, destination);
+            }}
+            onConfirm={onRemove}
+          />
         )}
-        <div className="mt-2 flex justify-end">
-          <div className="flex shrink-0 items-center gap-1.5">
-            {selectedIsInstalled ? (
-              <>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  className="h-7 gap-1 px-2 text-[11px]"
-                  disabled
-                >
-                  <Check className="size-3.5" />
-                  {t("hub.installedBadge")}
-                </Button>
-                {updateAvailable && (
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-2 pr-7">
+            <Package className="size-4 shrink-0 text-primary" />
+            <h3 className="min-w-0 truncate font-medium">{project.name}</h3>
+            <span className="shrink-0 text-[11px] text-muted-foreground">
+              {t("hub.version")}
+            </span>
+            <Select
+              value={selectedVersion}
+              onValueChange={setSelectedVersion}
+              disabled={busy}
+            >
+              <SelectTrigger
+                aria-label={`${t("hub.version")} ${project.name}`}
+                className="h-5 w-16 shrink-0 gap-0.5 px-1 text-[11px]"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="min-w-0 text-[11px]">
+                {versions.map((v) => (
+                  <SelectItem
+                    key={v}
+                    value={v}
+                    className="py-0.5 pl-1.5 pr-5 text-[11px]"
+                  >
+                    {v}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {project.description}
+          </p>
+          {isInstalled && (
+            <div className="mt-1 flex items-center gap-1.5">
+              <Badge variant="muted">{t("hub.installedLabel", { version: installed.version })}</Badge>
+              {updateAvailable && <Badge variant="update">{t("hub.updateAvailable")}</Badge>}
+            </div>
+          )}
+          <div className="mt-2 flex justify-end">
+            <div className="flex shrink-0 items-center gap-1.5">
+              {selectedIsInstalled ? (
+                <>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="h-7 gap-1 px-2 text-[11px]"
+                    disabled
+                  >
+                    <Check className="size-3.5" />
+                    {t("hub.installedBadge")}
+                  </Button>
+                  {updateAvailable && (
+                    <Button
+                      size="sm"
+                      className="h-7 gap-1 bg-[#e4f4e8] px-2 text-[11px] text-[#23663a] hover:bg-[#d7eddc]"
+                      disabled={busy}
+                      onClick={() => onInstall(project.latest_version)}
+                    >
+                      <ArrowUpCircle className="size-3.5" />
+                      {t("hub.upgrade")}
+                    </Button>
+                  )}
+                </>
+              ) : (
+                <>
                   <Button
                     size="sm"
                     className="h-7 gap-1 px-2 text-[11px]"
                     disabled={busy}
-                    onClick={() => onInstall(project.latest_version)}
+                    onClick={requestInstall}
                   >
-                    <ArrowUpCircle className="size-3.5" />
-                    {t("hub.upgrade")}
+                    {isInstalled ? (
+                      isDowngrade ? (
+                        <>
+                          <ArrowDownCircle className="size-3.5" />
+                          {t("hub.install")}
+                        </>
+                      ) : isUpgrade ? (
+                        <>
+                          <ArrowUpCircle className="size-3.5" />
+                          {t("hub.upgrade")}
+                        </>
+                      ) : (
+                        <>
+                          <ArrowUpCircle className="size-3.5" />
+                          {t("hub.installVersion", { version: selectedVersion })}
+                        </>
+                      )
+                    ) : (
+                      <>
+                        <CloudDownload className="size-3.5" />
+                        {t("hub.download")}
+                      </>
+                    )}
                   </Button>
-                )}
-              </>
-            ) : (
-              <>
-                <Button
-                  size="sm"
-                  className="h-7 gap-1 px-2 text-[11px]"
-                  disabled={busy}
-                  onClick={() => onInstall(selectedVersion)}
-                >
-                  {isInstalled ? (
-                    <>
-                      <ArrowUpCircle className="size-3.5" />
-                      {t("hub.installVersion", { version: selectedVersion })}
-                    </>
-                  ) : (
-                    <>
-                      <CloudDownload className="size-3.5" />
-                      {t("hub.download")}
-                    </>
-                  )}
-                </Button>
-              </>
-            )}
+                </>
+              )}
+            </div>
           </div>
         </div>
-      </div>
-    </motion.div>
+      </motion.div>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t("hub.downgradeWarningTitle")}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {installed
+              ? t("hub.downgradeWarningDescription", {
+                  currentVersion: installed.version,
+                  targetVersion: selectedVersion,
+                })
+              : null}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>{t("hub.cancel")}</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={() => onInstall(selectedVersion)}
+          >
+            {t("hub.install")}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
+}
+
+function compareSemVer(a: string, b: string): number {
+  const parse = (version: string): [number, number, number] | null => {
+    const match = version.trim().match(/^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/);
+    if (!match) return null;
+    return [Number(match[1]), Number(match[2]), Number(match[3])];
+  };
+
+  const parsedA = parse(a);
+  const parsedB = parse(b);
+  if (!parsedA || !parsedB) {
+    return a.localeCompare(b);
+  }
+
+  for (let i = 0; i < 3; i += 1) {
+    if (parsedA[i] !== parsedB[i]) {
+      return parsedA[i] - parsedB[i];
+    }
+  }
+
+  return 0;
 }
