@@ -180,10 +180,10 @@ export function ImportPackDialog({
 
         {error && <p className="text-sm text-destructive">{error}</p>}
         <DialogFooter>
-          {mode !== "choose" && <Button type="button" variant="ghost" disabled={importing} onClick={() => { setMode("choose"); setError(null); }}>{t("importDialogBack")}</Button>}
-          <Button type="button" variant="outline" disabled={importing} onClick={() => onOpenChange(false)}>{t("importDialogCancel")}</Button>
-          {mode === "zip" && <Button disabled={!selectedPath || importing} onClick={() => selectedPath && onImportZip(selectedPath)}>{importing && <Loader2 className="size-4 animate-spin" />}{t("importDialogImportZip")}</Button>}
-          {mode === "folder" && <Button disabled={!selectedPath || !folderValid || importing} onClick={() => selectedPath && onCreateFromFolder(selectedPath, metadata)}>{importing && <Loader2 className="size-4 animate-spin" />}{t("importDialogCreatePack")}</Button>}
+          {mode !== "choose" && <Button type="button" variant="ghost" disabled={importing} onClick={() => { setMode("choose"); setError(null); }}>{t("hub.importDialogBack")}</Button>}
+          <Button type="button" variant="outline" disabled={importing} onClick={() => onOpenChange(false)}>{t("hub.importDialogCancel")}</Button>
+          {mode === "zip" && <Button disabled={!selectedPath || importing} onClick={() => selectedPath && onImportZip(selectedPath)}>{importing && <Loader2 className="size-4 animate-spin" />}{t("hub.importDialogImportZip")}</Button>}
+          {mode === "folder" && <Button disabled={!selectedPath || !folderValid || importing} onClick={() => selectedPath && onCreateFromFolder(selectedPath, metadata)}>{importing && <Loader2 className="size-4 animate-spin" />}{t("hub.importDialogCreatePack")}</Button>}
         </DialogFooter>
       </DialogContent>
     </Dialog>
