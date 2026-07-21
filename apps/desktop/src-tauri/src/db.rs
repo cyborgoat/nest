@@ -15,6 +15,9 @@ pub struct AppSettings {
     /// Optional HTTP(S)/SOCKS5 proxy for Hub (and title) outbound requests.
     #[serde(default)]
     pub proxy_url: String,
+    /// When false, Nest connects directly and ignores `proxy_url`.
+    #[serde(default)]
+    pub proxy_enabled: bool,
     #[serde(default = "default_font_size_pt")]
     pub font_size_pt: u32,
     #[serde(default = "default_display_language")]
@@ -38,6 +41,7 @@ impl Default for AppSettings {
             embedding_model: crate::embeddings::DEFAULT_EMBEDDING_MODEL.into(),
             hub_base_url: String::new(),
             proxy_url: String::new(),
+            proxy_enabled: false,
             font_size_pt: default_font_size_pt(),
             display_language: default_display_language(),
             user_name: String::new(),
@@ -53,6 +57,17 @@ fn default_font_size_pt() -> u32 {
 
 fn default_display_language() -> String {
     "en".into()
+}
+
+impl AppSettings {
+    /// Proxy URL used for outbound requests when enabled; otherwise empty (direct).
+    pub fn effective_proxy_url(&self) -> &str {
+        if self.proxy_enabled {
+            self.proxy_url.trim()
+        } else {
+            ""
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -280,6 +295,7 @@ fn map_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChatSession> {
 
 pub fn get_settings(conn: &Connection) -> AppResult<AppSettings> {
     let mut settings = AppSettings::default();
+    let mut proxy_enabled_set = false;
     let mut stmt = conn.prepare("SELECT key, value FROM settings")?;
     let rows = stmt.query_map([], |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
@@ -293,6 +309,11 @@ pub fn get_settings(conn: &Connection) -> AppResult<AppSettings> {
             "embedding_model" | "embeddings_model" => settings.embedding_model = value,
             "hub_base_url" => settings.hub_base_url = value,
             "proxy_url" => settings.proxy_url = value,
+            "proxy_enabled" => {
+                proxy_enabled_set = true;
+                settings.proxy_enabled =
+                    matches!(value.trim().to_lowercase().as_str(), "1" | "true" | "yes" | "on");
+            }
             "font_size_pt" => {
                 if let Ok(parsed) = value.parse::<u32>() {
                     settings.font_size_pt = parsed;
@@ -309,6 +330,10 @@ pub fn get_settings(conn: &Connection) -> AppResult<AppSettings> {
             _ => {}
         }
     }
+    // Migrate: if a proxy URL was saved before the switch existed, keep using it.
+    if !proxy_enabled_set {
+        settings.proxy_enabled = !settings.proxy_url.trim().is_empty();
+    }
     Ok(settings)
 }
 
@@ -320,6 +345,14 @@ pub fn save_settings(conn: &Connection, settings: &AppSettings) -> AppResult<()>
         ("embedding_model", settings.embedding_model.clone()),
         ("hub_base_url", settings.hub_base_url.clone()),
         ("proxy_url", settings.proxy_url.trim().to_string()),
+        (
+            "proxy_enabled",
+            if settings.proxy_enabled {
+                "true".into()
+            } else {
+                "false".into()
+            },
+        ),
         ("font_size_pt", settings.font_size_pt.to_string()),
         ("display_language", settings.display_language.clone()),
         ("user_name", settings.user_name.clone()),

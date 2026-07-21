@@ -61,10 +61,12 @@ const messages: Record<Locale, MessageTree> = {
       hubBaseUrlDescription: "Address of the Hub service for browsing packs.",
       network: "Network",
       networkDescription:
-        "Optional proxy for Hub requests. Leave empty to connect directly (ignores system proxy).",
+        "Optional proxy for Hub requests. When disabled, Nest connects directly and ignores system proxy.",
+      proxyEnabled: "Use proxy",
+      proxyEnabledDescription: "Route Hub and related requests through the URL below.",
       proxyUrl: "Proxy URL",
       proxyUrlDescription:
-        "HTTP(S) or SOCKS5 proxy, for example http://127.0.0.1:7890. Leave blank for a direct connection.",
+        "HTTP(S) or SOCKS5 proxy, for example http://127.0.0.1:7890.",
       testConnection: "Test connection",
       testing: "Testing…",
       connected: "Hub connected",

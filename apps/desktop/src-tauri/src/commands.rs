@@ -57,7 +57,9 @@ pub async fn settings_set(
     if !settings.hub_base_url.is_empty() {
         validate_http_base_url("Hub URL", &settings.hub_base_url)?;
     }
-    crate::http::validate_proxy_url(&settings.proxy_url)?;
+    if settings.proxy_enabled {
+        crate::http::validate_proxy_url(&settings.proxy_url)?;
+    }
 
     let resolved =
         crate::state::resolve_knowledge_dir(&state.app_data_dir, &settings.knowledge_dir);
@@ -412,7 +414,7 @@ pub async fn hub_status(state: State<'_, SharedState>) -> AppResult<hub::HubConn
         let conn = state.db.lock();
         db::get_settings(&conn)?
     };
-    Ok(hub::check_hub_status(&settings.hub_base_url, &settings.proxy_url).await)
+    Ok(hub::check_hub_status(&settings.hub_base_url, settings.effective_proxy_url()).await)
 }
 
 #[tauri::command]
@@ -429,7 +431,7 @@ pub async fn hub_list_packs(state: State<'_, SharedState>) -> AppResult<Vec<Pack
         let conn = state.db.lock();
         db::get_settings(&conn)?
     };
-    hub::list_packs_remote(&settings.hub_base_url, &settings.proxy_url).await
+    hub::list_packs_remote(&settings.hub_base_url, settings.effective_proxy_url()).await
 }
 
 #[tauri::command]
@@ -514,7 +516,7 @@ pub async fn hub_download_pack(
     let vault = state.vault_path();
     let pack = hub::download_pack_remote(
         &settings.hub_base_url,
-        &settings.proxy_url,
+        settings.effective_proxy_url(),
         &pack_id,
         version.as_deref(),
         &vault,

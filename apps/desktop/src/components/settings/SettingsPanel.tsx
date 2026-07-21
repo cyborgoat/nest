@@ -18,6 +18,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PanelHeader } from "@/components/ui/panel-header";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Switch } from "@/components/ui/switch";
 import { api } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 
@@ -33,6 +34,7 @@ const EMPTY: AppSettings = {
   embedding_model: DEFAULT_EMBEDDING_MODEL,
   hub_base_url: "",
   proxy_url: "",
+  proxy_enabled: false,
   font_size_pt: 10,
   display_language: "en",
   user_name: "",
@@ -69,7 +71,16 @@ export function SettingsPanel() {
 
   useEffect(() => {
     if (!settingsQuery.data || hydrated.current) return;
-    const initial = withFixedEmbedding(settingsQuery.data);
+    const data = settingsQuery.data;
+    const initial = withFixedEmbedding({
+      ...EMPTY,
+      ...data,
+      // Older backends may omit this field until the desktop binary is rebuilt.
+      proxy_enabled:
+        typeof data.proxy_enabled === "boolean"
+          ? data.proxy_enabled
+          : Boolean(data.proxy_url?.trim()),
+    });
     setForm(initial);
     setFontSizeDraft(String(initial.font_size_pt));
     lastSavedKey.current = persistKey(initial);
@@ -115,7 +126,9 @@ export function SettingsPanel() {
   }, [form, queryClient, t]);
 
   const update = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
-    if (key === "hub_base_url" || key === "proxy_url") setHubTestResult(null);
+    if (key === "hub_base_url" || key === "proxy_url" || key === "proxy_enabled") {
+      setHubTestResult(null);
+    }
     setForm((prev) => ({ ...prev, [key]: value }));
   };
 
@@ -143,7 +156,11 @@ export function SettingsPanel() {
   };
 
   const testHubConnection = useMutation({
-    mutationFn: () => api.hubTestConnection(form.hub_base_url, form.proxy_url),
+    mutationFn: () =>
+      api.hubTestConnection(
+        form.hub_base_url,
+        form.proxy_enabled ? form.proxy_url : "",
+      ),
     onSuccess: (status) => {
       const message = status.online
         ? `Connected to ${status.hub_base_url}`
@@ -363,6 +380,22 @@ export function SettingsPanel() {
             title={t("settings.network")}
             description={t("settings.networkDescription")}
           >
+            <div className="flex items-start justify-between gap-4 rounded-md border border-border bg-background px-3 py-3">
+              <div className="min-w-0 space-y-1">
+                <Label htmlFor="proxy-enabled" className="text-sm font-medium">
+                  {t("settings.proxyEnabled")}
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  {t("settings.proxyEnabledDescription")}
+                </p>
+              </div>
+              <Switch
+                id="proxy-enabled"
+                checked={Boolean(form.proxy_enabled)}
+                onCheckedChange={(checked) => update("proxy_enabled", checked)}
+                aria-label={t("settings.proxyEnabled")}
+              />
+            </div>
             <Field
               label={t("settings.proxyUrl")}
               description={t("settings.proxyUrlDescription")}
@@ -371,6 +404,7 @@ export function SettingsPanel() {
                 value={form.proxy_url}
                 onChange={(e) => update("proxy_url", e.target.value)}
                 placeholder="http://127.0.0.1:7890"
+                disabled={!form.proxy_enabled}
               />
             </Field>
           </SettingsSection>

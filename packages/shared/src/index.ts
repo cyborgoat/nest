@@ -56,6 +56,8 @@ export type AppSettings = {
   hub_base_url: string;
   /** Optional HTTP(S)/SOCKS5 proxy for Hub and related outbound requests. Empty = direct. */
   proxy_url: string;
+  /** When false, Nest connects directly and ignores `proxy_url`. */
+  proxy_enabled: boolean;
   /** Root UI font size in points. */
   font_size_pt: number;
   /** UI display language, separate from runtime knowledge logic. */
