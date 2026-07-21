@@ -313,13 +313,15 @@ export function ChatPanel() {
                 <UserBubble content={msg.content} mentions={mentionByName} />
               ) : (
                 <AssistantBubble>
-                  <MarkdownBody className={bubble}>{msg.content}</MarkdownBody>
                   {msg.thinking && (
-                    <ThinkingDisclosure
-                      content={msg.thinking}
-                      seconds={msg.thinking_seconds}
-                    />
+                    <div className="mb-3">
+                      <ThinkingDisclosure
+                        content={msg.thinking}
+                        seconds={msg.thinking_seconds}
+                      />
+                    </div>
                   )}
+                  <MarkdownBody className={bubble}>{msg.content}</MarkdownBody>
                   {msg.citations && msg.citations.length > 0 && (
                     <References
                       citations={msg.citations}
@@ -458,11 +460,7 @@ function renderWithMentions(content: string, mentions: Map<string, MentionRef>) 
 }
 
 function AssistantBubble({ children }: { children: ReactNode }) {
-  return (
-    <div className={cn(bubble, "mr-2 rounded-lg bg-muted px-3 py-2")}>
-      {children}
-    </div>
-  );
+  return <div className={bubble}>{children}</div>;
 }
 
 function ThinkingDisclosure({
