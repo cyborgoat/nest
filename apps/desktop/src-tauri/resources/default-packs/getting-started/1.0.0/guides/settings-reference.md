@@ -8,7 +8,6 @@ This page explains each setting and when to change it.
 | API key | Auth for your model provider | provider key |
 | Chat model | Model used to generate answers | `gpt-4o-mini` |
 | Hub Base URL | Remote catalog/download service | `http://127.0.0.1:8787` |
-| Display language | UI language preference | `en` |
 | Font size | Global UI text size | `10pt` default |
 | User name | Optional profile display | your preferred name |
 | Knowledge directory | Local storage location for packs | empty = app default |

@@ -24,5 +24,6 @@ Welcome to Nest. This pack is bundled with the app so you can quickly learn how 
 ## Notes
 
 - This pack is active by default on first launch.
+- A Chinese counterpart pack (`getting-started-zh`) is also bundled.
 - You can remove it from Hub -> Installed at any time.
 - If you remove it, Nest does not auto-reinstall it later.

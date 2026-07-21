@@ -9,10 +9,15 @@ use std::path::{Path, PathBuf};
 
 const DEFAULT_PACK_ID: &str = "getting-started";
 const DEFAULT_PACK_NAME: &str = "Getting Started";
-const FIRST_RUN_MARKER: &str = ".default-pack-seeded-v1";
+const DEFAULT_PACK_ZH_ID: &str = "getting-started-zh";
+const DEFAULT_PACK_ZH_NAME: &str = "Getting Started (Chinese)";
+const DEFAULT_PACK_MARKER: &str = ".default-pack-seeded-v1";
+const DEFAULT_PACK_ZH_MARKER: &str = ".default-pack-zh-seeded-v1";
 
 static DEFAULT_PACK_DIR: Dir<'_> =
     include_dir!("$CARGO_MANIFEST_DIR/resources/default-packs/getting-started/1.0.0");
+static DEFAULT_PACK_ZH_DIR: Dir<'_> =
+    include_dir!("$CARGO_MANIFEST_DIR/resources/default-packs/getting-started-zh/1.0.0");
 
 #[derive(Debug, Deserialize)]
 struct EmbeddedPackMeta {
@@ -22,39 +27,77 @@ struct EmbeddedPackMeta {
 }
 
 pub fn ensure_seeded(conn: &Connection, app_data_dir: &Path, vault_root: &Path) -> AppResult<()> {
-    let marker = app_data_dir.join(FIRST_RUN_MARKER);
+    ensure_pack_seeded_once(
+        conn,
+        app_data_dir,
+        vault_root,
+        DEFAULT_PACK_ID,
+        DEFAULT_PACK_NAME,
+        &DEFAULT_PACK_DIR,
+        DEFAULT_PACK_MARKER,
+    )?;
+    ensure_pack_seeded_once(
+        conn,
+        app_data_dir,
+        vault_root,
+        DEFAULT_PACK_ZH_ID,
+        DEFAULT_PACK_ZH_NAME,
+        &DEFAULT_PACK_ZH_DIR,
+        DEFAULT_PACK_ZH_MARKER,
+    )
+}
+
+fn ensure_pack_seeded_once(
+    conn: &Connection,
+    app_data_dir: &Path,
+    vault_root: &Path,
+    pack_id: &str,
+    fallback_name: &str,
+    pack_dir: &Dir<'_>,
+    marker_name: &str,
+) -> AppResult<()> {
+    let marker = app_data_dir.join(marker_name);
     if marker.exists() {
         return Ok(());
     }
 
-    if db::get_sync_state(conn, DEFAULT_PACK_ID)?.is_some() {
-        write_marker(&marker)?;
+    seed_pack(conn, vault_root, pack_id, fallback_name, pack_dir)?;
+    write_marker(&marker)
+}
+
+fn seed_pack(
+    conn: &Connection,
+    vault_root: &Path,
+    pack_id: &str,
+    fallback_name: &str,
+    pack_dir: &Dir<'_>,
+) -> AppResult<()> {
+    if db::get_sync_state(conn, pack_id)?.is_some() {
         return Ok(());
     }
 
-    let pack_root = vault_root.join(DEFAULT_PACK_ID);
+    let pack_root = vault_root.join(pack_id);
     if !pack_root.exists() {
-        write_embedded_pack(&pack_root)?;
+        write_embedded_pack(pack_root.as_path(), pack_dir)?;
     }
 
-    let meta = match read_pack_meta(&pack_root.join("pack.json")) {
+    let meta = match read_pack_meta(&pack_root.join("pack.json"), pack_id, fallback_name) {
         Ok(meta) => meta,
         Err(_) => {
             if pack_root.exists() {
                 fs::remove_dir_all(&pack_root)?;
             }
-            write_embedded_pack(&pack_root)?;
-            read_pack_meta(&pack_root.join("pack.json"))?
+            write_embedded_pack(pack_root.as_path(), pack_dir)?;
+            read_pack_meta(&pack_root.join("pack.json"), pack_id, fallback_name)?
         }
     };
 
-    db::upsert_sync_state(conn, &meta.id, &meta.name, &meta.version, &meta.id)?;
-    write_marker(&marker)
+    db::upsert_sync_state(conn, &meta.id, &meta.name, &meta.version, &meta.id)
 }
 
-fn write_embedded_pack(pack_root: &Path) -> AppResult<()> {
+fn write_embedded_pack(pack_root: &Path, pack_dir: &Dir<'_>) -> AppResult<()> {
     vault::ensure_dir(pack_root)?;
-    write_dir_recursive(&DEFAULT_PACK_DIR, PathBuf::new(), pack_root)
+    write_dir_recursive(pack_dir, PathBuf::new(), pack_root)
 }
 
 fn write_dir_recursive(dir: &Dir<'_>, rel: PathBuf, target_root: &Path) -> AppResult<()> {
@@ -82,22 +125,22 @@ fn write_dir_recursive(dir: &Dir<'_>, rel: PathBuf, target_root: &Path) -> AppRe
     Ok(())
 }
 
-fn read_pack_meta(path: &Path) -> AppResult<EmbeddedPackMeta> {
+fn read_pack_meta(path: &Path, expected_id: &str, fallback_name: &str) -> AppResult<EmbeddedPackMeta> {
     let raw = fs::read_to_string(path)?;
     let meta: EmbeddedPackMeta = serde_json::from_str(&raw)?;
     if meta.id.trim().is_empty() || meta.version.trim().is_empty() {
         return Err(AppError::msg("Bundled default pack has invalid metadata"));
     }
-    if meta.id != DEFAULT_PACK_ID {
+    if meta.id != expected_id {
         return Err(AppError::msg(format!(
-            "Bundled default pack id mismatch: expected {DEFAULT_PACK_ID}, found {}",
+            "Bundled default pack id mismatch: expected {expected_id}, found {}",
             meta.id
         )));
     }
     if meta.name.trim().is_empty() {
         return Ok(EmbeddedPackMeta {
             id: meta.id,
-            name: DEFAULT_PACK_NAME.into(),
+            name: fallback_name.into(),
             version: meta.version,
         });
     }

@@ -20,7 +20,6 @@ Optional:
 - Hub Base URL (if you want remote packs)
 - Your display name
 - Font size
-- Display language
 - Custom knowledge directory
 
 ## 3) Ask your first question
