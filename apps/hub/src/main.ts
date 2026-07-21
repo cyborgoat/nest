@@ -18,6 +18,8 @@ async function bootstrap() {
     app.enableCors({ origin: hub.cors.origins });
   }
 
+  app.enableShutdownHooks();
+
   await app.listen(hub.port, hub.host);
   logger.log(`Nest Hub listening on ${hub.host}:${hub.port}`);
   logger.log(`Registry path: ${hub.registryPath}`);

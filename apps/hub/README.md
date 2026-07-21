@@ -13,7 +13,7 @@ npm run start:dev
 
 ## Configuration
 
-All runtime settings come from `.env` (see [`.env.example`](.env.example)). There are no hardcoded host/port/path fallbacks in code.
+All runtime settings come from `.env` (see [`.env.example`](.env.example) for local, [`.env.production.example`](.env.production.example) for host deploy). There are no hardcoded host/port/path fallbacks in code.
 
 | Variable | Example | Description |
 |----------|---------|-------------|
@@ -34,11 +34,57 @@ Registry layout is PyPI-style `{id}/{semver}/`. See [pack-registry.md](../../doc
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/health` | Liveness |
+| GET | `/ready` | Readiness (registry path exists and is readable) |
 | GET | `/packs` | Projects (`latest_version`, `versions[]`) |
 | GET | `/packs/:id` | Project detail |
 | GET | `/packs/:id/:version` | Release metadata |
 | GET | `/packs/:id/download` | Latest non-yanked ZIP (streamed) |
 | GET | `/packs/:id/:version/download` | Pinned version ZIP (streamed) |
+
+## Production deploy (PM2)
+
+Internal single-host deploy: build Hub, supervise with [PM2](https://pm2.keymetrics.io/), serve packs from a directory on disk.
+
+### First-time setup
+
+1. Install Node LTS and PM2 on the host: `npm i -g pm2`
+2. Copy `apps/hub` onto the host (or clone the repo).
+3. Seed the registry (e.g. from [examples/knowledge-packs](../../examples/knowledge-packs)) into an absolute path such as `/var/lib/nest-hub/registry`.
+4. Configure env and build:
+
+```bash
+cd apps/hub
+cp .env.production.example .env
+# edit .env — set REGISTRY_PATH to the absolute registry path; tighten CORS_ORIGIN if needed
+npm ci --omit=dev
+npm run build
+npm run validate:registry -- /var/lib/nest-hub/registry
+pm2 start ecosystem.config.cjs
+pm2 save
+pm2 startup                 # follow the printed command so Hub survives reboot
+```
+
+### Day-to-day
+
+| Task | Command |
+|------|---------|
+| Status | `pm2 status` |
+| Logs | `pm2 logs nest-hub` |
+| Restart after code change | `npm ci --omit=dev && npm run build && pm2 restart nest-hub` |
+| Stop | `pm2 stop nest-hub` |
+
+Publishing a new pack version: copy a new `{id}/{semver}/` tree into `REGISTRY_PATH` (validate first). Hub rescans on each request — **no PM2 restart** required for registry-only updates.
+
+### Smoke test
+
+```bash
+curl -sS http://127.0.0.1:8787/health
+curl -sS http://127.0.0.1:8787/ready
+curl -sS http://127.0.0.1:8787/packs
+curl -sSI http://127.0.0.1:8787/packs/<id>/download   # check Content-Length + X-Content-SHA256
+```
+
+Point desktop clients at `http://<internal-host>:8787`. Restrict firewall access to internal CIDRs.
 
 ## Cloud debugging
 

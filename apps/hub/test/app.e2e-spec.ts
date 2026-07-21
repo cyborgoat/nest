@@ -42,6 +42,13 @@ describe('Hub (e2e)', () => {
       .expect({ status: 'ok' });
   });
 
+  it('/ready (GET) when registry is present', async () => {
+    const res = await request(app.getHttpServer()).get('/ready').expect(200);
+    expect(res.body).toMatchObject({ status: 'ready' });
+    expect(typeof res.body.registryPath).toBe('string');
+    expect(res.body.registryPath.length).toBeGreaterThan(0);
+  });
+
   it('/packs (GET) returns projects with versions', async () => {
     const res = await request(app.getHttpServer()).get('/packs').expect(200);
     const packs = res.body as PackProject[];

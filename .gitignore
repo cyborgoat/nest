@@ -49,6 +49,7 @@ vite.config.ts.timestamp-*
 .env
 .env.*
 !.env.example
+!.env.production.example
 
 # Build outputs
 dist
