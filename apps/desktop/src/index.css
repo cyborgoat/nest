@@ -187,6 +187,22 @@
   @apply list-disc pl-5 mb-3 space-y-1;
 }
 
+.markdown-body ul.contains-task-list {
+  @apply list-none pl-0;
+}
+
+.markdown-body li.task-list-item {
+  @apply list-none;
+}
+
+.markdown-body li.task-list-item::marker {
+  content: "";
+}
+
+.markdown-body li.task-list-item input[type="checkbox"] {
+  @apply mr-2;
+}
+
 .markdown-body ol {
   @apply list-decimal pl-5 mb-3 space-y-1;
 }
