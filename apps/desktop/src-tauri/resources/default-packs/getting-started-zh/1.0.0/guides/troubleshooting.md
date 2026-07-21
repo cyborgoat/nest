@@ -2,9 +2,9 @@
 
 ## Hub 显示离线
 
-- 在 Settings 中确认 Hub Base URL 是否正确.
+- 在 Settings 中确认 Hub URL 是否正确.
 - 确认 Hub 进程是否正在运行.
-- 在浏览器中打开 Hub Base URL, 检查是否有响应.
+- 在浏览器中打开 Hub URL, 检查是否有响应.
 - 即使没有 Hub, 你仍然可以使用本地知识包.
 
 ## Chat 回答不相关或质量较弱

@@ -1,6 +1,6 @@
 # Architecture
 
-Nest is a **local-first** knowledge workspace: Markdown packs live on disk in a vault, retrieval and chat run in the desktop app, and a small Knowledge Hub only catalogs and distributes packs.
+Nest is a **local-first** knowledge workspace: Markdown packs live on disk in a vault, retrieval and chat run in the desktop app, and a small Hub service only catalogs and distributes packs.
 
 ```mermaid
 flowchart TB
@@ -24,7 +24,7 @@ flowchart TB
     Retr --> Vault
   end
 
-  subgraph hub [Knowledge Hub NestJS]
+  subgraph hub [Hub NestJS]
     Catalog["{id}/{version}/pack.json"]
     API["/packs + versioned ZIP"]
     Catalog --> API
@@ -41,16 +41,16 @@ flowchart TB
 | Desktop UI | `apps/desktop/src` | Library, Hub, Settings, Chat |
 | Desktop backend | `apps/desktop/src-tauri` | Vault I/O, index, RAG, LLM, sessions |
 | Shared types | `packages/shared` | TypeScript contracts shared with the UI |
-| Knowledge Hub | `apps/hub` | Pack catalog + ZIP download |
+| Hub service | `apps/hub` | Pack catalog + ZIP download |
 | Examples | `examples/knowledge-packs` | PyPI-style registry `{id}/{semver}/`; see [pack-registry.md](pack-registry.md) |
 
-## Knowledge Hub connectivity
+## Hub connectivity
 
-The desktop app uses the configured Hub base URL from Settings. The Hub service only owns the API port; host selection lives in the desktop setting.
+The desktop app uses the configured Hub URL from Settings. The Hub service listens on `HOST`/`PORT` from its `.env`; the desktop setting supplies the full base URL.
 
 - Catalog and download use a **PyPI-style versioned registry** (`GET /packs`, `GET /packs/:id/:version/download`). See [pack-registry.md](pack-registry.md).
-- The Hub panel has two tabs: **Browse** (remote registry: search + download) and **Installed** (everything in the vault, with origin badges and upgrade/remove actions).
-- If the Hub is unreachable, the Hub panel shows an **Offline** status and Browse offers a connect/import empty state. The Installed tab and local **Import** (zip) still work.
+- The Hub panel has two tabs: **Browse** (remote registry: search + download) and **Installed** (everything in the local vault, with origin badges and upgrade/remove actions).
+- If the Hub service is unreachable, the Hub panel shows an **Offline** status and Browse offers a connect/import empty state. The Installed tab and local **Import** (zip) still work.
 - Example-pack folders under `examples/knowledge-packs` are `{id}/{semver}/` trees served by the **Hub process** only — the desktop does not fall back to them when offline.
 
 On first launch, desktop seeds a local bundled `getting-started` pack into the vault. This does not require Hub connectivity.

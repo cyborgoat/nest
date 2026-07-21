@@ -1,5 +1,6 @@
 use crate::db::{self, PackMeta};
 use crate::error::{AppError, AppResult};
+use crate::http;
 use crate::vault;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
@@ -9,11 +10,17 @@ use std::path::{Path, PathBuf};
 use zip::write::SimpleFileOptions;
 use zip::{ZipArchive, ZipWriter};
 
-fn hub_http_client(_hub_base_url: &str) -> AppResult<reqwest::Client> {
-    // Always bypass HTTP(S)_PROXY for Hub traffic. Local Clash/system proxies
-    // often return 502/504 for remote Hub URLs (and for loopback unless
-    // no_proxy is set). The Hub base URL is user-configured first-party traffic.
-    Ok(reqwest::Client::builder().no_proxy().build()?)
+fn map_hub_http_error(label: &str, err: reqwest::Error) -> AppError {
+    if err.is_timeout() {
+        return AppError::msg(format!(
+            "{label} timed out after {}s",
+            http::DEFAULT_HTTP_TIMEOUT.as_secs()
+        ));
+    }
+    if let Some(status) = err.status() {
+        return AppError::msg(format!("{label} failed: HTTP {status}"));
+    }
+    AppError::msg(format!("{label} failed: {err}"))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -25,22 +32,22 @@ pub struct PackProject {
     pub versions: Vec<String>,
 }
 
-pub async fn list_packs_remote(hub_base_url: &str) -> AppResult<Vec<PackProject>> {
+pub async fn list_packs_remote(hub_base_url: &str, proxy_url: &str) -> AppResult<Vec<PackProject>> {
     if hub_base_url.trim().is_empty() {
         return Err(AppError::msg(
-            "Knowledge Hub URL is not configured. Set it in Settings.",
+            "Hub URL is not configured. Set it in Settings.",
         ));
     }
     let url = format!("{}/packs", hub_base_url.trim_end_matches('/'));
-    let client = hub_http_client(hub_base_url)?;
+    let client = http::build_client(proxy_url)?;
     let resp = client
         .get(&url)
         .send()
         .await
-        .map_err(|e| AppError::msg(format!("Knowledge Hub unreachable: {e}")))?;
+        .map_err(|e| map_hub_http_error("Hub list", e))?;
     if !resp.status().is_success() {
         return Err(AppError::msg(format!(
-            "Knowledge Hub list failed: {}",
+            "Hub list failed: HTTP {}",
             resp.status()
         )));
     }
@@ -74,23 +81,23 @@ struct LoosePackMeta {
 }
 
 /// Probe `{hub}/health`. Used for the Hub panel online/offline indicator.
-pub async fn check_hub_status(hub_base_url: &str) -> HubConnectionStatus {
+pub async fn check_hub_status(hub_base_url: &str, proxy_url: &str) -> HubConnectionStatus {
     let base = hub_base_url.trim_end_matches('/').to_string();
     if base.is_empty() {
         return HubConnectionStatus {
             online: false,
             hub_base_url: base,
-            message: Some("Knowledge Hub URL is not configured.".into()),
+            message: Some("Hub URL is not configured.".into()),
         };
     }
     let url = format!("{base}/health");
-    let client = match hub_http_client(hub_base_url) {
+    let client = match http::build_client(proxy_url) {
         Ok(client) => client,
         Err(e) => {
             return HubConnectionStatus {
                 online: false,
                 hub_base_url: base,
-                message: Some(format!("Knowledge Hub is not accessible: {e}")),
+                message: Some(format!("Hub is not accessible: {e}")),
             }
         }
     };
@@ -104,14 +111,14 @@ pub async fn check_hub_status(hub_base_url: &str) -> HubConnectionStatus {
             online: false,
             hub_base_url: base,
             message: Some(format!(
-                "Knowledge Hub is not accessible (HTTP {})",
+                "Hub is not accessible (HTTP {})",
                 resp.status()
             )),
         },
         Err(e) => HubConnectionStatus {
             online: false,
             hub_base_url: base,
-            message: Some(format!("Knowledge Hub is not accessible: {e}")),
+            message: Some(map_hub_http_error("Hub", e).to_string()),
         },
     }
 }
@@ -119,13 +126,14 @@ pub async fn check_hub_status(hub_base_url: &str) -> HubConnectionStatus {
 /// Download a pack release into `vault/<id>/`, replacing any previous install.
 pub async fn download_pack_remote(
     hub_base_url: &str,
+    proxy_url: &str,
     pack_id: &str,
     version: Option<&str>,
     vault_root: &Path,
 ) -> AppResult<PackMeta> {
     if hub_base_url.trim().is_empty() {
         return Err(AppError::msg(
-            "Knowledge Hub URL is not configured. Set it in Settings.",
+            "Hub URL is not configured. Set it in Settings.",
         ));
     }
     let base = hub_base_url.trim_end_matches('/');
@@ -133,19 +141,22 @@ pub async fn download_pack_remote(
         Some(v) => format!("{base}/packs/{pack_id}/{v}/download"),
         None => format!("{base}/packs/{pack_id}/download"),
     };
-    let client = hub_http_client(hub_base_url)?;
+    let client = http::build_client(proxy_url)?;
     let resp = client
         .get(&url)
         .send()
         .await
-        .map_err(|e| AppError::msg(format!("Knowledge Hub unreachable: {e}")))?;
+        .map_err(|e| map_hub_http_error("Hub download", e))?;
     if !resp.status().is_success() {
         return Err(AppError::msg(format!(
-            "Hub download failed: {}",
+            "Hub download failed: HTTP {}",
             resp.status()
         )));
     }
-    let bytes = resp.bytes().await?;
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|e| map_hub_http_error("Hub download body", e))?;
     let tmp = vault_root.join(format!(".{pack_id}.zip"));
     fs::write(&tmp, &bytes)?;
 

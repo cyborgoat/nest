@@ -17,7 +17,7 @@ Go to Settings and provide:
 
 Optional:
 
-- Hub Base URL (if you want remote packs)
+- Hub URL (if you want remote packs)
 - Your display name
 - Font size
 - Custom knowledge directory
@@ -42,7 +42,7 @@ In Chat, type `@` and pick a file or folder from active packs. Example:
 
 ## 5) Optional: connect Hub
 
-If you run the Hub service, set Hub Base URL and open Hub:
+If you run the Hub service, set Hub URL and open Hub:
 
 - Browse: find and download remote packs
 - Installed: upgrade/remove/manage active state

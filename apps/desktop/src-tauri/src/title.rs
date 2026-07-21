@@ -92,7 +92,7 @@ async fn generate_title(settings: &AppSettings, turns: &[(String, String)]) -> A
         ]
     });
 
-    let client = reqwest::Client::new();
+    let client = crate::http::build_client(&settings.proxy_url)?;
     let resp = client
         .post(&url)
         .bearer_auth(&settings.llm_api_key)

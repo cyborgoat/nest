@@ -6,6 +6,7 @@ import {
   Cloud,
   FolderOpen,
   LoaderCircle,
+  Network,
   Palette,
   User,
   type LucideIcon,
@@ -31,6 +32,7 @@ const EMPTY: AppSettings = {
   chat_model: "gpt-4o-mini",
   embedding_model: DEFAULT_EMBEDDING_MODEL,
   hub_base_url: "",
+  proxy_url: "",
   font_size_pt: 10,
   display_language: "en",
   user_name: "",
@@ -113,7 +115,7 @@ export function SettingsPanel() {
   }, [form, queryClient, t]);
 
   const update = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
-    if (key === "hub_base_url") setHubTestResult(null);
+    if (key === "hub_base_url" || key === "proxy_url") setHubTestResult(null);
     setForm((prev) => ({ ...prev, [key]: value }));
   };
 
@@ -141,11 +143,11 @@ export function SettingsPanel() {
   };
 
   const testHubConnection = useMutation({
-    mutationFn: () => api.hubTestConnection(form.hub_base_url),
+    mutationFn: () => api.hubTestConnection(form.hub_base_url, form.proxy_url),
     onSuccess: (status) => {
       const message = status.online
         ? `Connected to ${status.hub_base_url}`
-        : status.message || "Knowledge Hub is not accessible.";
+        : status.message || "Hub is not accessible.";
       setHubTestResult({ online: status.online, message });
       if (status.online) {
         toast.success(t("settings.connected"), { description: message });
@@ -353,6 +355,23 @@ export function SettingsPanel() {
                     : t("settings.testConnection")}
                 </Button>
               </div>
+            </Field>
+          </SettingsSection>
+
+          <SettingsSection
+            icon={Network}
+            title={t("settings.network")}
+            description={t("settings.networkDescription")}
+          >
+            <Field
+              label={t("settings.proxyUrl")}
+              description={t("settings.proxyUrlDescription")}
+            >
+              <Input
+                value={form.proxy_url}
+                onChange={(e) => update("proxy_url", e.target.value)}
+                placeholder="http://127.0.0.1:7890"
+              />
             </Field>
           </SettingsSection>
         </div>

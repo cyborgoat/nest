@@ -1,28 +1,31 @@
+import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
-import * as path from 'path';
 import { AppModule } from './app.module';
+import { loadHubConfig } from './hub.config';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
     logger: ['error', 'warn', 'log', 'debug'],
   });
-  app.enableCors();
   const config = app.get(ConfigService);
-  const port = Number(config.get<string>('PORT') ?? 8787);
-  const examplesPath = path.resolve(
-    process.cwd(),
-    config.get<string>('FIXTURES_PATH') ?? '../../examples/knowledge-packs',
+  const hub = loadHubConfig(config);
+  const logger = new Logger('Bootstrap');
+
+  if (hub.cors.mode === 'all') {
+    app.enableCors();
+  } else {
+    app.enableCors({ origin: hub.cors.origins });
+  }
+
+  await app.listen(hub.port, hub.host);
+  logger.log(`Nest Hub listening on ${hub.host}:${hub.port}`);
+  logger.log(`Registry path: ${hub.registryPath}`);
+  logger.log(
+    `CORS: ${hub.cors.mode === 'all' ? '*' : hub.cors.origins.join(', ')}`,
   );
-  const debug = ['1', 'true', 'yes', 'on'].includes(
-    (config.get<string>('NEST_DEBUG') ?? '').trim().toLowerCase(),
-  );
-  // Bind all interfaces so reverse proxies / cloud ingress can reach the app.
-  await app.listen(port, '0.0.0.0');
-  console.log(`Nest Knowledge Hub listening on 0.0.0.0:${port}`);
-  console.log(`Examples path: ${examplesPath}`);
-  if (debug) {
-    console.log('NEST_DEBUG is on');
+  if (hub.debug) {
+    logger.log('DEBUG_MODE is on');
   }
 }
 void bootstrap();

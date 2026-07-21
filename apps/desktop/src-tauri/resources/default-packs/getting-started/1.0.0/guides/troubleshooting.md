@@ -2,9 +2,9 @@
 
 ## Hub shows offline
 
-- Confirm Hub Base URL in Settings.
+- Confirm Hub URL in Settings.
 - Check Hub process is running.
-- Try opening the Hub base URL in a browser to confirm it responds.
+- Try opening the Hub URL in a browser to confirm it responds.
 - You can still use local packs without Hub.
 
 ## Chat answers are weak or unrelated

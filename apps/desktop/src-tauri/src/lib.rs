@@ -5,6 +5,7 @@ mod debug;
 mod default_pack;
 mod embeddings;
 mod error;
+mod http;
 mod hub;
 mod indexer;
 mod llm;

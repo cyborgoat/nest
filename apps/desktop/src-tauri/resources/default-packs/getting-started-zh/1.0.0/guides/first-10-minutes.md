@@ -26,7 +26,7 @@ This walkthrough takes you from launch to useful answers.
 
 可选项:
 
-- Hub Base URL (如果你要连接远程目录)
+- Hub URL (如果你要连接远程目录)
 - 你的显示名称
 - 字体大小
 - 本地知识目录
@@ -51,7 +51,7 @@ This walkthrough takes you from launch to useful answers.
 
 ## 5) 可选: 连接 Hub
 
-如果你运行了 Hub 服务, 设置 Hub Base URL 后打开 Hub:
+如果你运行了 Hub 服务, 设置 Hub URL 后打开 Hub:
 
 - Browse: 查找并下载远程知识包
 - Installed: 升级、删除、管理激活状态

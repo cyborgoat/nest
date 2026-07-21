@@ -2,15 +2,15 @@
 
 Local-first desktop knowledge workspace. Browse immutable Markdown knowledge packs and ask questions with retrieval-augmented chat over an OpenAI-compatible LLM.
 
-Nest ships with a bundled default knowledge pack (`getting-started`) on first launch so users can learn the app immediately, even before connecting to a Hub.
+Nest ships with a bundled default knowledge pack (`getting-started`) on first launch so users can learn the app immediately, even before connecting to a remote Hub.
 
 ## Layout
 
 ```
 apps/desktop      Tauri v2 + React (Nest desktop client)
-apps/hub          NestJS Knowledge Hub (catalog + download)
+apps/hub          NestJS Hub service (catalog + download)
 packages/shared   Shared TypeScript types
-examples/knowledge-packs  Example Markdown packs served by the Knowledge Hub
+examples/knowledge-packs  Example Markdown packs served by the Hub service
 docs/             Architecture and development notes
 ```
 
@@ -31,7 +31,7 @@ npm run tauri dev
 
 1. Open **Library** and start with the bundled **Getting Started** pack. It is preinstalled on first run, active by default, and can be removed any time.
 2. Configure an OpenAI-compatible **Base URL**, **API key**, and chat model under **Settings**.
-3. (Optional) Start the Knowledge Hub (`apps/hub`), then open **Hub** in the desktop app. The **Browse** tab lists the remote registry for download; the **Installed** tab manages everything in your vault (upgrade/remove, with origin badges). Use **Import** to add a local pack `.zip` (must include `pack.json`). Indexing runs automatically after download, import, and remove.
+3. (Optional) Start the Hub service (`apps/hub`), then open **Hub** in the desktop app. The **Browse** tab lists the remote registry for download; the **Installed** tab manages everything in your local vault (upgrade/remove, with origin badges). Use **Import** to add a local pack `.zip` (must include `pack.json`). Indexing runs automatically after download, import, and remove.
 4. In **Library**, keep packs **Active** for chat retrieval (use **+/−** to deactivate). Inactive packs stay browsable under a collapsible section.
 5. In **Chat**, ask questions over all active packs, or `@`-mention files/folders under active packs to narrow focus.
 6. Chat supports **multiple sessions**: tabs for open chats, History for pin/archive/rename/delete. Session titles are generated after the first reply when still untitled.
@@ -43,9 +43,9 @@ npm run tauri dev
 - Mermaid diagrams via fenced `mermaid` blocks
 - Relative and absolute image references, including inline SVG
 
-## Knowledge Hub
+## Hub service
 
-[NestJS](https://nestjs.com/) API served on `PORT` (`8787` by default). Configure the desktop app's **Settings → Hub base URL** to point at this service.
+[NestJS](https://nestjs.com/) API served on `HOST`/`PORT` from `.env` (see `apps/hub/.env.example`). Configure the desktop app's **Settings → Hub URL** to point at this service.
 
 ```bash
 cd apps/hub
@@ -70,7 +70,7 @@ Desktop installers (macOS `.dmg` for Apple Silicon + Intel, Windows `.msi`/`.exe
 ## Documentation
 
 - [Architecture](docs/architecture.md) — vault, RAG, streaming
-- [Pack registry](docs/pack-registry.md) — PyPI-style multi-version Hub
+- [Pack registry](docs/pack-registry.md) — PyPI-style multi-version registry
 - [Chat sessions](docs/chat-sessions.md) — tabs, history, titles
 - [Development](docs/development.md) — env vars, sanity checks, releases
 

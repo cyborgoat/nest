@@ -347,7 +347,7 @@ export function LibraryTree({
       <div className="flex flex-col gap-2 p-4">
         <p className="text-sm font-medium text-foreground">No packs yet</p>
         <p className="text-sm text-muted-foreground">
-          Download from the Hub to add knowledge packs.
+          Download from Hub to add knowledge packs.
         </p>
       </div>
     );

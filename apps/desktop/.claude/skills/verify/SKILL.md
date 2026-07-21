@@ -26,7 +26,7 @@ cd apps/desktop && npx tsc --noEmit && npm run build
      often have `tauri dev` running in tmux (`tmux capture-pane -p -t 0:0.0`).
      Launching a second instance fails theirs with "Port 1420 is already in use".
    - Vite HMR means frontend edits reach an already-running app instantly.
-   - Hub base URL is persisted in app settings (SQLite); on this machine it is
+   - Hub URL is persisted in app settings (SQLite); on this machine it is
      already set to http://127.0.0.1:8787.
 
 ## Observe (screenshots without stealing focus)

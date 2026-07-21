@@ -52,8 +52,11 @@ export const api = {
 
   hubListPacks: () => invoke<PackProject[]>("hub_list_packs"),
   hubStatus: () => invoke<HubConnectionStatus>("hub_status"),
-  hubTestConnection: (hubBaseUrl: string) =>
-    invoke<HubConnectionStatus>("hub_test_connection", { hubBaseUrl }),
+  hubTestConnection: (hubBaseUrl: string, proxyUrl?: string) =>
+    invoke<HubConnectionStatus>("hub_test_connection", {
+      hubBaseUrl,
+      proxyUrl: proxyUrl ?? null,
+    }),
   hubListInstalled: () => invoke<InstalledPack[]>("hub_list_installed"),
   hubSetPackActive: (packId: string, active: boolean) =>
     invoke<void>("hub_set_pack_active", { packId, active }),

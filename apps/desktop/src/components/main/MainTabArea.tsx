@@ -32,7 +32,7 @@ export function MainTabArea() {
       <EmptyState
         icon={<PackageOpen className="size-8 text-primary" />}
         title="Your library is empty"
-        description="Download a knowledge pack from the Hub to get started."
+        description="Download a knowledge pack from Hub to get started."
       >
         <Button onClick={openHubTab}>
           <Cloud className="size-4" />

@@ -54,6 +54,8 @@ export type AppSettings = {
   chat_model: string;
   embedding_model: string;
   hub_base_url: string;
+  /** Optional HTTP(S)/SOCKS5 proxy for Hub and related outbound requests. Empty = direct. */
+  proxy_url: string;
   /** Root UI font size in points. */
   font_size_pt: number;
   /** UI display language, separate from runtime knowledge logic. */

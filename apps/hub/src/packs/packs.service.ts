@@ -5,19 +5,23 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createHash } from 'crypto';
-import { existsSync, promises as fs } from 'fs';
+import { createHash, randomUUID } from 'crypto';
+import { createReadStream, existsSync, promises as fs } from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import AdmZip from 'adm-zip';
+import { isDebugEnabled, loadHubConfig } from '../hub.config';
 import type { PackProject, PackRelease } from './pack.types';
 import { isValidSemVer, sortSemVerDesc } from './semver';
 
 const PACK_ID_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
-function nestDebugEnabled(config: ConfigService): boolean {
-  const v = (config.get<string>('NEST_DEBUG') ?? '').trim().toLowerCase();
-  return v === '1' || v === 'true' || v === 'yes' || v === 'on';
-}
+export type PackZipArtifact = {
+  filePath: string;
+  filename: string;
+  sha256: string;
+  byteLength: number;
+};
 
 type RawPackJson = {
   id?: string;
@@ -35,19 +39,13 @@ export class PacksService {
   constructor(private readonly config: ConfigService) {}
 
   private debug(message: string) {
-    if (nestDebugEnabled(this.config)) {
+    if (isDebugEnabled(this.config)) {
       this.logger.debug(message);
     }
   }
 
-  private fixturesRoot(): string {
-    const configured = this.config.get<string>('FIXTURES_PATH');
-    if (!configured) {
-      throw new Error(
-        'FIXTURES_PATH is not set. Copy .env.example to .env and configure it.',
-      );
-    }
-    return path.resolve(process.cwd(), configured);
+  private registryRoot(): string {
+    return loadHubConfig(this.config).registryPath;
   }
 
   private async readRelease(
@@ -102,9 +100,10 @@ export class PacksService {
 
   /** Scan registry: {id}/{version}/pack.json */
   async listReleases(): Promise<PackRelease[]> {
-    const root = this.fixturesRoot();
-    this.debug(`listReleases root=${root}`);
+    const root = this.registryRoot();
+    this.debug(`listReleases registry=${root}`);
     if (!existsSync(root)) {
+      this.logger.warn(`Registry path does not exist: ${root}`);
       return [];
     }
 
@@ -211,10 +210,15 @@ export class PacksService {
     return release;
   }
 
+  /**
+   * Build a pack ZIP on disk (temp file) for streaming. Caller must delete
+   * `filePath` after the response finishes.
+   */
   async createPackZip(
     packId: string,
     version?: string,
-  ): Promise<{ buffer: Buffer; filename: string; sha256: string }> {
+  ): Promise<PackZipArtifact> {
+    const started = Date.now();
     let release: PackRelease;
     if (version) {
       release = await this.getRelease(packId, version);
@@ -233,26 +237,60 @@ export class PacksService {
       }
     }
 
-    const packDir = path.join(this.fixturesRoot(), release.id, release.version);
+    const packDir = path.join(this.registryRoot(), release.id, release.version);
     this.debug(
-      `createPackZip id=${packId} version=${release.version} dir=${packDir}`,
+      `createPackZip start id=${packId} version=${release.version} dir=${packDir}`,
     );
     if (!existsSync(packDir)) {
+      this.logger.error(
+        `Pack directory missing for download: ${packId}@${release.version} path=${packDir}`,
+      );
       throw new NotFoundException(
         `Pack directory missing: ${packId}@${release.version}`,
       );
     }
 
-    const zip = new AdmZip();
-    zip.addLocalFolder(packDir, release.id);
-    const buffer = zip.toBuffer();
-    const sha256 = createHash('sha256').update(buffer).digest('hex');
-    this.debug(`createPackZip bytes=${buffer.length} sha256=${sha256}`);
+    const filename = `${release.id}-${release.version}.zip`;
+    const filePath = path.join(
+      os.tmpdir(),
+      `nest-hub-${release.id}-${release.version}-${randomUUID()}.zip`,
+    );
 
-    return {
-      buffer,
-      filename: `${release.id}-${release.version}.zip`,
-      sha256,
-    };
+    try {
+      const zip = new AdmZip();
+      zip.addLocalFolder(packDir, release.id);
+      zip.writeZip(filePath);
+
+      const stat = await fs.stat(filePath);
+      const hash = createHash('sha256');
+      for await (const chunk of createReadStream(filePath)) {
+        hash.update(chunk as Buffer);
+      }
+      const sha256 = hash.digest('hex');
+      const byteLength = stat.size;
+      const elapsedMs = Date.now() - started;
+
+      this.debug(
+        `createPackZip done id=${packId} version=${release.version} bytes=${byteLength} sha256=${sha256.slice(0, 12)}… elapsedMs=${elapsedMs} file=${filePath}`,
+      );
+
+      return { filePath, filename, sha256, byteLength };
+    } catch (e) {
+      await fs.unlink(filePath).catch(() => undefined);
+      this.logger.error(
+        `createPackZip failed id=${packId} version=${release.version} dir=${packDir}: ${
+          e instanceof Error ? e.message : String(e)
+        }`,
+      );
+      throw e;
+    }
+  }
+
+  openZipStream(filePath: string) {
+    return createReadStream(filePath);
+  }
+
+  async cleanupZipFile(filePath: string) {
+    await fs.unlink(filePath).catch(() => undefined);
   }
 }

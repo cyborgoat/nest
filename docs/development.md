@@ -8,7 +8,7 @@
 ## Run
 
 ```bash
-# Terminal 1 (optional) — Knowledge Hub
+# Terminal 1 (optional) — Hub service
 cd apps/hub
 cp .env.example .env   # first time
 npm install
@@ -20,19 +20,19 @@ npm install
 npm run tauri dev
 ```
 
-The desktop app can start without the Hub and will still include a bundled first-run `getting-started` pack.
+The desktop app can start without the Hub service and will still include a bundled first-run `getting-started` pack.
 
-The Hub service listens on `PORT` (default `8787`). Configure the desktop app's **Settings → Hub base URL** to the address you want it to use, for example `http://127.0.0.1:8787` for local development.
+The Hub service listens on `PORT` (from `.env`, typically `8787`). Configure the desktop app's **Settings → Hub URL** to the address you want it to use, for example `http://127.0.0.1:8787` for local development.
 
 ## Environment
 
 | App | File | Variables |
 |-----|------|-----------|
-| Hub | `apps/hub/.env.example` | `PORT`, `FIXTURES_PATH`, `NEST_DEBUG` |
+| Hub (`apps/hub`) | `apps/hub/.env.example` | `HOST`, `PORT`, `REGISTRY_PATH`, `DEBUG_MODE`, `CORS_ORIGIN`, `DOWNLOAD_TIMEOUT_MS` (`VAULT_PATH` / `FIXTURES_PATH` / `NEST_DEBUG` aliases) |
 | Desktop | `apps/desktop/.env.example` | `NEST_DEBUG` (logs from the Rust side when set for the process) |
 | Desktop Tauri | `apps/desktop/src-tauri/.env.example` | `NEST_DEBUG` |
 
-`NEST_DEBUG=true` (or `1` / `yes` / `on`) enables verbose service logging.
+Hub `DEBUG_MODE=true` (or `1` / `yes` / `on`) enables verbose service logging. Desktop `NEST_DEBUG` remains the Rust-side debug flag.
 
 ## Sanity checks
 

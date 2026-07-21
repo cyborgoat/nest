@@ -1,13 +1,13 @@
 # Knowledge Pack Registry (PyPI-style)
 
-Nest’s Knowledge Hub catalogs and distributes Markdown knowledge packs like a small **PyPI**: a stable project id, immutable SemVer releases, and one active install in the vault.
+Nest’s Hub service catalogs and distributes Markdown knowledge packs like a small **PyPI**: a stable project id, immutable SemVer releases, and one active install in the vault.
 
 Desktop also bundles one default pack (`getting-started`) for first launch. The bundled content follows the same pack structure.
 
 ## Layout
 
 ```text
-examples/knowledge-packs/     # or FIXTURES_PATH / HUB_REGISTRY_PATH
+examples/knowledge-packs/     # or REGISTRY_PATH (pack registry root)
   getting-started/
     1.0.0/
       pack.json
@@ -78,7 +78,7 @@ Bundled default pack notes:
 ## Authoring
 
 1. **SemVer:** patch = doc fixes; minor = new pages; major = breaking path/structure changes.
-2. **Never edit** a published `{id}/{version}/` on the Hub disk.
+2. **Never edit** a published `{id}/{version}/` on the Vault disk.
 3. **Keep `id` stable**; bump version for every publish.
 4. Prefer wholesale vault replace (Nest model).
 5. Validate registry with `node scripts/validate-pack-registry.mjs` (id/version match, SemVer, ≥1 `.md`, optional yanked).

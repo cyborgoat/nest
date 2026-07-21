@@ -110,7 +110,7 @@ pub fn format_citations_for_tool(citations: &[Citation]) -> String {
     if citations.is_empty() {
         return "No relevant passages found in the vault. Tell the user clearly that nothing \
                 matching their question is in the local library, and suggest downloading a \
-                knowledge pack from the Hub that covers the topic."
+                knowledge pack from Hub that covers the topic."
             .to_string();
     }
     let mut out = String::from("Retrieved vault passages:\n");
@@ -131,7 +131,7 @@ pub fn agent_preamble() -> &'static str {
      Use the vault_search tool to retrieve relevant Markdown passages before answering factual questions about the library. \
      Answer using ONLY retrieved vault content when possible. \
      If vault_search returns nothing relevant (or the library has no matching packs), clearly tell the user you could not find an answer in their local knowledge — do not invent product steps or guess. \
-     Suggest they download a relevant knowledge pack from the Hub when the topic is missing. \
+     Suggest they download a relevant knowledge pack from Hub when the topic is missing. \
      Cite passages by their [n] numbers inline when helpful. \
      Prefer concise, accurate answers that respect multi-turn conversation context."
 }

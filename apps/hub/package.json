@@ -1,7 +1,7 @@
 {
   "name": "nest-hub",
   "version": "0.1.0",
-  "description": "Nest Knowledge Hub — catalog and download Markdown knowledge packs",
+  "description": "Nest Hub — catalog and download Markdown knowledge packs",
   "author": "Nest",
   "private": true,
   "license": "MIT",

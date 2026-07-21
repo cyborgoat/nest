@@ -7,7 +7,7 @@
 | LLM Base URL | OpenAI 兼容接口地址 | `https://api.openai.com/v1` |
 | API key | 模型服务鉴权密钥 | 服务提供方密钥 |
 | Chat model | 用于生成回答的模型 | `gpt-4o-mini` |
-| Hub Base URL | 远程目录/下载服务地址 | `http://127.0.0.1:8787` |
+| Hub URL | 远程目录/下载服务地址 | `http://127.0.0.1:8787` |
 | Font size | 全局界面字体大小 | 默认 `10pt` |
 | User name | 可选显示名称 | 你的名称 |
 | Knowledge directory | 知识包本地存储位置 | 留空 = 应用默认 |

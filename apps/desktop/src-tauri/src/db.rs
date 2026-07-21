@@ -12,6 +12,9 @@ pub struct AppSettings {
     pub chat_model: String,
     pub embedding_model: String,
     pub hub_base_url: String,
+    /// Optional HTTP(S)/SOCKS5 proxy for Hub (and title) outbound requests.
+    #[serde(default)]
+    pub proxy_url: String,
     #[serde(default = "default_font_size_pt")]
     pub font_size_pt: u32,
     #[serde(default = "default_display_language")]
@@ -34,6 +37,7 @@ impl Default for AppSettings {
             chat_model: "gpt-4o-mini".into(),
             embedding_model: crate::embeddings::DEFAULT_EMBEDDING_MODEL.into(),
             hub_base_url: String::new(),
+            proxy_url: String::new(),
             font_size_pt: default_font_size_pt(),
             display_language: default_display_language(),
             user_name: String::new(),
@@ -288,6 +292,7 @@ pub fn get_settings(conn: &Connection) -> AppResult<AppSettings> {
             "chat_model" => settings.chat_model = value,
             "embedding_model" | "embeddings_model" => settings.embedding_model = value,
             "hub_base_url" => settings.hub_base_url = value,
+            "proxy_url" => settings.proxy_url = value,
             "font_size_pt" => {
                 if let Ok(parsed) = value.parse::<u32>() {
                     settings.font_size_pt = parsed;
@@ -314,6 +319,7 @@ pub fn save_settings(conn: &Connection, settings: &AppSettings) -> AppResult<()>
         ("chat_model", settings.chat_model.clone()),
         ("embedding_model", settings.embedding_model.clone()),
         ("hub_base_url", settings.hub_base_url.clone()),
+        ("proxy_url", settings.proxy_url.trim().to_string()),
         ("font_size_pt", settings.font_size_pt.to_string()),
         ("display_language", settings.display_language.clone()),
         ("user_name", settings.user_name.clone()),

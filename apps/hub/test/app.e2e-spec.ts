@@ -1,12 +1,25 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
+import * as path from 'path';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from './../src/app.module';
 import type { PackProject, PackRelease } from './../src/packs/pack.types';
 
-describe('Knowledge Hub (e2e)', () => {
+describe('Hub (e2e)', () => {
   let app: INestApplication<App>;
+
+  beforeAll(() => {
+    process.env.HOST = process.env.HOST || '127.0.0.1';
+    process.env.PORT = process.env.PORT || '8787';
+    process.env.REGISTRY_PATH =
+      process.env.REGISTRY_PATH ||
+      process.env.VAULT_PATH ||
+      path.resolve(__dirname, '../../../examples/knowledge-packs');
+    process.env.DEBUG_MODE = process.env.DEBUG_MODE || 'false';
+    process.env.CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
+    process.env.DOWNLOAD_TIMEOUT_MS = process.env.DOWNLOAD_TIMEOUT_MS || '120000';
+  });
 
   beforeEach(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -63,9 +76,13 @@ describe('Knowledge Hub (e2e)', () => {
       })
       .expect(200);
     expect(res.headers['content-type']).toMatch(/zip/);
+    expect(res.headers['content-length']).toMatch(/^\d+$/);
     expect(res.headers['x-content-sha256']).toMatch(/^[a-f0-9]{64}$/);
     expect(Buffer.isBuffer(res.body)).toBe(true);
     expect((res.body as Buffer).length).toBeGreaterThan(0);
+    expect(Number(res.headers['content-length'])).toBe(
+      (res.body as Buffer).length,
+    );
   });
 
   it('/packs/:id/:version/download (GET)', async () => {
@@ -83,6 +100,7 @@ describe('Knowledge Hub (e2e)', () => {
     expect(res.headers['content-disposition']).toContain(
       'customer-support-1.0.0.zip',
     );
+    expect(res.headers['content-length']).toMatch(/^\d+$/);
     expect(res.headers['x-content-sha256']).toMatch(/^[a-f0-9]{64}$/);
   });
 });

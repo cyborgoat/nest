@@ -2,7 +2,7 @@
 
 PyPI-style layout: `{pack-id}/{semver}/` with required `pack.json`.
 
-This folder contains Hub example packs only. The official bundled first-run guide is stored separately in `apps/desktop/src-tauri/resources/default-packs/getting-started/1.0.0/`.
+This folder contains Hub registry example packs only. The official bundled first-run guide is stored separately in `apps/desktop/src-tauri/resources/default-packs/getting-started/1.0.0/`.
 
 See [docs/pack-registry.md](../../docs/pack-registry.md).
 
