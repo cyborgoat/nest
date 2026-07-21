@@ -187,7 +187,7 @@ function PackRow({
   removePending: boolean;
 }) {
   const [selectedVersion, setSelectedVersion] = useState(
-    project.latest_version,
+    installed?.version ?? project.latest_version,
   );
   const [downgradeConfirmOpen, setDowngradeConfirmOpen] = useState(false);
   const versions = project.versions.length
@@ -195,8 +195,8 @@ function PackRow({
     : [project.latest_version];
 
   useEffect(() => {
-    setSelectedVersion(project.latest_version);
-  }, [project.id, project.latest_version]);
+    setSelectedVersion(installed?.version ?? project.latest_version);
+  }, [project.id, project.latest_version, installed?.version]);
 
   const isInstalled = !!installed;
   const updateAvailable =
@@ -208,12 +208,16 @@ function PackRow({
     : 0;
   const isDowngrade = isInstalled && selectedVersionDelta < 0;
   const isUpgrade = isInstalled && selectedVersionDelta > 0;
+  const installVersion = (version: string) => {
+    setSelectedVersion(version);
+    onInstall(version);
+  };
   const requestInstall = () => {
     if (isDowngrade) {
       setDowngradeConfirmOpen(true);
       return;
     }
-    onInstall(selectedVersion);
+    installVersion(selectedVersion);
   };
 
   return (
@@ -300,7 +304,7 @@ function PackRow({
                       size="sm"
                       className="h-7 gap-1 bg-[#e4f4e8] px-2 text-[11px] text-[#23663a] hover:bg-[#d7eddc]"
                       disabled={busy}
-                      onClick={() => onInstall(project.latest_version)}
+                      onClick={() => installVersion(project.latest_version)}
                     >
                       {downloading ? (
                         <Spinner data-icon="inline-start" className="size-3.5" />
@@ -371,7 +375,7 @@ function PackRow({
         <AlertDialogFooter>
           <AlertDialogCancel>{t("hub.cancel")}</AlertDialogCancel>
           <AlertDialogAction
-            onClick={() => onInstall(selectedVersion)}
+            onClick={() => installVersion(selectedVersion)}
           >
             {t("hub.install")}
           </AlertDialogAction>
