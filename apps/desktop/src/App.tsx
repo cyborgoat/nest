@@ -15,7 +15,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Toaster } from "@/components/ui/sonner";
 import { api } from "@/lib/api";
-import { I18nProvider, isLocale } from "@/lib/i18n";
+import { I18nProvider } from "@/lib/i18n";
 import {
   animatePanelSize,
   cancelPanelAnimation,
@@ -81,50 +81,28 @@ export default function App() {
   });
 
   const fontSizePt = settingsQuery.data?.font_size_pt ?? 10;
-  const displayLanguage = isLocale(settingsQuery.data?.display_language ?? "en")
-    ? settingsQuery.data?.display_language ?? "en"
-    : "en";
-
-  const shell =
-    displayLanguage === "zh"
-      ? {
-          appSubtitle: "知识工作区",
-          collapseLibrary: "折叠资料库",
-          expandLibrary: "展开资料库",
-          hub: "Hub",
-          settings: "设置",
-          chat: "对话",
-          collapseChat: "折叠对话",
-          expandChat: "展开对话",
-          loading: "加载中…",
-          indexing: " · 索引中…",
-          ready: "就绪",
-          index: "索引",
-          files: "个文件",
-          chunks: "个块",
-        }
-      : {
-          appSubtitle: "Knowledge workspace",
-          collapseLibrary: "Collapse library",
-          expandLibrary: "Expand library",
-          hub: "Hub",
-          settings: "Settings",
-          chat: "Chat",
-          collapseChat: "Collapse chat",
-          expandChat: "Expand chat",
-          loading: "Loading…",
-          indexing: " · indexing…",
-          ready: "Ready",
-          index: "Index",
-          files: "files",
-          chunks: "chunks",
-        };
+  const shell = {
+    appSubtitle: "Knowledge workspace",
+    collapseLibrary: "Collapse library",
+    expandLibrary: "Expand library",
+    hub: "Hub",
+    settings: "Settings",
+    chat: "Chat",
+    collapseChat: "Collapse chat",
+    expandChat: "Expand chat",
+    loading: "Loading…",
+    indexing: " · indexing…",
+    ready: "Ready",
+    index: "Index",
+    files: "files",
+    chunks: "chunks",
+  };
 
   useEffect(() => {
     document.documentElement.style.setProperty("--app-font-size", `${fontSizePt}pt`);
-    document.documentElement.lang = displayLanguage === "zh" ? "zh-CN" : "en";
-    document.documentElement.dataset.locale = displayLanguage;
-  }, [displayLanguage, fontSizePt]);
+    document.documentElement.lang = "en";
+    document.documentElement.dataset.locale = "en";
+  }, [fontSizePt]);
 
   useEffect(() => {
     if (!treeQuery.data) return;
@@ -213,7 +191,7 @@ export default function App() {
   }
 
   return (
-    <I18nProvider locale={displayLanguage}>
+    <I18nProvider locale="en">
       <div className="flex h-full flex-col">
       <header className="flex items-center justify-between border-b border-border bg-panel/80 px-4 py-2.5 backdrop-blur">
         <div className="flex items-center gap-3">

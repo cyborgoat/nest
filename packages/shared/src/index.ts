@@ -57,7 +57,7 @@ export type AppSettings = {
   /** Root UI font size in points. */
   font_size_pt: number;
   /** UI display language, separate from runtime knowledge logic. */
-  display_language: "en" | "zh";
+  display_language: "en";
   /** Display name for the local user. */
   user_name: string;
   /** Custom vault path; empty = default under app data. */

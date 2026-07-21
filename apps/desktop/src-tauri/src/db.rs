@@ -294,7 +294,7 @@ pub fn get_settings(conn: &Connection) -> AppResult<AppSettings> {
                 }
             }
             "display_language" => {
-                if value == "en" || value == "zh" {
+                if value == "en" {
                     settings.display_language = value;
                 }
             }

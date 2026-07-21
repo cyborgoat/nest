@@ -16,13 +16,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PanelHeader } from "@/components/ui/panel-header";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { api } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
@@ -279,25 +272,6 @@ export function SettingsPanel() {
                   placeholder={`${MIN_FONT_SIZE_PT}-${MAX_FONT_SIZE_PT}`}
                 />
               </div>
-            </Field>
-            <Field
-              label={t("settings.displayLanguage")}
-              description={t("settings.displayLanguageDescription")}
-            >
-              <Select
-                value={form.display_language}
-                onValueChange={(value) =>
-                  update("display_language", value as AppSettings["display_language"])
-                }
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="en">{t("settings.english")}</SelectItem>
-                  <SelectItem value="zh">{t("settings.chinese")}</SelectItem>
-                </SelectContent>
-              </Select>
             </Field>
           </SettingsSection>
 
