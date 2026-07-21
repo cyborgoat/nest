@@ -321,9 +321,7 @@ export function LibraryTree({
         if (local && local !== vars.packId) clearPathsUnder(local);
       }
       queryClient.invalidateQueries({ queryKey: ["installed-packs"] });
-      toast.success(vars.active ? "Pack activated" : "Pack deactivated", {
-        description: vars.packId,
-      });
+      toast.success(vars.active ? "Knowledge pack activated" : "Knowledge pack deactivated");
     },
     onError: (e: Error) =>
       toast.error("Could not update pack", { description: e.message }),

@@ -106,25 +106,12 @@ export function HubPanel() {
       version: string;
       previousVersion?: string;
     }) => api.hubDownloadPack(packId, version),
-    onSuccess: (status, vars) => {
+    onSuccess: (_status, vars) => {
       invalidateAfterPackChange();
       if (vars.previousVersion && vars.previousVersion !== vars.version) {
-        toast.success(t("hub.packUpgraded"), {
-          description: t("hub.upgradeDescription", {
-            packId: vars.packId,
-            previousVersion: vars.previousVersion,
-            version: vars.version,
-            count: status.indexed_files,
-          }),
-        });
+        toast.success(t("hub.packUpgraded"));
       } else {
-        toast.success(t("hub.packDownloaded"), {
-          description: t("hub.downloadDescription", {
-            packId: vars.packId,
-            version: vars.version,
-            count: status.indexed_files,
-          }),
-        });
+        toast.success(t("hub.packDownloaded"));
       }
     },
     onError: (e: Error) => toast.error(t("hub.downloadFailed"), { description: e.message }),
@@ -132,12 +119,10 @@ export function HubPanel() {
 
   const importLocal = useMutation({
     mutationFn: (sourcePath: string) => api.hubImportLocalPack(sourcePath),
-    onSuccess: (status) => {
+    onSuccess: () => {
       setImportOpen(false);
       invalidateAfterPackChange();
-      toast.success(t("hub.packImported"), {
-        description: t("hub.indexedFiles", { count: status.indexed_files }),
-      });
+      toast.success(t("hub.packImported"));
     },
     onError: (e: Error) =>
       toast.error(t("hub.importFailed"), {
@@ -148,12 +133,10 @@ export function HubPanel() {
   const createFromFolder = useMutation({
     mutationFn: ({ sourcePath, metadata }: { sourcePath: string; metadata: KnowledgePackMeta }) =>
       api.hubCreatePackFromFolder(sourcePath, metadata),
-    onSuccess: (status) => {
+    onSuccess: () => {
       setImportOpen(false);
       invalidateAfterPackChange();
-      toast.success(t("hub.packCreated"), {
-        description: t("hub.indexedFiles", { count: status.indexed_files }),
-      });
+      toast.success(t("hub.packCreated"));
     },
     onError: (e: Error) =>
       toast.error(t("hub.createFailed"), { description: e.message || String(e) }),
@@ -175,9 +158,7 @@ export function HubPanel() {
         packId;
       clearPathsUnder(localPath);
       invalidateAfterPackChange();
-      toast.success(t("hub.packRemoved"), {
-        description: t("hub.removedDescription", { packId }),
-      });
+      toast.success(t("hub.packRemoved"));
     },
     onError: (e: Error) =>
       toast.error(t("hub.removeFailed"), {
