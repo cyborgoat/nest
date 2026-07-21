@@ -9,20 +9,11 @@ use std::path::{Path, PathBuf};
 use zip::write::SimpleFileOptions;
 use zip::{ZipArchive, ZipWriter};
 
-fn hub_http_client(hub_base_url: &str) -> AppResult<reqwest::Client> {
-    let base = hub_base_url.trim().to_lowercase();
-    let is_loopback = base.starts_with("http://127.")
-        || base.starts_with("https://127.")
-        || base.starts_with("http://localhost")
-        || base.starts_with("https://localhost")
-        || base.starts_with("http://[::1]")
-        || base.starts_with("https://[::1]");
-
-    let mut builder = reqwest::Client::builder();
-    if is_loopback {
-        builder = builder.no_proxy();
-    }
-    Ok(builder.build()?)
+fn hub_http_client(_hub_base_url: &str) -> AppResult<reqwest::Client> {
+    // Always bypass HTTP(S)_PROXY for Hub traffic. Local Clash/system proxies
+    // often return 502/504 for remote Hub URLs (and for loopback unless
+    // no_proxy is set). The Hub base URL is user-configured first-party traffic.
+    Ok(reqwest::Client::builder().no_proxy().build()?)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

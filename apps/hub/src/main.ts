@@ -17,8 +17,9 @@ async function bootstrap() {
   const debug = ['1', 'true', 'yes', 'on'].includes(
     (config.get<string>('NEST_DEBUG') ?? '').trim().toLowerCase(),
   );
-  await app.listen(port);
-  console.log(`Nest Knowledge Hub listening on port ${port}`);
+  // Bind all interfaces so reverse proxies / cloud ingress can reach the app.
+  await app.listen(port, '0.0.0.0');
+  console.log(`Nest Knowledge Hub listening on 0.0.0.0:${port}`);
   console.log(`Examples path: ${examplesPath}`);
   if (debug) {
     console.log('NEST_DEBUG is on');
