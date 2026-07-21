@@ -6,6 +6,7 @@ import { RemovePackButton } from "@/components/hub/RemovePackButton";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
+import { Spinner } from "@/components/ui/spinner";
 import { useI18n } from "@/lib/i18n";
 
 export function InstalledTab({
@@ -14,7 +15,8 @@ export function InstalledTab({
   hubOnline,
   catalogById,
   busy,
-  removePending,
+  downloadPendingId,
+  removePendingId,
   onUpgrade,
   onRemove,
   onOpenImport,
@@ -26,7 +28,8 @@ export function InstalledTab({
   hubOnline: boolean;
   catalogById: Map<string, PackProject> | null;
   busy: boolean;
-  removePending: boolean;
+  downloadPendingId?: string;
+  removePendingId?: string;
   onUpgrade: (packId: string, version: string, previousVersion: string) => void;
   onRemove: (packId: string) => void;
   onOpenImport: () => void;
@@ -80,7 +83,8 @@ export function InstalledTab({
           catalogEntry={catalogById?.get(pack.pack_id)}
           catalogAvailable={catalogById != null}
           busy={busy}
-          removePending={removePending}
+          downloading={downloadPendingId === pack.pack_id}
+          removePending={removePendingId === pack.pack_id}
           t={t}
           onUpgrade={onUpgrade}
           onRemove={() => onRemove(pack.pack_id)}
@@ -105,6 +109,7 @@ function InstalledPackRow({
   catalogEntry,
   catalogAvailable,
   busy,
+  downloading,
   removePending,
   t,
   onUpgrade,
@@ -116,6 +121,7 @@ function InstalledPackRow({
   catalogEntry: PackProject | undefined;
   catalogAvailable: boolean;
   busy: boolean;
+  downloading: boolean;
   removePending: boolean;
   t: ReturnType<typeof useI18n>["t"];
   onUpgrade: (packId: string, version: string, previousVersion: string) => void;
@@ -177,8 +183,12 @@ function InstalledPackRow({
               onUpgrade(pack.pack_id, catalogEntry.latest_version, pack.version)
             }
           >
-            <ArrowUpCircle className="size-3.5" />
-            {t("hub.upgrade")}
+            {downloading ? (
+              <Spinner data-icon="inline-start" className="size-3.5" />
+            ) : (
+              <ArrowUpCircle className="size-3.5" />
+            )}
+            {downloading ? t("hub.upgrading") : t("hub.upgrade")}
           </Button>
         )}
       </div>

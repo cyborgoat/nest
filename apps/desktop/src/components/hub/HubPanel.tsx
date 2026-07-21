@@ -186,6 +186,8 @@ export function HubPanel() {
   });
 
   const busy = download.isPending || remove.isPending || createFromFolder.isPending || importLocal.isPending || exportPack.isPending;
+  const downloadPendingId = download.isPending ? download.variables?.packId : undefined;
+  const removePendingId = remove.isPending ? remove.variables : undefined;
   const installedCount = installedQuery.data?.length ?? 0;
 
   return (
@@ -242,7 +244,8 @@ export function HubPanel() {
                 onSearchChange={setCatalogSearch}
                 installedById={installedById}
                 busy={busy}
-                removePending={remove.isPending}
+                downloadPendingId={downloadPendingId}
+                removePendingId={removePendingId}
                 onInstall={(packId, version, previousVersion) =>
                   download.mutate({ packId, version, previousVersion })
                 }
@@ -264,7 +267,8 @@ export function HubPanel() {
                 hubOnline={hubOnline}
                 catalogById={catalogById}
                 busy={busy}
-                removePending={remove.isPending}
+                downloadPendingId={downloadPendingId}
+                removePendingId={removePendingId}
                 onUpgrade={(packId, version, previousVersion) =>
                   download.mutate({ packId, version, previousVersion })
                 }

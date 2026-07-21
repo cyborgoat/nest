@@ -112,6 +112,37 @@ fn image_mime_type(path: &Path) -> Option<&'static str> {
     })
 }
 
+/// Directories skipped while importing a pack (hidden names plus common junk trees).
+fn should_skip_pack_entry(name: &str) -> bool {
+    if name.starts_with('.') {
+        return true;
+    }
+    matches!(
+        name,
+        "node_modules" | "__pycache__" | "venv" | "dist" | "build" | "target"
+    )
+}
+
+/// Files Nest keeps when importing a pack folder or zip: markdown, supported
+/// images, and pack.json. Everything else is ignored.
+pub fn is_pack_content_file(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    if name.eq_ignore_ascii_case("pack.json") {
+        return true;
+    }
+    if path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.eq_ignore_ascii_case("md"))
+        .unwrap_or(false)
+    {
+        return true;
+    }
+    image_mime_type(path).is_some()
+}
+
 /// Read an image from the vault and return it as a `data:` URL, for inline
 /// rendering in markdown — never serves files outside the known image types.
 pub fn read_image_data_url(root: &Path, rel_path: &str) -> AppResult<String> {
@@ -214,21 +245,33 @@ fn prune_empty_dirs_inner(root: &Path, dir: &Path) -> AppResult<()> {
     Ok(())
 }
 
+/// Copy pack content from `src` into `dst`, keeping only markdown, supported
+/// images, and `pack.json`. Hidden and common build/dependency directories are
+/// not descended into.
 pub fn copy_dir_recursive(src: &Path, dst: &Path) -> AppResult<()> {
     ensure_dir(dst)?;
-    for entry in walkdir::WalkDir::new(src) {
+    let walker = walkdir::WalkDir::new(src).into_iter().filter_entry(|entry| {
+        if entry.depth() == 0 {
+            return true;
+        }
+        entry
+            .file_name()
+            .to_str()
+            .map(|name| !should_skip_pack_entry(name))
+            .unwrap_or(false)
+    });
+    for entry in walker {
         let entry = entry.map_err(|e| AppError::msg(e.to_string()))?;
         let path = entry.path();
+        if !path.is_file() || !is_pack_content_file(path) {
+            continue;
+        }
         let rel = path.strip_prefix(src).unwrap_or(path);
         let target = dst.join(rel);
-        if path.is_dir() {
-            ensure_dir(&target)?;
-        } else if path.is_file() {
-            if let Some(parent) = target.parent() {
-                ensure_dir(parent)?;
-            }
-            fs::copy(path, &target)?;
+        if let Some(parent) = target.parent() {
+            ensure_dir(parent)?;
         }
+        fs::copy(path, &target)?;
     }
     Ok(())
 }
@@ -317,5 +360,43 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         ensure_dir(&dir).unwrap();
         assert!(read_image_data_url(&dir, "../etc/passwd.png").is_err());
+    }
+
+    #[test]
+    fn is_pack_content_file_allows_markdown_images_and_meta() {
+        assert!(is_pack_content_file(Path::new("notes/guide.md")));
+        assert!(is_pack_content_file(Path::new("pack.json")));
+        assert!(is_pack_content_file(Path::new("images/pic.PNG")));
+        assert!(is_pack_content_file(Path::new("diagram.svg")));
+        assert!(!is_pack_content_file(Path::new("data.csv")));
+        assert!(!is_pack_content_file(Path::new("video.mp4")));
+        assert!(!is_pack_content_file(Path::new("readme.txt")));
+    }
+
+    #[test]
+    fn copy_dir_recursive_keeps_only_pack_content() {
+        let src = env::temp_dir().join("nest-vault-copy-src");
+        let dst = env::temp_dir().join("nest-vault-copy-dst");
+        let _ = fs::remove_dir_all(&src);
+        let _ = fs::remove_dir_all(&dst);
+        ensure_dir(&src.join("docs")).unwrap();
+        ensure_dir(&src.join("images")).unwrap();
+        ensure_dir(&src.join("node_modules/pkg")).unwrap();
+        ensure_dir(&src.join(".git")).unwrap();
+        fs::write(src.join("docs/a.md"), b"# A").unwrap();
+        fs::write(src.join("images/pic.png"), [1, 2, 3]).unwrap();
+        fs::write(src.join("pack.json"), b"{}").unwrap();
+        fs::write(src.join("docs/notes.pdf"), b"%PDF").unwrap();
+        fs::write(src.join("node_modules/pkg/index.js"), b"module.exports=1").unwrap();
+        fs::write(src.join(".git/config"), b"hidden").unwrap();
+
+        copy_dir_recursive(&src, &dst).unwrap();
+
+        assert!(dst.join("docs/a.md").is_file());
+        assert!(dst.join("images/pic.png").is_file());
+        assert!(dst.join("pack.json").is_file());
+        assert!(!dst.join("docs/notes.pdf").exists());
+        assert!(!dst.join("node_modules").exists());
+        assert!(!dst.join(".git").exists());
     }
 }

@@ -28,6 +28,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
+import { Spinner } from "@/components/ui/spinner";
 import { useI18n } from "@/lib/i18n";
 import {
   Select,
@@ -47,7 +48,8 @@ export function BrowseTab({
   onSearchChange,
   installedById,
   busy,
-  removePending,
+  downloadPendingId,
+  removePendingId,
   onInstall,
   onRemove,
   onExport,
@@ -62,7 +64,8 @@ export function BrowseTab({
   onSearchChange: (q: string) => void;
   installedById: Map<string, InstalledPack>;
   busy: boolean;
-  removePending: boolean;
+  downloadPendingId?: string;
+  removePendingId?: string;
   onInstall: (packId: string, version: string, previousVersion?: string) => void;
   onRemove: (packId: string) => void;
   onExport: (packId: string, destinationPath: string) => void;
@@ -129,13 +132,14 @@ export function BrowseTab({
           project={pack}
           installed={installedById.get(pack.id)}
           busy={busy}
+          downloading={downloadPendingId === pack.id}
+          removePending={removePendingId === pack.id}
           t={t}
           onInstall={(version) =>
             onInstall(pack.id, version, installedById.get(pack.id)?.version)
           }
           onRemove={() => onRemove(pack.id)}
           onExport={onExport}
-          removePending={removePending}
         />
       ))}
       {packs && packs.length > 0 && filteredPacks.length === 0 && (
@@ -164,6 +168,7 @@ function PackRow({
   project,
   installed,
   busy,
+  downloading,
   t,
   onInstall,
   onRemove,
@@ -174,6 +179,7 @@ function PackRow({
   project: PackProject;
   installed?: InstalledPack;
   busy: boolean;
+  downloading: boolean;
   t: ReturnType<typeof useI18n>["t"];
   onInstall: (version: string) => void;
   onRemove: () => void;
@@ -296,8 +302,12 @@ function PackRow({
                       disabled={busy}
                       onClick={() => onInstall(project.latest_version)}
                     >
-                      <ArrowUpCircle className="size-3.5" />
-                      {t("hub.upgrade")}
+                      {downloading ? (
+                        <Spinner data-icon="inline-start" className="size-3.5" />
+                      ) : (
+                        <ArrowUpCircle className="size-3.5" />
+                      )}
+                      {downloading ? t("hub.upgrading") : t("hub.upgrade")}
                     </Button>
                   )}
                 </>
@@ -309,7 +319,14 @@ function PackRow({
                     disabled={busy}
                     onClick={requestInstall}
                   >
-                    {isInstalled ? (
+                    {downloading ? (
+                      <>
+                        <Spinner data-icon="inline-start" className="size-3.5" />
+                        {isInstalled && isUpgrade
+                          ? t("hub.upgrading")
+                          : t("hub.downloading")}
+                      </>
+                    ) : isInstalled ? (
                       isDowngrade ? (
                         <>
                           <ArrowDownCircle className="size-3.5" />

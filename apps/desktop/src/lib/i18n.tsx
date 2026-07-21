@@ -103,6 +103,8 @@ const messages: Record<Locale, MessageTree> = {
       downgradeWarningDescription:
         "You are about to downgrade from {{currentVersion}} to {{targetVersion}}. Continue only if you want to replace the current installed version.",
       download: "Download",
+      downloading: "Downloading…",
+      upgrading: "Upgrading…",
       fromRegistry: "From registry",
       importedLocally: "Imported locally",
       inVault: "In vault",

@@ -17,6 +17,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Spinner } from "@/components/ui/spinner";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -86,6 +87,7 @@ export function RemovePackButton({
             disabled={pending}
             onClick={onConfirm}
           >
+            {pending && <Spinner data-icon="inline-start" />}
             {pending ? t("hub.uninstalling") : t("hub.uninstall")}
           </AlertDialogAction>
         </AlertDialogFooter>
