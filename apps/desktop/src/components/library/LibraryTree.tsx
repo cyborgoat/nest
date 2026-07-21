@@ -69,7 +69,7 @@ function TreeItem({
   onSetActive?: (active: boolean) => void;
   setActivePending?: boolean;
 }) {
-  const [open, setOpen] = useState((packActive ? depth < 1 : false) || !!forceOpen);
+  const [open, setOpen] = useState(!!forceOpen);
   useEffect(() => {
     if (forceOpen) setOpen(true);
   }, [forceOpen]);

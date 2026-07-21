@@ -202,7 +202,7 @@ export default function App() {
             title={sidebarOpen ? shell.collapseLibrary : shell.expandLibrary}
             aria-label={sidebarOpen ? shell.collapseLibrary : shell.expandLibrary}
           >
-            <PanelLeft className="size-4" />
+            <PanelLeft className="size-5" />
           </Button>
           <Separator orientation="vertical" className="h-6" />
           <div className="flex items-center gap-3">
