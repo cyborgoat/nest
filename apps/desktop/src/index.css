@@ -163,6 +163,17 @@
   border-radius: 9999px;
 }
 
+/* Radix ScrollArea wraps its Viewport children in an internal
+   `display: table` div (to measure scrollable size), which sizes to its
+   content's max-content width instead of the viewport — so wrapping text
+   never wraps and instead gets clipped by the viewport's overflow-x:
+   hidden. Force it back to normal block layout everywhere ScrollArea is
+   used so long paragraphs/headings wrap at the actual available width. */
+[data-radix-scroll-area-viewport] > div {
+  display: block !important;
+  min-width: 0 !important;
+}
+
 .markdown-body {
   @apply min-w-0 max-w-full wrap-break-word text-foreground;
   overflow-wrap: anywhere;

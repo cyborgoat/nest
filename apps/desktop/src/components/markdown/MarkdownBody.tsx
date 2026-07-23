@@ -94,6 +94,11 @@ export function MarkdownBody({ children, className, basePath }: MarkdownBodyProp
       }
       return <pre {...props}>{preChildren}</pre>;
     },
+    table: ({ children: tableChildren, ...props }) => (
+      <div className="overflow-x-auto">
+        <table {...props}>{tableChildren}</table>
+      </div>
+    ),
   };
 
   return (

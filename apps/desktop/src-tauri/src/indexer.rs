@@ -61,7 +61,11 @@ pub fn chunk_markdown(text: &str, fallback_title: &str) -> Vec<TextChunk> {
                 end: offset,
             });
             let overlap = if buffer.len() > OVERLAP_CHARS {
-                buffer[buffer.len() - OVERLAP_CHARS..].to_string()
+                let mut start = buffer.len() - OVERLAP_CHARS;
+                while !buffer.is_char_boundary(start) {
+                    start += 1;
+                }
+                buffer[start..].to_string()
             } else {
                 buffer.clone()
             };
