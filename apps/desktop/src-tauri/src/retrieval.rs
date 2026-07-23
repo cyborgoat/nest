@@ -99,14 +99,16 @@ pub async fn retrieve(
 }
 
 fn snippet(content: &str) -> String {
-    if content.len() > 280 {
-        format!("{}…", &content[..280])
+    let mut chars = content.chars();
+    let prefix = chars.by_ref().take(280).collect::<String>();
+    if chars.next().is_some() {
+        format!("{prefix}…")
     } else {
-        content.to_string()
+        prefix
     }
 }
 
-pub fn format_citations_for_tool(citations: &[Citation]) -> String {
+pub fn format_citations_for_prompt(citations: &[Citation]) -> String {
     if citations.is_empty() {
         return "No relevant passages found in the vault. Tell the user clearly that nothing \
                 matching their question is in the local library, and suggest downloading a \
@@ -128,10 +130,21 @@ pub fn format_citations_for_tool(citations: &[Citation]) -> String {
 
 pub fn agent_preamble() -> &'static str {
     "You are Nest, a local-first knowledge assistant. \
-     Use the vault_search tool to retrieve relevant Markdown passages before answering factual questions about the library. \
-     Answer using ONLY retrieved vault content when possible. \
-     If vault_search returns nothing relevant (or the library has no matching packs), clearly tell the user you could not find an answer in their local knowledge — do not invent product steps or guess. \
-     Suggest they download a relevant knowledge pack from Hub when the topic is missing. \
+     The application retrieves relevant Markdown passages before each model request. \
+     Answer using ONLY the retrieved vault content. \
      Cite passages by their [n] numbers inline when helpful. \
      Prefer concise, accurate answers that respect multi-turn conversation context."
+}
+
+#[cfg(test)]
+mod tests {
+    use super::snippet;
+
+    #[test]
+    fn snippet_handles_multibyte_markdown() {
+        let content = "知".repeat(300);
+        let value = snippet(&content);
+        assert_eq!(value.chars().count(), 281);
+        assert!(value.ends_with('…'));
+    }
 }

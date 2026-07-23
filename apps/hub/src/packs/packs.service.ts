@@ -3,14 +3,17 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  OnModuleInit,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { createHash, randomUUID } from 'crypto';
 import { createReadStream, existsSync, promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import AdmZip from 'adm-zip';
-import { isDebugEnabled, loadHubConfig } from '../hub.config';
+import { HubRuntimeConfig } from '../hub.config';
+import { DatabaseService } from '../database/database.service';
+import { isRegistryAdmin } from '../auth/access-policy';
+import type { AuthUser } from '../auth/auth.types';
 import type { PackProject, PackRelease } from './pack.types';
 import { isValidSemVer, sortSemVerDesc } from './semver';
 
@@ -33,19 +36,26 @@ type RawPackJson = {
 };
 
 @Injectable()
-export class PacksService {
+export class PacksService implements OnModuleInit {
   private readonly logger = new Logger(PacksService.name);
 
-  constructor(private readonly config: ConfigService) {}
+  constructor(
+    private readonly config: HubRuntimeConfig,
+    private readonly database: DatabaseService,
+  ) {}
+
+  async onModuleInit() {
+    await this.syncRegistry();
+  }
 
   private debug(message: string) {
-    if (isDebugEnabled(this.config)) {
+    if (this.config.value.debug) {
       this.logger.debug(message);
     }
   }
 
   private registryRoot(): string {
-    return loadHubConfig(this.config).registryPath;
+    return this.config.value.registryPath;
   }
 
   private async readRelease(
@@ -99,7 +109,7 @@ export class PacksService {
   }
 
   /** Scan registry: {id}/{version}/pack.json */
-  async listReleases(): Promise<PackRelease[]> {
+  private async scanReleases(): Promise<PackRelease[]> {
     const root = this.registryRoot();
     this.debug(`listReleases registry=${root}`);
     if (!existsSync(root)) {
@@ -155,7 +165,75 @@ export class PacksService {
     return releases;
   }
 
-  private projectFromReleases(releases: PackRelease[]): PackProject | null {
+  /** Import filesystem-only releases as public catalog records. Idempotent. */
+  async syncRegistry(): Promise<void> {
+    const releases = await this.scanReleases();
+    const timestamp = new Date().toISOString();
+    const db = this.database.db;
+    const insertPack =
+      db.prepare(`INSERT OR IGNORE INTO packs(id, name, description, visibility, archived, created_at, updated_at)
+      VALUES (?, ?, ?, 'public', 0, ?, ?)`);
+    const insertRelease =
+      db.prepare(`INSERT OR IGNORE INTO releases(pack_id, version, storage_path, yanked, published_at)
+      VALUES (?, ?, ?, ?, ?)`);
+    db.transaction(() => {
+      for (const release of releases) {
+        insertPack.run(
+          release.id,
+          release.name,
+          release.description,
+          timestamp,
+          timestamp,
+        );
+        insertRelease.run(
+          release.id,
+          release.version,
+          path.join(release.id, release.version),
+          release.yanked ? 1 : 0,
+          timestamp,
+        );
+      }
+    })();
+  }
+
+  async listReleases(
+    user?: AuthUser,
+    includeArchived = false,
+  ): Promise<PackRelease[]> {
+    await this.syncRegistry();
+    const rows = this.database.db
+      .prepare(
+        `
+      SELECT r.pack_id AS id, p.name, p.description, r.version, r.yanked
+      FROM releases r JOIN packs p ON p.id = r.pack_id
+      WHERE (? = 1 OR p.archived = 0)
+        AND (? = 1 OR p.visibility = 'public' OR p.owner_uuid = ? OR EXISTS (
+          SELECT 1 FROM pack_access a WHERE a.pack_id = p.id AND a.user_uuid = ?
+        ))
+    `,
+      )
+      .all(
+        includeArchived ? 1 : 0,
+        isRegistryAdmin(user) ? 1 : 0,
+        user?.uuid ?? '',
+        user?.uuid ?? '',
+      ) as Array<{
+      id: string;
+      name: string;
+      description: string;
+      version: string;
+      yanked: number;
+    }>;
+    return rows.map((row) => ({
+      ...row,
+      path: row.id,
+      yanked: row.yanked === 1,
+    }));
+  }
+
+  private projectFromReleases(
+    releases: PackRelease[],
+  ): Omit<PackProject, 'visibility' | 'owner_id'> | null {
     if (releases.length === 0) return null;
     const installable = releases.filter((r) => !r.yanked);
     const versions = sortSemVerDesc(releases.map((r) => r.version));
@@ -172,8 +250,11 @@ export class PacksService {
     };
   }
 
-  async listProjects(): Promise<PackProject[]> {
-    const releases = await this.listReleases();
+  async listProjects(
+    user?: AuthUser,
+    includeArchived = false,
+  ): Promise<PackProject[]> {
+    const releases = await this.listReleases(user, includeArchived);
     const byId = new Map<string, PackRelease[]>();
     for (const r of releases) {
       const list = byId.get(r.id) ?? [];
@@ -183,25 +264,41 @@ export class PacksService {
     const projects: PackProject[] = [];
     for (const id of [...byId.keys()].sort()) {
       const project = this.projectFromReleases(byId.get(id)!);
-      if (project) projects.push(project);
+      if (project) {
+        const row = this.database.db
+          .prepare(
+            `SELECT p.visibility, u.login_id AS owner_id FROM packs p LEFT JOIN users u ON u.uuid = p.owner_uuid WHERE p.id = ?`,
+          )
+          .get(id) as {
+          visibility: 'public' | 'restricted';
+          owner_id: string | null;
+        };
+        projects.push({
+          ...project,
+          visibility: row.visibility,
+          owner_id: row.owner_id,
+        });
+      }
     }
     return projects;
   }
 
-  async getProject(packId: string): Promise<PackProject> {
-    const releases = (await this.listReleases()).filter((r) => r.id === packId);
-    const project = this.projectFromReleases(releases);
-    if (!project) {
-      throw new NotFoundException(`Pack not found: ${packId}`);
-    }
-    return project;
+  async getProject(packId: string, user?: AuthUser): Promise<PackProject> {
+    const projects = await this.listProjects(user);
+    const found = projects.find((project) => project.id === packId);
+    if (found) return found;
+    throw new NotFoundException(`Pack not found: ${packId}`);
   }
 
-  async getRelease(packId: string, version: string): Promise<PackRelease> {
+  async getRelease(
+    packId: string,
+    version: string,
+    user?: AuthUser,
+  ): Promise<PackRelease> {
     if (!isValidSemVer(version)) {
       throw new BadRequestException(`Invalid SemVer: ${version}`);
     }
-    const release = (await this.listReleases()).find(
+    const release = (await this.listReleases(user)).find(
       (r) => r.id === packId && r.version === version,
     );
     if (!release) {
@@ -217,19 +314,20 @@ export class PacksService {
   async createPackZip(
     packId: string,
     version?: string,
+    user?: AuthUser,
   ): Promise<PackZipArtifact> {
     const started = Date.now();
     let release: PackRelease;
     if (version) {
-      release = await this.getRelease(packId, version);
+      release = await this.getRelease(packId, version, user);
       if (release.yanked) {
         throw new NotFoundException(
           `Pack version yanked: ${packId}@${version}`,
         );
       }
     } else {
-      const project = await this.getProject(packId);
-      release = await this.getRelease(packId, project.latest_version);
+      const project = await this.getProject(packId, user);
+      release = await this.getRelease(packId, project.latest_version, user);
       if (release.yanked) {
         throw new NotFoundException(
           `No installable version for pack: ${packId}`,

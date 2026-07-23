@@ -1,4 +1,5 @@
 mod agent;
+mod chat_history;
 mod commands;
 mod db;
 mod debug;
@@ -8,8 +9,8 @@ mod error;
 mod http;
 mod hub;
 mod indexer;
+mod indexing;
 mod llm;
-mod memory;
 mod retrieval;
 mod state;
 mod title;
@@ -46,7 +47,6 @@ pub fn run() {
             commands::settings_get,
             commands::settings_set,
             commands::index_status,
-            commands::index_rebuild,
             commands::chat_create_session,
             commands::chat_list_sessions,
             commands::chat_update_session,
@@ -62,9 +62,24 @@ pub fn run() {
             commands::hub_remove_pack,
             commands::hub_download_pack,
             commands::hub_import_local_pack,
+            commands::hub_inspect_local_pack,
             commands::hub_read_folder_pack_defaults,
             commands::hub_create_pack_from_folder,
             commands::hub_export_pack,
+            commands::hub_auth_state,
+            commands::hub_login,
+            commands::hub_register,
+            commands::hub_logout,
+            commands::hub_update_profile,
+            commands::hub_change_password,
+            commands::hub_publish_pack,
+            commands::hub_list_publish_requests,
+            commands::hub_list_messages,
+            commands::hub_unread_message_count,
+            commands::hub_mark_message_read,
+            commands::hub_mark_all_messages_read,
+            commands::hub_delete_message,
+            commands::hub_delete_read_messages,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Nest");

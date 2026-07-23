@@ -20,7 +20,7 @@ rusqlite = { version = "0.32", features = ["bundled", "functions"] }
 thiserror = "2"
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls", "socks"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "multipart", "rustls-tls", "socks"] }
 futures-util = "0.3"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
 walkdir = "2"
@@ -35,4 +35,5 @@ futures = "0.3.32"
 dotenvy = "0.15.7"
 tauri-plugin-dialog = "2"
 base64 = "0.22"
+keyring = "3"
 include_dir = "0.7"

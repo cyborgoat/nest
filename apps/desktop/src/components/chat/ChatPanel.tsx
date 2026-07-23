@@ -18,6 +18,8 @@ import {
 } from "@/components/ui/accordion";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { api, listenChatStream, type ChatStreamEvent } from "@/lib/api";
+import { appErrorMessage } from "@/lib/errors";
+import { queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
 import { useUiStore } from "@/stores/ui";
 
@@ -43,12 +45,12 @@ export function ChatPanel() {
   const bootstrapped = useRef(false);
 
   const treeQuery = useQuery({
-    queryKey: ["tree"],
+    queryKey: queryKeys.tree,
     queryFn: api.vaultListTree,
   });
 
   const installedQuery = useQuery({
-    queryKey: ["installed-packs"],
+    queryKey: queryKeys.installedPacks,
     queryFn: api.hubListInstalled,
   });
 
@@ -115,7 +117,7 @@ export function ChatPanel() {
   };
 
   const sessionsQuery = useQuery({
-    queryKey: ["chat-sessions"],
+    queryKey: queryKeys.chatSessions,
     queryFn: api.chatListSessions,
   });
 
@@ -155,7 +157,7 @@ export function ChatPanel() {
 
     void api.chatCreateSession("New chat").then((s) => {
       openChatTab(s.id);
-      queryClient.invalidateQueries({ queryKey: ["chat-sessions"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.chatSessions });
     });
   }, [sessionsQuery.data, pruneChatTabs, openChatTab, queryClient]);
 
@@ -170,12 +172,12 @@ export function ChatPanel() {
     }
     void api.chatCreateSession("New chat").then((s) => {
       openChatTab(s.id);
-      queryClient.invalidateQueries({ queryKey: ["chat-sessions"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.chatSessions });
     });
   }, [sessionId, sessionsQuery.data, openChatTab, queryClient]);
 
   const messagesQuery = useQuery({
-    queryKey: ["chat-messages", sessionId],
+    queryKey: queryKeys.chatMessages(sessionId ?? ""),
     queryFn: () => api.chatListMessages(sessionId!),
     enabled: !!sessionId,
   });
@@ -243,7 +245,7 @@ export function ChatPanel() {
       flushStream();
       if (sessionId) {
         queryClient.setQueryData<ChatMessage[]>(
-          ["chat-messages", sessionId],
+          queryKeys.chatMessages(sessionId),
           (old) => {
             const list = [...(old ?? [])];
             if (
@@ -268,10 +270,10 @@ export function ChatPanel() {
       setIsSending(false);
       setIsStopping(false);
       clearStream();
-      void queryClient.invalidateQueries({ queryKey: ["chat-sessions"] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.chatSessions });
     },
-    onError: (e: Error) => {
-      const message = e.message || "Chat request failed";
+    onError: (error: unknown) => {
+      const message = appErrorMessage(error, "Chat request failed");
       if (message.toLowerCase().includes("cancelled")) {
         setIsSending(false);
         setIsStopping(false);
@@ -280,7 +282,7 @@ export function ChatPanel() {
         setAgentActivity(null);
         if (sessionId) {
           void queryClient.invalidateQueries({
-            queryKey: ["chat-messages", sessionId],
+            queryKey: queryKeys.chatMessages(sessionId),
           });
         }
         return;

@@ -1,15 +1,13 @@
 import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
-import { ConfigService } from '@nestjs/config';
 import { AppModule } from './app.module';
-import { loadHubConfig } from './hub.config';
+import { HubRuntimeConfig } from './hub.config';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
     logger: ['error', 'warn', 'log', 'debug'],
   });
-  const config = app.get(ConfigService);
-  const hub = loadHubConfig(config);
+  const hub = app.get(HubRuntimeConfig).value;
   const logger = new Logger('Bootstrap');
 
   if (hub.cors.mode === 'all') {

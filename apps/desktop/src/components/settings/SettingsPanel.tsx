@@ -8,7 +8,6 @@ import {
   LoaderCircle,
   Network,
   Palette,
-  User,
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -19,8 +18,12 @@ import { Label } from "@/components/ui/label";
 import { PanelHeader } from "@/components/ui/panel-header";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
+import { queryKeys } from "@/lib/query-keys";
+import { useUiStore, type SettingsSection } from "@/stores/ui";
+import { HubAccountSettings } from "./HubAccountSettings";
 
 /** Matches backend default; not shown in UI — always forced on save. */
 const DEFAULT_EMBEDDING_MODEL = "AllMiniLML6V2Q";
@@ -37,7 +40,6 @@ const EMPTY: AppSettings = {
   proxy_enabled: false,
   font_size_pt: 10,
   display_language: "en",
-  user_name: "",
   knowledge_dir: "",
   resolved_knowledge_dir: "",
 };
@@ -55,8 +57,12 @@ function persistKey(settings: AppSettings): string {
 export function SettingsPanel() {
   const { t } = useI18n();
   const queryClient = useQueryClient();
+  const settingsSection = useUiStore((state) => state.settingsSection);
+  const setSettingsSection = useUiStore((state) => state.setSettingsSection);
   const [form, setForm] = useState<AppSettings>(EMPTY);
-  const [fontSizeDraft, setFontSizeDraft] = useState(String(EMPTY.font_size_pt));
+  const [fontSizeDraft, setFontSizeDraft] = useState(
+    String(EMPTY.font_size_pt),
+  );
   const [hubTestResult, setHubTestResult] = useState<{
     online: boolean;
     message: string;
@@ -65,7 +71,7 @@ export function SettingsPanel() {
   const lastSavedKey = useRef("");
 
   const settingsQuery = useQuery({
-    queryKey: ["settings"],
+    queryKey: queryKeys.settings,
     queryFn: api.settingsGet,
   });
 
@@ -109,11 +115,13 @@ export function SettingsPanel() {
             display_language: refreshed.display_language,
             resolved_knowledge_dir: refreshed.resolved_knowledge_dir,
           }));
-          queryClient.setQueryData(["settings"], refreshed);
-          void queryClient.invalidateQueries({ queryKey: ["hub-status"] });
-          void queryClient.invalidateQueries({ queryKey: ["packs"] });
-          void queryClient.invalidateQueries({ queryKey: ["tree"] });
-          void queryClient.invalidateQueries({ queryKey: ["installed-packs"] });
+          queryClient.setQueryData(queryKeys.settings, refreshed);
+          void queryClient.invalidateQueries({ queryKey: queryKeys.hubStatus });
+          void queryClient.invalidateQueries({ queryKey: queryKeys.catalog });
+          void queryClient.invalidateQueries({ queryKey: queryKeys.tree });
+          void queryClient.invalidateQueries({
+            queryKey: queryKeys.installedPacks,
+          });
         } catch (e) {
           toast.error(t("settings.couldNotSave"), {
             description: e instanceof Error ? e.message : String(e),
@@ -125,8 +133,15 @@ export function SettingsPanel() {
     return () => window.clearTimeout(timer);
   }, [form, queryClient, t]);
 
-  const update = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
-    if (key === "hub_base_url" || key === "proxy_url" || key === "proxy_enabled") {
+  const update = <K extends keyof AppSettings>(
+    key: K,
+    value: AppSettings[K],
+  ) => {
+    if (
+      key === "hub_base_url" ||
+      key === "proxy_url" ||
+      key === "proxy_enabled"
+    ) {
       setHubTestResult(null);
     }
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -209,237 +224,220 @@ export function SettingsPanel() {
         description={t("settings.description")}
       />
       <ScrollArea className="min-h-0 flex-1">
-        <div className="mx-auto max-w-2xl space-y-6 px-6 py-5">
-          <SettingsSection
-            icon={User}
-            title={t("settings.personal")}
-            description={t("settings.personalDescription")}
+        <div className="mx-auto max-w-2xl px-6 py-5">
+          <Tabs
+            value={settingsSection}
+            onValueChange={(value) =>
+              setSettingsSection(value as SettingsSection)
+            }
+            className="space-y-5"
           >
-            <Field
-              label={t("settings.yourName")}
-              description={t("settings.yourNameDescription")}
-            >
-              <Input
-                value={form.user_name}
-                onChange={(e) => update("user_name", e.target.value)}
-                placeholder={t("settings.optional")}
-              />
-            </Field>
-            <Field
-              label={t("settings.knowledgeDirectory")}
-              description={t("settings.knowledgeDirectoryDescription")}
-            >
-              <div className="flex min-w-0 gap-2">
-                <Input
-                  value={displayKnowledgePath}
-                  readOnly
-                  title={displayKnowledgePath}
-                  className="min-w-0 flex-1 font-mono text-xs"
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="shrink-0"
-                  onClick={() => void pickKnowledgeDir()}
-                >
-                  <FolderOpen className="size-4" />
-                  {t("hub.browse")}
-                </Button>
-              </div>
-              <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                <p className="text-xs text-muted-foreground">
-                  {usingDefaultKnowledge
-                    ? t("settings.usingDefaultVault")
-                    : t("settings.usingCustomVault")}
-                </p>
-                {!usingDefaultKnowledge && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => update("knowledge_dir", "")}
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="general">General</TabsTrigger>
+              <TabsTrigger value="account">Account</TabsTrigger>
+            </TabsList>
+            <TabsContent value="account">
+              <HubAccountSettings />
+            </TabsContent>
+            <TabsContent value="general">
+              <SettingsSection>
+                <GeneralGroup icon={FolderOpen} title="Knowledge vault">
+                  <Field
+                    label={t("settings.knowledgeDirectory")}
+                    description={t("settings.knowledgeDirectoryDescription")}
                   >
-                    {t("settings.resetToDefault")}
-                  </Button>
-                )}
-              </div>
-            </Field>
-          </SettingsSection>
-
-          <SettingsSection
-            icon={Palette}
-            title={t("settings.appearance")}
-            description={t("settings.appearanceDescription")}
-          >
-            <Field
-              label={t("settings.fontSize")}
-              description={t("settings.fontSizeDescription")}
-            >
-              <div className="space-y-2">
-                <Input
-                  type="text"
-                  inputMode="numeric"
-                  value={fontSizeDraft}
-                  onChange={(e) => setFontSizeDraft(e.target.value)}
-                  onBlur={commitFontSizeInput}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      commitFontSizeInput();
-                    }
-                  }}
-                  placeholder={`${MIN_FONT_SIZE_PT}-${MAX_FONT_SIZE_PT}`}
-                />
-              </div>
-            </Field>
-          </SettingsSection>
-
-          <SettingsSection
-            icon={Bot}
-            title={t("settings.llm")}
-            description={t("settings.llmDescription")}
-          >
-            <Field
-              label={t("settings.baseUrl")}
-              description={t("settings.baseUrlDescription")}
-            >
-              <Input
-                value={form.llm_base_url}
-                onChange={(e) => update("llm_base_url", e.target.value)}
-              />
-            </Field>
-            <Field
-              label={t("settings.apiKey")}
-              description={t("settings.apiKeyDescription")}
-            >
-              <Input
-                type="password"
-                value={form.llm_api_key}
-                onChange={(e) => update("llm_api_key", e.target.value)}
-                placeholder="sk-…"
-              />
-            </Field>
-            <Field
-              label={t("settings.chatModel")}
-              description={t("settings.chatModelDescription")}
-            >
-              <Input
-                value={form.chat_model}
-                onChange={(e) => update("chat_model", e.target.value)}
-              />
-            </Field>
-          </SettingsSection>
-
-          <SettingsSection
-            icon={Cloud}
-            title={t("settings.knowledgeHub")}
-            description={t("settings.knowledgeHubDescription")}
-          >
-            <Field
-              label={t("settings.hubBaseUrl")}
-              description={t("settings.hubBaseUrlDescription")}
-            >
-              <Input
-                value={form.hub_base_url}
-                onChange={(e) => update("hub_base_url", e.target.value)}
-                placeholder="http://127.0.0.1:8787"
-              />
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                {hubTestResult ? (
-                  <p
-                    className={
-                      hubTestResult.online
-                        ? "text-xs text-primary"
-                        : "text-xs text-destructive"
-                    }
+                    <div className="flex min-w-0 gap-2">
+                      <Input
+                        value={displayKnowledgePath}
+                        readOnly
+                        title={displayKnowledgePath}
+                        className="min-w-0 flex-1 font-mono text-xs"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="shrink-0"
+                        onClick={() => void pickKnowledgeDir()}
+                      >
+                        <FolderOpen className="size-4" />
+                        {t("hub.browse")}
+                      </Button>
+                    </div>
+                    <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                      <p className="text-xs text-muted-foreground">
+                        {usingDefaultKnowledge
+                          ? t("settings.usingDefaultVault")
+                          : t("settings.usingCustomVault")}
+                      </p>
+                      {!usingDefaultKnowledge && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => update("knowledge_dir", "")}
+                        >
+                          {t("settings.resetToDefault")}
+                        </Button>
+                      )}
+                    </div>
+                  </Field>
+                </GeneralGroup>
+                <GeneralGroup icon={Palette} title={t("settings.appearance")}>
+                  <Field
+                    label={t("settings.fontSize")}
+                    description={t("settings.fontSizeDescription")}
                   >
-                    {hubTestResult.message}
-                  </p>
-                ) : (
-                  <span />
-                )}
-                <Button
-                  type="button"
-                  size="sm"
-                  disabled={testHubConnection.isPending}
-                  onClick={() => testHubConnection.mutate()}
-                >
-                  {testHubConnection.isPending && (
-                    <LoaderCircle className="size-3.5 animate-spin" />
-                  )}
-                  {testHubConnection.isPending
-                    ? t("settings.testing")
-                    : t("settings.testConnection")}
-                </Button>
-              </div>
-            </Field>
-          </SettingsSection>
-
-          <SettingsSection
-            icon={Network}
-            title={t("settings.network")}
-            description={t("settings.networkDescription")}
-          >
-            <div className="flex items-start justify-between gap-4 rounded-md border border-border bg-background px-3 py-3">
-              <div className="min-w-0 space-y-1">
-                <Label htmlFor="proxy-enabled" className="text-sm font-medium">
-                  {t("settings.proxyEnabled")}
-                </Label>
-                <p className="text-xs text-muted-foreground">
-                  {t("settings.proxyEnabledDescription")}
-                </p>
-              </div>
-              <Switch
-                id="proxy-enabled"
-                checked={Boolean(form.proxy_enabled)}
-                onCheckedChange={(checked) => update("proxy_enabled", checked)}
-                aria-label={t("settings.proxyEnabled")}
-              />
-            </div>
-            <Field
-              label={t("settings.proxyUrl")}
-              description={t("settings.proxyUrlDescription")}
-            >
-              <Input
-                value={form.proxy_url}
-                onChange={(e) => update("proxy_url", e.target.value)}
-                placeholder="http://127.0.0.1:7890"
-                disabled={!form.proxy_enabled}
-              />
-            </Field>
-          </SettingsSection>
+                    <Input
+                      type="text"
+                      inputMode="numeric"
+                      value={fontSizeDraft}
+                      onChange={(e) => setFontSizeDraft(e.target.value)}
+                      onBlur={commitFontSizeInput}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          commitFontSizeInput();
+                        }
+                      }}
+                      placeholder={`${MIN_FONT_SIZE_PT}-${MAX_FONT_SIZE_PT}`}
+                    />
+                  </Field>
+                </GeneralGroup>
+                <GeneralGroup icon={Bot} title={t("settings.llm")}>
+                  <Field
+                    label={t("settings.baseUrl")}
+                    description={t("settings.baseUrlDescription")}
+                  >
+                    <Input
+                      value={form.llm_base_url}
+                      onChange={(e) => update("llm_base_url", e.target.value)}
+                    />
+                  </Field>
+                  <Field
+                    label={t("settings.apiKey")}
+                    description={t("settings.apiKeyDescription")}
+                  >
+                    <Input
+                      type="password"
+                      value={form.llm_api_key}
+                      onChange={(e) => update("llm_api_key", e.target.value)}
+                      placeholder="sk-…"
+                    />
+                  </Field>
+                  <Field
+                    label={t("settings.chatModel")}
+                    description={t("settings.chatModelDescription")}
+                  >
+                    <Input
+                      value={form.chat_model}
+                      onChange={(e) => update("chat_model", e.target.value)}
+                    />
+                  </Field>
+                </GeneralGroup>
+                <GeneralGroup icon={Cloud} title={t("settings.knowledgeHub")}>
+                  <Field
+                    label={t("settings.hubBaseUrl")}
+                    description={t("settings.hubBaseUrlDescription")}
+                  >
+                    <Input
+                      value={form.hub_base_url}
+                      onChange={(e) => update("hub_base_url", e.target.value)}
+                      placeholder="http://127.0.0.1:8787"
+                    />
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      {hubTestResult ? (
+                        <p
+                          className={
+                            hubTestResult.online
+                              ? "text-xs text-primary"
+                              : "text-xs text-destructive"
+                          }
+                        >
+                          {hubTestResult.message}
+                        </p>
+                      ) : (
+                        <span />
+                      )}
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={testHubConnection.isPending}
+                        onClick={() => testHubConnection.mutate()}
+                      >
+                        {testHubConnection.isPending && (
+                          <LoaderCircle className="size-3.5 animate-spin" />
+                        )}
+                        {testHubConnection.isPending
+                          ? t("settings.testing")
+                          : t("settings.testConnection")}
+                      </Button>
+                    </div>
+                  </Field>
+                </GeneralGroup>
+                <GeneralGroup icon={Network} title={t("settings.network")}>
+                  <div className="flex items-start justify-between gap-4 rounded-lg bg-muted/40 px-3 py-3">
+                    <div className="min-w-0 space-y-1">
+                      <Label
+                        htmlFor="proxy-enabled"
+                        className="text-sm font-medium"
+                      >
+                        {t("settings.proxyEnabled")}
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        {t("settings.proxyEnabledDescription")}
+                      </p>
+                    </div>
+                    <Switch
+                      id="proxy-enabled"
+                      checked={Boolean(form.proxy_enabled)}
+                      onCheckedChange={(checked) =>
+                        update("proxy_enabled", checked)
+                      }
+                      aria-label={t("settings.proxyEnabled")}
+                    />
+                  </div>
+                  <Field
+                    label={t("settings.proxyUrl")}
+                    description={t("settings.proxyUrlDescription")}
+                  >
+                    <Input
+                      value={form.proxy_url}
+                      onChange={(e) => update("proxy_url", e.target.value)}
+                      placeholder="http://127.0.0.1:7890"
+                      disabled={!form.proxy_enabled}
+                    />
+                  </Field>
+                </GeneralGroup>
+              </SettingsSection>
+            </TabsContent>
+          </Tabs>
         </div>
       </ScrollArea>
     </div>
   );
 }
 
-function SettingsSection({
+function SettingsSection({ children }: { children: ReactNode }) {
+  return <section className="space-y-8">{children}</section>;
+}
+
+function GeneralGroup({
   icon: Icon,
   title,
-  description,
   children,
 }: {
   icon: LucideIcon;
   title: string;
-  description?: string;
   children: ReactNode;
 }) {
   return (
-    <section className="space-y-3">
-      <div>
-        <h3 className="flex items-center gap-2 text-sm font-semibold">
-          <Icon className="size-4 text-primary" aria-hidden />
-          {title}
-        </h3>
-        {description ? (
-          <p className="mt-1 text-xs text-muted-foreground">{description}</p>
-        ) : null}
-      </div>
-      <div className="space-y-4 rounded-lg border border-border bg-card p-4">
-        {children}
-      </div>
-    </section>
+    <div className="space-y-4">
+      <h4 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        <Icon className="size-4 text-primary" aria-hidden />
+        {title}
+      </h4>
+      {children}
+    </div>
   );
 }
 

@@ -10,10 +10,7 @@ pub fn build_client(proxy_url: &str) -> AppResult<reqwest::Client> {
     build_client_with_timeout(proxy_url, DEFAULT_HTTP_TIMEOUT)
 }
 
-pub fn build_client_with_timeout(
-    proxy_url: &str,
-    timeout: Duration,
-) -> AppResult<reqwest::Client> {
+pub fn build_client_with_timeout(proxy_url: &str, timeout: Duration) -> AppResult<reqwest::Client> {
     let proxy = proxy_url.trim();
     let builder = reqwest::Client::builder().timeout(timeout);
     if proxy.is_empty() {
@@ -33,9 +30,7 @@ pub fn validate_proxy_url(value: &str) -> AppResult<()> {
     let url = reqwest::Url::parse(value)
         .map_err(|e| AppError::msg(format!("Proxy URL is invalid: {e}")))?;
     if !matches!(url.scheme(), "http" | "https" | "socks5" | "socks5h") {
-        return Err(AppError::msg(
-            "Proxy URL must use http, https, or socks5",
-        ));
+        return Err(AppError::msg("Proxy URL must use http, https, or socks5"));
     }
     if url.host_str().is_none() {
         return Err(AppError::msg("Proxy URL must include a host"));

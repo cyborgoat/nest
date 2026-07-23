@@ -1,15 +1,10 @@
-import {
-  Controller,
-  Get,
-  ServiceUnavailableException,
-} from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { Controller, Get, ServiceUnavailableException } from '@nestjs/common';
 import { accessSync, constants, existsSync } from 'fs';
-import { loadHubConfig } from './hub.config';
+import { HubRuntimeConfig } from './hub.config';
 
 @Controller()
 export class HealthController {
-  constructor(private readonly config: ConfigService) {}
+  constructor(private readonly config: HubRuntimeConfig) {}
 
   @Get('health')
   health() {
@@ -19,7 +14,7 @@ export class HealthController {
   /** Readiness: registry path exists and is readable. */
   @Get('ready')
   ready() {
-    const { registryPath } = loadHubConfig(this.config);
+    const { registryPath } = this.config.value;
     if (!existsSync(registryPath)) {
       throw new ServiceUnavailableException({
         status: 'not_ready',

@@ -38,7 +38,7 @@ pub fn list_tree(root: &Path) -> AppResult<Vec<TreeNode>> {
     ensure_dir(root)?;
     // Clean leftovers from failed removes / accidental path creation.
     prune_empty_dirs(root)?;
-    Ok(build_tree(root, root)?)
+    build_tree(root, root)
 }
 
 fn build_tree(root: &Path, dir: &Path) -> AppResult<Vec<TreeNode>> {
@@ -250,16 +250,18 @@ fn prune_empty_dirs_inner(root: &Path, dir: &Path) -> AppResult<()> {
 /// not descended into.
 pub fn copy_dir_recursive(src: &Path, dst: &Path) -> AppResult<()> {
     ensure_dir(dst)?;
-    let walker = walkdir::WalkDir::new(src).into_iter().filter_entry(|entry| {
-        if entry.depth() == 0 {
-            return true;
-        }
-        entry
-            .file_name()
-            .to_str()
-            .map(|name| !should_skip_pack_entry(name))
-            .unwrap_or(false)
-    });
+    let walker = walkdir::WalkDir::new(src)
+        .into_iter()
+        .filter_entry(|entry| {
+            if entry.depth() == 0 {
+                return true;
+            }
+            entry
+                .file_name()
+                .to_str()
+                .map(|name| !should_skip_pack_entry(name))
+                .unwrap_or(false)
+        });
     for entry in walker {
         let entry = entry.map_err(|e| AppError::msg(e.to_string()))?;
         let path = entry.path();

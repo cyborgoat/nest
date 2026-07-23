@@ -10,9 +10,12 @@ npm run tauri dev
 ## Highlights
 
 - **Library** — read-only Markdown tree; activate/deactivate packs for chat; search
-- **Hub** — versioned catalog, download/upgrade, import local pack zips (`pack.json` required), remove (auto reindex)
+- **Hub** — public/restricted catalog, download/upgrade, local pack import, and owner publishing actions
+- **Messages** — durable Hub publish-submitted, approved, and rejected notifications
 - **Chat** — RAG over active packs; `@` mention files/folders to focus; session tabs, history, pin/archive
-- **Settings** — personal profile, LLM, Hub URL, and manual re-index (auto-saves)
+- **Settings** — General (vault, appearance, LLM, Hub, network) and Account (sign-in, profile, password) tabs; General auto-saves
+
+Pack mutations queue background indexing and return before FastEmbed model loading, so import/download dialogs are not held open by indexing. Hub accounts are optional and needed only for publishing or restricted packs.
 
 See the [root README](../../README.md) and [docs/](../../docs/) for architecture, pack registry, chat sessions, and development checks.
 

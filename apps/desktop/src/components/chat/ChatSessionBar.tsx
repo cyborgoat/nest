@@ -34,6 +34,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { TabStrip } from "@/components/ui/tab-strip";
 import { api } from "@/lib/api";
+import { queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
 import { useUiStore } from "@/stores/ui";
 
@@ -68,7 +69,7 @@ export function ChatSessionBar({ sessions, onResetChatUi }: Props) {
   const archivedSessions = sessions.filter((s) => s.archived);
 
   const invalidate = () =>
-    queryClient.invalidateQueries({ queryKey: ["chat-sessions"] });
+    queryClient.invalidateQueries({ queryKey: queryKeys.chatSessions });
 
   const update = useMutation({
     mutationFn: (args: {
@@ -83,7 +84,7 @@ export function ChatSessionBar({ sessions, onResetChatUi }: Props) {
     mutationFn: (sessionId: string) => api.chatDeleteSession(sessionId),
     onSuccess: (_void, sessionId) => {
       closeChatTab(sessionId);
-      queryClient.removeQueries({ queryKey: ["chat-messages", sessionId] });
+      queryClient.removeQueries({ queryKey: queryKeys.chatMessages(sessionId) });
       invalidate();
       onResetChatUi();
     },

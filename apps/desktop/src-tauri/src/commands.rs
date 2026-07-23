@@ -5,11 +5,10 @@ use crate::db::{
 use crate::embeddings;
 use crate::error::{AppError, AppResult};
 use crate::hub::{self, PackProject};
-use crate::indexer;
+use crate::indexing;
 use crate::llm;
 use crate::state::SharedState;
 use crate::vault::{self, TreeNode};
-use crate::vector_store::{self, KnowledgeChunk};
 use tauri::{AppHandle, Emitter, State};
 
 #[tauri::command]
@@ -82,7 +81,7 @@ pub async fn settings_set(
     }
 
     if vault_changed {
-        index_rebuild(state).await?;
+        indexing::schedule(state.inner())?;
     }
 
     Ok(())
@@ -103,100 +102,7 @@ fn validate_http_base_url(label: &str, value: &str) -> AppResult<()> {
 
 #[tauri::command]
 pub fn index_status(state: State<'_, SharedState>) -> AppResult<IndexStatus> {
-    let conn = state.db.lock();
-    db::get_index_status(&conn, state.indexing())
-}
-
-/// Rebuild FTS + vector indexes (used after download / import / remove / manual).
-#[tauri::command]
-pub async fn index_rebuild(state: State<'_, SharedState>) -> AppResult<IndexStatus> {
-    if state.indexing() {
-        return Err(AppError::msg("Indexing already in progress"));
-    }
-    state.set_indexing(true);
-
-    let result = async {
-        let settings = {
-            let conn = state.db.lock();
-            db::get_settings(&conn)?
-        };
-
-        {
-            let conn = state.db.lock();
-            db::set_index_meta(&conn, 0, 0, Some("Collecting Markdown…"))?;
-        }
-
-        let vault = state.vault_path();
-        let pending = indexer::collect_pending_chunks(&vault)?;
-
-        {
-            let conn = state.db.lock();
-            db::set_index_meta(&conn, 0, pending.len() as u32, Some("Building FTS index…"))?;
-            indexer::persist_chunks(&conn, &pending)?;
-            db::set_index_meta(
-                &conn,
-                {
-                    let mut files = std::collections::HashSet::new();
-                    for (_, path, _, _, _, _) in &pending {
-                        files.insert(path.clone());
-                    }
-                    files.len() as u32
-                },
-                pending.len() as u32,
-                Some("Loading FastEmbed model (may download on first run)…"),
-            )?;
-        }
-
-        let model = embeddings::load_embedding_model(&settings.embedding_model)?;
-        let chunks: Vec<KnowledgeChunk> = pending
-            .iter()
-            .map(|(id, file_path, title, content, _, _)| KnowledgeChunk {
-                id: id.clone(),
-                file_path: file_path.clone(),
-                title: title.clone(),
-                content: content.clone(),
-            })
-            .collect();
-
-        {
-            let conn = state.db.lock();
-            let file_count = {
-                let mut files = std::collections::HashSet::new();
-                for c in &chunks {
-                    files.insert(c.file_path.clone());
-                }
-                files.len() as u32
-            };
-            db::set_index_meta(
-                &conn,
-                file_count,
-                chunks.len() as u32,
-                Some("Embedding chunks into local vector store…"),
-            )?;
-        }
-
-        vector_store::rebuild_vector_index(&state.app_data_dir, model, chunks).await?;
-
-        let conn = state.db.lock();
-        let file_count = {
-            let mut files = std::collections::HashSet::new();
-            for (_, path, _, _, _, _) in &pending {
-                files.insert(path.clone());
-            }
-            files.len() as u32
-        };
-        db::set_index_meta(
-            &conn,
-            file_count,
-            pending.len() as u32,
-            Some("Local FTS + FastEmbed vector index ready"),
-        )?;
-        db::get_index_status(&conn, false)
-    }
-    .await;
-
-    state.set_indexing(false);
-    result
+    indexing::status(state.inner())
 }
 
 #[tauri::command]
@@ -303,7 +209,7 @@ pub async fn chat_send(
         {
             msgs.pop();
         }
-        crate::memory::messages_to_rig_history(&msgs)
+        crate::chat_history::messages_to_rig_history(&msgs)
     };
 
     crate::nest_debug!(
@@ -313,17 +219,17 @@ pub async fn chat_send(
         focus
     );
 
-    let result = match agent::run_agent_chat(
-        &app,
-        state.inner().clone(),
+    let result = match agent::run_agent_chat(agent::AgentChatRequest {
+        app: app.clone(),
+        state: state.inner().clone(),
         app_data_dir,
-        &settings,
-        &session_id,
-        &query,
-        focus,
-        &stream_event,
-        prior,
-    )
+        settings: settings.clone(),
+        session_id: session_id.clone(),
+        query: query.clone(),
+        focus_paths: focus,
+        stream_event: stream_event.clone(),
+        prior_history: prior,
+    })
     .await
     {
         Ok(v) => v,
@@ -431,7 +337,13 @@ pub async fn hub_list_packs(state: State<'_, SharedState>) -> AppResult<Vec<Pack
         let conn = state.db.lock();
         db::get_settings(&conn)?
     };
-    hub::list_packs_remote(&settings.hub_base_url, settings.effective_proxy_url()).await
+    let token = ensure_hub_access(state.inner(), &settings, false).await?;
+    hub::list_packs_remote(
+        &settings.hub_base_url,
+        settings.effective_proxy_url(),
+        token.as_deref(),
+    )
+    .await
 }
 
 #[tauri::command]
@@ -472,10 +384,7 @@ fn pack_has_markdown(vault_root: &std::path::Path, local_path: &str) -> bool {
 }
 
 #[tauri::command]
-pub async fn hub_remove_pack(
-    state: State<'_, SharedState>,
-    pack_id: String,
-) -> AppResult<IndexStatus> {
+pub async fn hub_remove_pack(state: State<'_, SharedState>, pack_id: String) -> AppResult<()> {
     let local_path = {
         let conn = state.db.lock();
         if let Some(installed) = db::get_sync_state(&conn, &pack_id)? {
@@ -499,7 +408,24 @@ pub async fn hub_remove_pack(
     }
 
     // Rebuild so FastEmbed vectors stay in sync with the vault (purge only clears FTS/SQL).
-    index_rebuild(state).await
+    indexing::schedule(state.inner())?;
+    Ok(())
+}
+
+fn finish_pack_install(
+    state: &SharedState,
+    pack: &PackMeta,
+    origin: &str,
+) -> AppResult<InstalledPack> {
+    let installed = {
+        let conn = state.db.lock();
+        hub::record_sync(&conn, pack, origin)?;
+        db::get_sync_state(&conn, &pack.id)?.ok_or_else(|| {
+            AppError::msg(format!("Installed pack record was not saved: {}", pack.id))
+        })?
+    };
+    indexing::schedule(state)?;
+    Ok(installed)
 }
 
 #[tauri::command]
@@ -507,46 +433,60 @@ pub async fn hub_download_pack(
     state: State<'_, SharedState>,
     pack_id: String,
     version: Option<String>,
-) -> AppResult<IndexStatus> {
+) -> AppResult<InstalledPack> {
     let settings = {
         let conn = state.db.lock();
         db::get_settings(&conn)?
     };
 
     let vault = state.vault_path();
+    let token = ensure_hub_access(state.inner(), &settings, false).await?;
     let pack = hub::download_pack_remote(
         &settings.hub_base_url,
         settings.effective_proxy_url(),
         &pack_id,
         version.as_deref(),
         &vault,
+        token.as_deref(),
     )
     .await?;
 
-    {
-        let conn = state.db.lock();
-        hub::record_sync(&conn, &pack)?;
-    }
-
-    index_rebuild(state).await
+    finish_pack_install(state.inner(), &pack, "registry")
 }
 
 #[tauri::command]
 pub async fn hub_import_local_pack(
     state: State<'_, SharedState>,
     source_path: String,
-) -> AppResult<IndexStatus> {
+    overwrite: bool,
+) -> AppResult<InstalledPack> {
     let source = std::path::PathBuf::from(source_path.trim());
     crate::nest_debug!("hub", "import_local_pack source={}", source.display());
 
     let vault = state.vault_path();
-    let pack = hub::import_local_pack(&source, &vault)?;
-    {
+    let inspected = hub::inspect_local_pack(&source, &vault)?;
+    if !overwrite {
         let conn = state.db.lock();
-        hub::record_sync(&conn, &pack)?;
+        if db::get_sync_state(&conn, &inspected.id)?.is_some() {
+            return Err(AppError::msg(format!(
+                "Knowledge pack '{}' is already installed",
+                inspected.id
+            )));
+        }
     }
+    let pack = hub::import_local_pack(&source, &vault, overwrite)?;
+    finish_pack_install(state.inner(), &pack, "local")
+}
 
-    index_rebuild(state).await
+#[tauri::command]
+pub fn hub_inspect_local_pack(
+    state: State<'_, SharedState>,
+    source_path: String,
+) -> AppResult<PackMeta> {
+    hub::inspect_local_pack(
+        std::path::Path::new(source_path.trim()),
+        &state.vault_path(),
+    )
 }
 
 #[tauri::command]
@@ -559,15 +499,25 @@ pub async fn hub_create_pack_from_folder(
     state: State<'_, SharedState>,
     source_path: String,
     metadata: PackMeta,
-) -> AppResult<IndexStatus> {
-    let vault = state.vault_path();
-    let pack =
-        hub::create_pack_from_folder(std::path::Path::new(source_path.trim()), metadata, &vault)?;
-    {
+    overwrite: bool,
+) -> AppResult<InstalledPack> {
+    if !overwrite {
         let conn = state.db.lock();
-        hub::record_sync(&conn, &pack)?;
+        if db::get_sync_state(&conn, metadata.id.trim())?.is_some() {
+            return Err(AppError::msg(format!(
+                "Knowledge pack '{}' is already installed",
+                metadata.id.trim()
+            )));
+        }
     }
-    index_rebuild(state).await
+    let vault = state.vault_path();
+    let pack = hub::create_pack_from_folder(
+        std::path::Path::new(source_path.trim()),
+        metadata,
+        &vault,
+        overwrite,
+    )?;
+    finish_pack_install(state.inner(), &pack, "local")
 }
 
 #[tauri::command]
@@ -598,4 +548,408 @@ pub fn hub_export_pack(
         destination.set_extension("zip");
     }
     hub::export_pack(&pack, &state.vault_path(), &destination)
+}
+
+#[tauri::command]
+pub async fn hub_auth_state(state: State<'_, SharedState>) -> AppResult<hub::AuthState> {
+    let settings = {
+        let conn = state.db.lock();
+        db::get_settings(&conn)?
+    };
+    let _ = ensure_hub_access(state.inner(), &settings, false).await;
+    let auth = state.hub_auth.lock();
+    let user = auth.as_ref().map(|session| session.user.clone());
+    drop(auth);
+    Ok(hub::AuthState {
+        authenticated: user.is_some(),
+        user,
+    })
+}
+
+#[tauri::command]
+pub async fn hub_login(
+    state: State<'_, SharedState>,
+    id: String,
+    password: String,
+) -> AppResult<hub::AuthState> {
+    let settings = {
+        let conn = state.db.lock();
+        db::get_settings(&conn)?
+    };
+    let session = hub::login_remote(
+        &settings.hub_base_url,
+        settings.effective_proxy_url(),
+        id.trim(),
+        &password,
+    )
+    .await?;
+    if let Ok(entry) = keyring::Entry::new("com.cyborgoat.nest.hub", "active") {
+        let _ = entry.set_password(&session.refresh_token);
+    }
+    let user = session.user.clone();
+    *state.hub_auth.lock() = Some(session);
+    Ok(hub::AuthState {
+        authenticated: true,
+        user: Some(user),
+    })
+}
+
+#[tauri::command]
+pub async fn hub_register(
+    state: State<'_, SharedState>,
+    id: String,
+    password: String,
+    name: String,
+) -> AppResult<hub::AuthState> {
+    let settings = {
+        let conn = state.db.lock();
+        db::get_settings(&conn)?
+    };
+    let session = hub::register_remote(
+        &settings.hub_base_url,
+        settings.effective_proxy_url(),
+        id.trim(),
+        &password,
+        name.trim(),
+    )
+    .await?;
+    if let Ok(entry) = keyring::Entry::new("com.cyborgoat.nest.hub", "active") {
+        let _ = entry.set_password(&session.refresh_token);
+    }
+    let user = session.user.clone();
+    *state.hub_auth.lock() = Some(session);
+    Ok(hub::AuthState {
+        authenticated: true,
+        user: Some(user),
+    })
+}
+
+#[tauri::command]
+pub fn hub_logout(state: State<'_, SharedState>) -> AppResult<()> {
+    state.hub_auth.lock().take();
+    if let Ok(entry) = keyring::Entry::new("com.cyborgoat.nest.hub", "active") {
+        let _ = entry.delete_credential();
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn hub_update_profile(
+    state: State<'_, SharedState>,
+    name: String,
+) -> AppResult<hub::HubUser> {
+    let settings = {
+        let conn = state.db.lock();
+        db::get_settings(&conn)?
+    };
+    let token = ensure_hub_access(state.inner(), &settings, false)
+        .await?
+        .ok_or_else(|| AppError::msg("Sign in to update your Hub profile"))?;
+    let user = hub::update_profile_remote(
+        &settings.hub_base_url,
+        settings.effective_proxy_url(),
+        &token,
+        name.trim(),
+    )
+    .await?;
+    if let Some(session) = state.hub_auth.lock().as_mut() {
+        session.user = user.clone();
+    }
+    Ok(user)
+}
+
+#[tauri::command]
+pub async fn hub_change_password(
+    state: State<'_, SharedState>,
+    current_password: String,
+    new_password: String,
+) -> AppResult<hub::AuthState> {
+    let settings = {
+        let conn = state.db.lock();
+        db::get_settings(&conn)?
+    };
+    let token = ensure_hub_access(state.inner(), &settings, false)
+        .await?
+        .ok_or_else(|| AppError::msg("Sign in to change your Hub password"))?;
+    let session = hub::change_password_remote(
+        &settings.hub_base_url,
+        settings.effective_proxy_url(),
+        &token,
+        &current_password,
+        &new_password,
+    )
+    .await?;
+    if let Ok(entry) = keyring::Entry::new("com.cyborgoat.nest.hub", "active") {
+        let _ = entry.set_password(&session.refresh_token);
+    }
+    let user = session.user.clone();
+    *state.hub_auth.lock() = Some(session);
+    Ok(hub::AuthState {
+        authenticated: true,
+        user: Some(user),
+    })
+}
+
+#[tauri::command]
+pub async fn hub_publish_pack(
+    state: State<'_, SharedState>,
+    pack_id: String,
+) -> AppResult<hub::PublishRequest> {
+    let settings = {
+        let conn = state.db.lock();
+        db::get_settings(&conn)?
+    };
+    let token = ensure_hub_access(state.inner(), &settings, false)
+        .await?
+        .ok_or_else(|| AppError::msg("Sign in to publish a knowledge pack"))?;
+    let installed = {
+        let conn = state.db.lock();
+        db::get_sync_state(&conn, pack_id.trim())?
+    }
+    .ok_or_else(|| AppError::msg(format!("Pack not installed: {}", pack_id.trim())))?;
+    ensure_pack_publishable(&installed)?;
+    let pack = PackMeta {
+        id: installed.pack_id,
+        name: installed.name,
+        description: String::new(),
+        version: installed.version,
+        path: installed.local_path,
+    };
+    let published = hub::publish_pack_remote(
+        &settings.hub_base_url,
+        settings.effective_proxy_url(),
+        &token,
+        &pack,
+        &state.vault_path(),
+    )
+    .await;
+    match published {
+        Err(error) if error.is_unauthorized() => {
+            let token = ensure_hub_access(state.inner(), &settings, true)
+                .await?
+                .ok_or_else(|| AppError::msg("Your Hub session expired. Sign in again."))?;
+            hub::publish_pack_remote(
+                &settings.hub_base_url,
+                settings.effective_proxy_url(),
+                &token,
+                &pack,
+                &state.vault_path(),
+            )
+            .await
+        }
+        result => result,
+    }
+}
+
+fn ensure_pack_publishable(installed: &db::InstalledPack) -> AppResult<()> {
+    if installed.origin == "local" {
+        Ok(())
+    } else {
+        Err(AppError::msg(
+            "Only knowledge packs imported or created locally can be published",
+        ))
+    }
+}
+
+#[tauri::command]
+pub async fn hub_list_publish_requests(
+    state: State<'_, SharedState>,
+) -> AppResult<Vec<hub::PublishRequest>> {
+    let settings = {
+        let conn = state.db.lock();
+        db::get_settings(&conn)?
+    };
+    let token = ensure_hub_access(state.inner(), &settings, false)
+        .await?
+        .ok_or_else(|| AppError::msg("Sign in to view publish requests"))?;
+    hub::list_publish_requests_remote(
+        &settings.hub_base_url,
+        settings.effective_proxy_url(),
+        &token,
+    )
+    .await
+}
+
+async fn hub_message_context(state: &SharedState) -> AppResult<(AppSettings, String)> {
+    let settings = {
+        let conn = state.db.lock();
+        db::get_settings(&conn)?
+    };
+    let token = ensure_hub_access(state, &settings, false)
+        .await?
+        .ok_or_else(|| AppError::msg("Sign in to view Hub messages"))?;
+    Ok((settings, token))
+}
+
+#[tauri::command]
+pub async fn hub_list_messages(
+    state: State<'_, SharedState>,
+    filter: String,
+    cursor: Option<String>,
+) -> AppResult<hub::HubMessagePage> {
+    let (settings, token) = hub_message_context(state.inner()).await?;
+    hub::list_messages_remote(
+        &settings.hub_base_url,
+        settings.effective_proxy_url(),
+        &token,
+        &filter,
+        cursor.as_deref(),
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn hub_unread_message_count(
+    state: State<'_, SharedState>,
+) -> AppResult<hub::UnreadCount> {
+    let (settings, token) = hub_message_context(state.inner()).await?;
+    hub::unread_count_remote(
+        &settings.hub_base_url,
+        settings.effective_proxy_url(),
+        &token,
+    )
+    .await
+}
+
+async fn mutate_hub_message(
+    state: &SharedState,
+    method: reqwest::Method,
+    path: &str,
+) -> AppResult<()> {
+    let (settings, token) = hub_message_context(state).await?;
+    hub::mutate_message_remote(
+        &settings.hub_base_url,
+        settings.effective_proxy_url(),
+        &token,
+        method,
+        path,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn hub_mark_message_read(
+    state: State<'_, SharedState>,
+    message_id: String,
+) -> AppResult<()> {
+    mutate_hub_message(
+        state.inner(),
+        reqwest::Method::PATCH,
+        &format!("/{}/read", message_id),
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn hub_mark_all_messages_read(state: State<'_, SharedState>) -> AppResult<()> {
+    mutate_hub_message(state.inner(), reqwest::Method::POST, "/read-all").await
+}
+
+#[tauri::command]
+pub async fn hub_delete_message(
+    state: State<'_, SharedState>,
+    message_id: String,
+) -> AppResult<()> {
+    mutate_hub_message(
+        state.inner(),
+        reqwest::Method::DELETE,
+        &format!("/{}", message_id),
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn hub_delete_read_messages(state: State<'_, SharedState>) -> AppResult<()> {
+    mutate_hub_message(state.inner(), reqwest::Method::DELETE, "/read").await
+}
+
+async fn ensure_hub_access(
+    state: &SharedState,
+    settings: &AppSettings,
+    force_refresh: bool,
+) -> AppResult<Option<String>> {
+    let _refresh_guard = state.hub_auth_refresh.lock().await;
+    let session = state.hub_auth.lock().clone();
+    let session = match session {
+        Some(session) => session,
+        None => {
+            let refresh = keyring::Entry::new("com.cyborgoat.nest.hub", "active")
+                .ok()
+                .and_then(|entry| entry.get_password().ok());
+            let Some(refresh) = refresh else {
+                return Ok(None);
+            };
+            let restored = match hub::refresh_remote(
+                &settings.hub_base_url,
+                settings.effective_proxy_url(),
+                &refresh,
+            )
+            .await
+            {
+                Ok(value) => value,
+                Err(_) => {
+                    if let Ok(entry) = keyring::Entry::new("com.cyborgoat.nest.hub", "active") {
+                        let _ = entry.delete_credential();
+                    }
+                    return Ok(None);
+                }
+            };
+            *state.hub_auth.lock() = Some(restored.clone());
+            restored
+        }
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    if !force_refresh && session.expires_at_epoch > now + 30 {
+        return Ok(Some(session.access_token));
+    }
+    let refreshed = match hub::refresh_remote(
+        &settings.hub_base_url,
+        settings.effective_proxy_url(),
+        &session.refresh_token,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(_) => {
+            *state.hub_auth.lock() = None;
+            if let Ok(entry) = keyring::Entry::new("com.cyborgoat.nest.hub", "active") {
+                let _ = entry.delete_credential();
+            }
+            return Ok(None);
+        }
+    };
+    if let Ok(entry) = keyring::Entry::new("com.cyborgoat.nest.hub", "active") {
+        let _ = entry.set_password(&refreshed.refresh_token);
+    }
+    let token = refreshed.access_token.clone();
+    *state.hub_auth.lock() = Some(refreshed);
+    Ok(Some(token))
+}
+
+#[cfg(test)]
+mod publishing_origin_tests {
+    use super::*;
+
+    fn installed(origin: &str) -> db::InstalledPack {
+        db::InstalledPack {
+            pack_id: "sample".into(),
+            name: "Sample".into(),
+            local_path: "sample".into(),
+            version: "1.0.0".into(),
+            last_synced: None,
+            active: true,
+            origin: origin.into(),
+        }
+    }
+
+    #[test]
+    fn only_local_packs_are_publishable() {
+        assert!(ensure_pack_publishable(&installed("local")).is_ok());
+        for origin in ["registry", "bundled", "unknown"] {
+            assert!(ensure_pack_publishable(&installed(origin)).is_err());
+        }
+    }
 }

@@ -5,41 +5,51 @@
 ## Run locally
 
 ```bash
+cd apps/admin
+npm install
+npm run build
+
 cd apps/hub
 cp .env.example .env   # if you don't already have one
 npm install
 npm run start:dev
 ```
 
+The admin build is written to the ignored `apps/hub/public/admin/` directory and served by Hub at `/admin`.
+
 ## Configuration
 
 All runtime settings come from `.env` (see [`.env.example`](.env.example) for local, [`.env.production.example`](.env.production.example) for host deploy). There are no hardcoded host/port/path fallbacks in code.
 
-| Variable | Example | Description |
-|----------|---------|-------------|
-| `HOST` | `0.0.0.0` | HTTP listen interface (`0.0.0.0` for cloud / reverse proxies) |
-| `PORT` | `8787` | HTTP listen port |
-| `REGISTRY_PATH` | `../../examples/knowledge-packs` | Pack registry root (absolute, or relative to `apps/hub`) |
-| `VAULT_PATH` | — | Deprecated alias for `REGISTRY_PATH` |
-| `FIXTURES_PATH` | — | Deprecated alias for `REGISTRY_PATH` |
-| `DEBUG_MODE` | `false` | Verbose logs when `true` / `1` / `yes` / `on` |
-| `NEST_DEBUG` | — | Deprecated alias for `DEBUG_MODE` |
-| `CORS_ORIGIN` | `*` | `*` or comma-separated allowed origins |
-| `DOWNLOAD_TIMEOUT_MS` | `120000` | Documented client timeout hint (desktop uses 120s) |
+| Variable              | Example                          | Description                                                     |
+| --------------------- | -------------------------------- | --------------------------------------------------------------- |
+| `HOST`                | `0.0.0.0`                        | HTTP listen interface (`0.0.0.0` for cloud / reverse proxies)   |
+| `PORT`                | `8787`                           | HTTP listen port                                                |
+| `REGISTRY_PATH`       | `../../examples/knowledge-packs` | Pack registry root (absolute, or relative to `apps/hub`)        |
+| `DEBUG_MODE`          | `false`                          | Verbose logs when `true` / `1` / `yes` / `on`                   |
+| `CORS_ORIGIN`         | `*`                              | `*` or comma-separated allowed origins                          |
+| `DOWNLOAD_TIMEOUT_MS` | `120000`                         | Documented client timeout hint (desktop uses 120s)              |
+| `DATABASE_PATH`       | `./data/hub.sqlite3`             | SQLite control database for users, packs, releases, and reviews |
+| `STAGING_PATH`        | `./data/staging`                 | Pending pack upload storage                                     |
+| `JWT_SECRET`          | —                                | Required random signing secret, at least 32 characters          |
+| `MIN_PASSWORD_LENGTH` | `8`                              | Minimum registration password length enforced by Hub            |
+| `SUPERUSER_ID`        | —                                | Account ID adopted/created as the permanent superuser           |
+| `SUPERUSER_PASSWORD`  | —                                | Initial superuser password; remove after bootstrap              |
+| `SUPERUSER_NAME`      | `Administrator`                  | Display name applied when the superuser is first adopted        |
 
 Registry layout is PyPI-style `{id}/{semver}/`. See [pack-registry.md](../../docs/pack-registry.md).
 
 ## Endpoints
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/health` | Liveness |
-| GET | `/ready` | Readiness (registry path exists and is readable) |
-| GET | `/packs` | Projects (`latest_version`, `versions[]`) |
-| GET | `/packs/:id` | Project detail |
-| GET | `/packs/:id/:version` | Release metadata |
-| GET | `/packs/:id/download` | Latest non-yanked ZIP (streamed) |
-| GET | `/packs/:id/:version/download` | Pinned version ZIP (streamed) |
+Public catalog/download, authenticated account/publishing/messages, and privileged admin routes are documented in the canonical [Hub API reference](../../docs/hub-api.md).
+
+The routed React operations console is served at `/admin` for admins and the superuser. It uses Tailwind, TanStack Router/Query/Table, and shadcn-style primitives for the dashboard, publishing queue, pack details, and user access. Admins and the superuser have equal registry-management permissions, including immediate uploads. Admins can promote regular users and remove regular users; only the superuser can remove admins. The environment-adopted superuser is permanently marked as managed and its ID, name, password, and role cannot be changed through the service. Published release contents are immutable, while project metadata, visibility, grants, archive state, and release yank state are managed in SQLite.
+
+Publishing submissions, approvals, and rejections create durable per-user messages. Clients may poll the unread-count endpoint; messages remain until the recipient deletes them.
+
+### Schema compatibility
+
+The account/publishing release establishes a new development schema baseline. Databases from earlier development builds are not upgraded in place; reset the configured `DATABASE_PATH` once as described in [Development](../../docs/development.md#development-database-reset). Production data should be migrated explicitly rather than reset.
 
 ## Production deploy (PM2)
 
@@ -50,14 +60,16 @@ Internal single-host deploy: build Hub, supervise with [PM2](https://pm2.keymetr
 1. Install Node LTS and PM2 on the host: `npm i -g pm2`
 2. Copy `apps/hub` onto the host (or clone the repo).
 3. Seed the registry (e.g. from [examples/knowledge-packs](../../examples/knowledge-packs)) into an absolute path such as `/var/lib/nest-hub/registry`.
-4. Configure env and build:
+4. Install both application workspaces, configure env, and build:
 
 ```bash
 cd apps/hub
 cp .env.production.example .env
 # edit .env — set REGISTRY_PATH to the absolute registry path; tighten CORS_ORIGIN if needed
-npm ci --omit=dev
+npm ci
+npm --prefix ../admin ci
 npm run build
+npm prune --omit=dev
 npm run validate:registry -- /var/lib/nest-hub/registry
 pm2 start ecosystem.config.cjs
 pm2 save
@@ -66,14 +78,14 @@ pm2 startup                 # follow the printed command so Hub survives reboot
 
 ### Day-to-day
 
-| Task | Command |
-|------|---------|
-| Status | `pm2 status` |
-| Logs | `pm2 logs nest-hub` |
+| Task                      | Command                                                      |
+| ------------------------- | ------------------------------------------------------------ |
+| Status                    | `pm2 status`                                                 |
+| Logs                      | `pm2 logs nest-hub`                                          |
 | Restart after code change | `npm ci --omit=dev && npm run build && pm2 restart nest-hub` |
-| Stop | `pm2 stop nest-hub` |
+| Stop                      | `pm2 stop nest-hub`                                          |
 
-Publishing a new pack version: copy a new `{id}/{semver}/` tree into `REGISTRY_PATH` (validate first). Hub rescans on each request — **no PM2 restart** required for registry-only updates.
+Publishing now normally happens through the desktop review workflow or the `/admin` control room. Existing filesystem releases are imported idempotently as public, system-owned catalog records.
 
 ### Smoke test
 

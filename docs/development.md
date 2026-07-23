@@ -9,6 +9,10 @@
 
 ```bash
 # Terminal 1 (optional) — Hub service
+cd apps/admin
+npm install
+npm run build
+
 cd apps/hub
 cp .env.example .env   # first time
 npm install
@@ -28,24 +32,35 @@ The Hub service listens on `PORT` (from `.env`, typically `8787`). Configure the
 
 | App | File | Variables |
 |-----|------|-----------|
-| Hub (`apps/hub`) | `apps/hub/.env.example` | `HOST`, `PORT`, `REGISTRY_PATH`, `DEBUG_MODE`, `CORS_ORIGIN`, `DOWNLOAD_TIMEOUT_MS` (`VAULT_PATH` / `FIXTURES_PATH` / `NEST_DEBUG` aliases) |
+| Hub (`apps/hub`) | `apps/hub/.env.example` | `HOST`, `PORT`, `REGISTRY_PATH`, `DEBUG_MODE`, `CORS_ORIGIN`, `DOWNLOAD_TIMEOUT_MS`, `DATABASE_PATH`, `STAGING_PATH`, `MAX_PACK_UPLOAD_BYTES`, `JWT_SECRET`, `MIN_PASSWORD_LENGTH`, and optional `SUPERUSER_*` bootstrap values |
 | Desktop | `apps/desktop/.env.example` | `NEST_DEBUG` (logs from the Rust side when set for the process) |
 | Desktop Tauri | `apps/desktop/src-tauri/.env.example` | `NEST_DEBUG` |
 
 Hub `DEBUG_MODE=true` (or `1` / `yes` / `on`) enables verbose service logging. Desktop `NEST_DEBUG` remains the Rust-side debug flag.
 
+Hub runtime configuration is strict: missing or invalid required values fail startup, and removed aliases are not accepted. After adopting or creating a superuser, its managed marker persists in SQLite; remove `SUPERUSER_PASSWORD` after the initial account is created.
+
+### Development database reset
+
+The current Hub schema is a clean baseline for the account/publishing feature. It does not migrate databases created by pre-feature development builds. Stop Hub and move or delete the file configured by `DATABASE_PATH` (plus its `-wal` and `-shm` companions) once, then restart. Do not apply this reset procedure to data you need to preserve.
+
 ## Sanity checks
 
 ```bash
 # Desktop UI
-cd apps/desktop && npx tsc --noEmit && npm run build
+cd apps/desktop && npm run lint && npm test && npm run build
 
 # Desktop Rust
-cd apps/desktop/src-tauri && cargo check && cargo test
+cd apps/desktop/src-tauri && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
 
-# Hub
-cd apps/hub && npm run build
+# Admin console
+cd apps/admin && npm run lint && npm test && npm run build
+
+# Hub (build also rebuilds the admin console into apps/hub/public/admin)
+cd apps/hub && npm run lint && npm test -- --runInBand && npm run build && npm run test:e2e -- --runInBand && npm run validate:registry
 ```
+
+Hub end-to-end tests use `examples/knowledge-packs` as their only registry fixture source. They copy it to an isolated directory under `/tmp`; generated releases, the test database, staging artifacts, and destructive registry-management checks stay inside those temporary paths and are removed after the suite.
 
 ## Releases
 

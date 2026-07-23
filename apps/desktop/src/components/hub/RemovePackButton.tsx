@@ -1,4 +1,4 @@
-import { Download, MoreHorizontal, Trash2 } from "lucide-react";
+import { Download, MoreHorizontal, Send, Trash2 } from "lucide-react";
 import { useState } from "react";
 import {
   AlertDialog,
@@ -15,6 +15,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Spinner } from "@/components/ui/spinner";
@@ -28,6 +29,8 @@ export function RemovePackButton({
   onExport,
   exportLabel,
   onConfirm,
+  onPublish,
+  publishLabel,
 }: {
   name: string;
   disabled: boolean;
@@ -35,6 +38,8 @@ export function RemovePackButton({
   onExport?: () => void;
   exportLabel?: string;
   onConfirm: () => void;
+  onPublish?: () => void;
+  publishLabel?: string;
 }) {
   const { t } = useI18n();
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -54,8 +59,23 @@ export function RemovePackButton({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="min-w-32">
+            {onPublish && (
+              <>
+                <DropdownMenuItem
+                  disabled={disabled}
+                  onSelect={() => void onPublish()}
+                >
+                  <Send className="size-3.5" />
+                  {publishLabel ?? "Publish"}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+              </>
+            )}
             {onExport && (
-              <DropdownMenuItem disabled={disabled} onSelect={() => void onExport()}>
+              <DropdownMenuItem
+                disabled={disabled}
+                onSelect={() => void onExport()}
+              >
                 <Download className="size-3.5" />
                 {exportLabel ?? "Export ZIP"}
               </DropdownMenuItem>

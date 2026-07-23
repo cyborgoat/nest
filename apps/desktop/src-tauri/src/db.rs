@@ -22,8 +22,6 @@ pub struct AppSettings {
     pub font_size_pt: u32,
     #[serde(default = "default_display_language")]
     pub display_language: String,
-    #[serde(default)]
-    pub user_name: String,
     /// Custom knowledge / vault directory. Empty means default `{app_data}/vault`.
     #[serde(default)]
     pub knowledge_dir: String,
@@ -44,7 +42,6 @@ impl Default for AppSettings {
             proxy_enabled: false,
             font_size_pt: default_font_size_pt(),
             display_language: default_display_language(),
-            user_name: String::new(),
             knowledge_dir: String::new(),
             resolved_knowledge_dir: String::new(),
         }
@@ -134,10 +131,16 @@ pub struct InstalledPack {
     pub last_synced: Option<String>,
     #[serde(default = "default_true")]
     pub active: bool,
+    #[serde(default = "default_origin")]
+    pub origin: String,
 }
 
 fn default_true() -> bool {
     true
+}
+
+fn default_origin() -> String {
+    "unknown".to_string()
 }
 
 pub fn open_db(path: &Path) -> AppResult<Connection> {
@@ -205,7 +208,8 @@ fn migrate(conn: &Connection) -> AppResult<()> {
             version TEXT NOT NULL,
             local_path TEXT NOT NULL,
             last_synced TEXT NOT NULL,
-            active INTEGER NOT NULL DEFAULT 1
+            active INTEGER NOT NULL DEFAULT 1,
+            origin TEXT NOT NULL DEFAULT 'unknown'
         );
 
         CREATE TABLE IF NOT EXISTS index_meta (
@@ -222,6 +226,17 @@ fn migrate(conn: &Connection) -> AppResult<()> {
     ensure_chat_session_columns(conn)?;
     ensure_message_thinking_columns(conn)?;
     ensure_sync_state_active_column(conn)?;
+    ensure_sync_state_origin_column(conn)?;
+    Ok(())
+}
+
+fn ensure_sync_state_origin_column(conn: &Connection) -> AppResult<()> {
+    if !table_has_column(conn, "sync_state", "origin")? {
+        conn.execute(
+            "ALTER TABLE sync_state ADD COLUMN origin TEXT NOT NULL DEFAULT 'unknown'",
+            [],
+        )?;
+    }
     Ok(())
 }
 
@@ -311,8 +326,10 @@ pub fn get_settings(conn: &Connection) -> AppResult<AppSettings> {
             "proxy_url" => settings.proxy_url = value,
             "proxy_enabled" => {
                 proxy_enabled_set = true;
-                settings.proxy_enabled =
-                    matches!(value.trim().to_lowercase().as_str(), "1" | "true" | "yes" | "on");
+                settings.proxy_enabled = matches!(
+                    value.trim().to_lowercase().as_str(),
+                    "1" | "true" | "yes" | "on"
+                );
             }
             "font_size_pt" => {
                 if let Ok(parsed) = value.parse::<u32>() {
@@ -324,7 +341,8 @@ pub fn get_settings(conn: &Connection) -> AppResult<AppSettings> {
                     settings.display_language = value;
                 }
             }
-            "user_name" => settings.user_name = value,
+            // Removed account mirror. Hub authentication is the sole identity source.
+            "user_name" => {}
             "knowledge_dir" => settings.knowledge_dir = value,
             // legacy "top_k" rows ignored — retrieval uses DEFAULT_TOP_K
             _ => {}
@@ -355,7 +373,6 @@ pub fn save_settings(conn: &Connection, settings: &AppSettings) -> AppResult<()>
         ),
         ("font_size_pt", settings.font_size_pt.to_string()),
         ("display_language", settings.display_language.clone()),
-        ("user_name", settings.user_name.clone()),
         ("knowledge_dir", settings.knowledge_dir.trim().to_string()),
     ];
     for (key, value) in pairs {
@@ -396,16 +413,36 @@ pub fn insert_chunk(
     Ok(())
 }
 
-pub fn set_index_meta(
+pub fn set_index_progress(
     conn: &Connection,
     files: u32,
     chunks: u32,
     message: Option<&str>,
 ) -> AppResult<()> {
-    let now = Utc::now().to_rfc3339();
+    conn.execute(
+        "UPDATE index_meta SET indexed_files = ?1, indexed_chunks = ?2, message = ?3 WHERE id = 1",
+        params![files, chunks, message],
+    )?;
+    Ok(())
+}
+
+pub fn set_index_complete(
+    conn: &Connection,
+    files: u32,
+    chunks: u32,
+    message: &str,
+) -> AppResult<()> {
     conn.execute(
         "UPDATE index_meta SET indexed_files = ?1, indexed_chunks = ?2, last_indexed_at = ?3, message = ?4 WHERE id = 1",
-        params![files, chunks, now, message],
+        params![files, chunks, Utc::now().to_rfc3339(), message],
+    )?;
+    Ok(())
+}
+
+pub fn set_index_message(conn: &Connection, message: &str) -> AppResult<()> {
+    conn.execute(
+        "UPDATE index_meta SET message = ?1 WHERE id = 1",
+        params![message],
     )?;
     Ok(())
 }
@@ -763,18 +800,20 @@ pub fn upsert_sync_state(
     name: &str,
     version: &str,
     local_path: &str,
+    origin: &str,
 ) -> AppResult<()> {
     let now = Utc::now().to_rfc3339();
     // Preserve active flag on upgrade; new packs default to active=1.
     conn.execute(
-        "INSERT INTO sync_state (pack_id, name, version, local_path, last_synced, active)
-         VALUES (?1, ?2, ?3, ?4, ?5, 1)
+        "INSERT INTO sync_state (pack_id, name, version, local_path, last_synced, active, origin)
+         VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6)
          ON CONFLICT(pack_id) DO UPDATE SET
            name = excluded.name,
            version = excluded.version,
            local_path = excluded.local_path,
-           last_synced = excluded.last_synced",
-        params![pack_id, name, version, local_path, now],
+           last_synced = excluded.last_synced,
+           origin = excluded.origin",
+        params![pack_id, name, version, local_path, now, origin],
     )?;
     Ok(())
 }
@@ -799,7 +838,7 @@ pub fn list_active_pack_roots(conn: &Connection) -> AppResult<Vec<String>> {
 
 pub fn list_sync_state(conn: &Connection) -> AppResult<Vec<InstalledPack>> {
     let mut stmt = conn.prepare(
-        "SELECT pack_id, name, local_path, version, last_synced, COALESCE(active, 1)
+        "SELECT pack_id, name, local_path, version, last_synced, COALESCE(active, 1), COALESCE(origin, 'unknown')
          FROM sync_state ORDER BY name",
     )?;
     let rows = stmt.query_map([], |row| {
@@ -810,6 +849,7 @@ pub fn list_sync_state(conn: &Connection) -> AppResult<Vec<InstalledPack>> {
             version: row.get(3)?,
             last_synced: row.get(4)?,
             active: row.get::<_, i64>(5)? != 0,
+            origin: row.get(6)?,
         })
     })?;
     Ok(rows.filter_map(|r| r.ok()).collect())
@@ -817,7 +857,7 @@ pub fn list_sync_state(conn: &Connection) -> AppResult<Vec<InstalledPack>> {
 
 pub fn get_sync_state(conn: &Connection, pack_id: &str) -> AppResult<Option<InstalledPack>> {
     conn.query_row(
-        "SELECT pack_id, name, local_path, version, last_synced, COALESCE(active, 1)
+        "SELECT pack_id, name, local_path, version, last_synced, COALESCE(active, 1), COALESCE(origin, 'unknown')
          FROM sync_state WHERE pack_id = ?1",
         params![pack_id],
         |row| {
@@ -828,6 +868,7 @@ pub fn get_sync_state(conn: &Connection, pack_id: &str) -> AppResult<Option<Inst
                 version: row.get(3)?,
                 last_synced: row.get(4)?,
                 active: row.get::<_, i64>(5)? != 0,
+                origin: row.get(6)?,
             })
         },
     )
@@ -904,4 +945,36 @@ fn recount_index_meta(conn: &Connection) -> AppResult<()> {
         params![file_count, chunk_count, now],
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod sync_state_tests {
+    use super::*;
+
+    #[test]
+    fn migrates_legacy_pack_origins_and_updates_provenance() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE sync_state (
+                pack_id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                version TEXT NOT NULL,
+                local_path TEXT NOT NULL,
+                last_synced TEXT NOT NULL,
+                active INTEGER NOT NULL DEFAULT 1
+             );
+             INSERT INTO sync_state VALUES ('legacy', 'Legacy', '1.0.0', 'legacy', 'now', 0);",
+        )
+        .unwrap();
+        migrate(&conn).unwrap();
+        let legacy = get_sync_state(&conn, "legacy").unwrap().unwrap();
+        assert_eq!(legacy.origin, "unknown");
+        assert!(!legacy.active);
+
+        upsert_sync_state(&conn, "legacy", "Legacy", "2.0.0", "legacy", "local").unwrap();
+        let updated = get_sync_state(&conn, "legacy").unwrap().unwrap();
+        assert_eq!(updated.origin, "local");
+        assert_eq!(updated.version, "2.0.0");
+        assert!(!updated.active, "replacement must preserve active state");
+    }
 }

@@ -28,6 +28,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
+import { queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
 import { useUiStore } from "@/stores/ui";
 
@@ -320,7 +321,7 @@ export function LibraryTree({
         const local = byPath.get(vars.packId)?.local_path;
         if (local && local !== vars.packId) clearPathsUnder(local);
       }
-      queryClient.invalidateQueries({ queryKey: ["installed-packs"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.installedPacks });
       toast.success(vars.active ? "Knowledge pack activated" : "Knowledge pack deactivated");
     },
     onError: (e: Error) =>

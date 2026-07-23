@@ -1,3 +1,5 @@
+export type PackVisibility = "public" | "restricted";
+
 export type PackRelease = {
   id: string;
   name: string;
@@ -5,7 +7,7 @@ export type PackRelease = {
   version: string;
   /** Vault folder; equals `id`. */
   path: string;
-  yanked?: boolean;
+  yanked: boolean;
 };
 
 /** Hub catalog project (may have multiple SemVer releases). */
@@ -15,7 +17,96 @@ export type PackProject = {
   description: string;
   latest_version: string;
   versions: string[];
+  visibility: PackVisibility;
+  owner_id: string | null;
 };
+
+export type UserRole = "user" | "admin" | "superuser";
+export type HubUser = {
+  uuid: string;
+  id: string;
+  name: string;
+  role: UserRole;
+  managed: boolean;
+};
+export type HubAuthState = { authenticated: boolean; user: HubUser | null };
+export type HubSession = {
+  user: HubUser;
+  access_token: string;
+  refresh_token: string;
+  expires_in: number;
+};
+export type PublishRequestStatus = "pending" | "approved" | "rejected";
+export type PublishRequest = {
+  id: string;
+  pack_id: string;
+  version: string;
+  name: string;
+  description: string;
+  status: PublishRequestStatus;
+  review_note?: string | null;
+  created_at: string;
+  reviewed_at?: string | null;
+};
+
+export type PendingPublishRequest = PublishRequest & {
+  status: "pending";
+  submitter_id: string;
+  submitter_name: string;
+  checksum: string;
+  validation_json: string;
+};
+
+export type HubMessageKind =
+  "publish_submitted" | "publish_approved" | "publish_rejected";
+export type HubMessage = {
+  id: string;
+  kind: HubMessageKind;
+  title: string;
+  body: string;
+  pack_id: string | null;
+  publish_request_id: string | null;
+  read_at: string | null;
+  created_at: string;
+};
+export type HubMessagePage = {
+  items: HubMessage[];
+  next_cursor: string | null;
+};
+export type HubUnreadCount = { count: number };
+
+export type AdminUser = HubUser & {
+  created_at: string;
+  updated_at: string;
+};
+
+export type AdminRelease = {
+  pack_id: string;
+  version: string;
+  yanked: boolean;
+  checksum: string;
+  published_at: string;
+};
+
+export type AdminGrant = Pick<HubUser, "uuid" | "id" | "name"> & {
+  pack_id: string;
+};
+
+export type AdminPack = {
+  id: string;
+  name: string;
+  description: string;
+  owner_uuid: string | null;
+  owner_id: string | null;
+  visibility: PackVisibility;
+  archived: boolean;
+  created_at: string;
+  updated_at: string;
+  releases: AdminRelease[];
+  grants: AdminGrant[];
+};
+
+export type SuccessResponse = { success: true };
 
 export type InstalledPack = {
   pack_id: string;
@@ -24,6 +115,7 @@ export type InstalledPack = {
   version: string;
   last_synced: string | null;
   active: boolean;
+  origin: "local" | "registry" | "bundled" | "unknown";
 };
 
 /** Editable metadata used when creating a knowledge pack from a local folder. */
@@ -62,8 +154,6 @@ export type AppSettings = {
   font_size_pt: number;
   /** UI display language, separate from runtime knowledge logic. */
   display_language: "en";
-  /** Display name for the local user. */
-  user_name: string;
   /** Custom vault path; empty = default under app data. */
   knowledge_dir: string;
   /** Absolute path currently used for packs (read-only from UI). */

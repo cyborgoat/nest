@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  desktop-ui:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+
+  desktop-rust:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/desktop/src-tauri
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+      - name: Install Tauri system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
+
+  hub-and-admin:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/hub
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            apps/admin/package-lock.json
+            apps/hub/package-lock.json
+      - run: npm ci
+        working-directory: apps/admin
+      - run: npm ci
+      - run: npm --prefix ../admin run lint
+      - run: npm --prefix ../admin test
+      - run: npm run lint
+      - run: npm test -- --runInBand
+      - run: npm run build
+      - run: npm run test:e2e -- --runInBand
+        env:
+          HOST: 127.0.0.1
+          PORT: 8787
+          REGISTRY_PATH: ../../examples/knowledge-packs
+          DEBUG_MODE: "false"
+          CORS_ORIGIN: "*"
+          DOWNLOAD_TIMEOUT_MS: 120000
+          DATABASE_PATH: ./data/ci-hub.sqlite3
+          STAGING_PATH: ./data/ci-staging
+          MAX_PACK_UPLOAD_BYTES: 104857600
+          JWT_SECRET: ci-only-secret-that-is-at-least-thirty-two-characters
+          MIN_PASSWORD_LENGTH: 8

@@ -52,9 +52,11 @@ const messages: Record<Locale, MessageTree> = {
       baseUrl: "Base URL",
       baseUrlDescription: "Endpoint for your OpenAI-compatible API service.",
       apiKey: "API key",
-      apiKeyDescription: "Authentication key sent with requests to the LLM API.",
+      apiKeyDescription:
+        "Authentication key sent with requests to the LLM API.",
       chatModel: "Chat model",
-      chatModelDescription: "Model ID used for chat responses and title generation.",
+      chatModelDescription:
+        "Model ID used for chat responses and title generation.",
       knowledgeHub: "Hub",
       knowledgeHubDescription: "Remote catalog for pack downloads.",
       hubBaseUrl: "Hub URL",
@@ -63,7 +65,8 @@ const messages: Record<Locale, MessageTree> = {
       networkDescription:
         "Optional proxy for Hub requests. When disabled, Nest connects directly and ignores system proxy.",
       proxyEnabled: "Use proxy",
-      proxyEnabledDescription: "Route Hub and related requests through the URL below.",
+      proxyEnabledDescription:
+        "Route Hub and related requests through the URL below.",
       proxyUrl: "Proxy URL",
       proxyUrlDescription:
         "HTTP(S) or SOCKS5 proxy, for example http://127.0.0.1:7890.",
@@ -115,6 +118,8 @@ const messages: Record<Locale, MessageTree> = {
       upgrading: "Upgrading…",
       fromRegistry: "From registry",
       importedLocally: "Imported locally",
+      bundledPack: "Bundled",
+      unknownOrigin: "Origin unknown",
       inVault: "In vault",
       localFolder: "Local folder · {{path}}",
       exportZip: "Export ZIP",
@@ -210,7 +215,8 @@ export function useI18n() {
   if (value) return value;
   const fallback: I18nValue = {
     locale: "en",
-    t: (key, params) => format(String(resolvePath(messages.en, key) ?? key), params),
+    t: (key, params) =>
+      format(String(resolvePath(messages.en, key) ?? key), params),
   };
   return fallback;
 }

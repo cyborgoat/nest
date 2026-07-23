@@ -92,7 +92,14 @@ fn seed_pack(
         }
     };
 
-    db::upsert_sync_state(conn, &meta.id, &meta.name, &meta.version, &meta.id)
+    db::upsert_sync_state(
+        conn,
+        &meta.id,
+        &meta.name,
+        &meta.version,
+        &meta.id,
+        "bundled",
+    )
 }
 
 fn write_embedded_pack(pack_root: &Path, pack_dir: &Dir<'_>) -> AppResult<()> {
@@ -125,7 +132,11 @@ fn write_dir_recursive(dir: &Dir<'_>, rel: PathBuf, target_root: &Path) -> AppRe
     Ok(())
 }
 
-fn read_pack_meta(path: &Path, expected_id: &str, fallback_name: &str) -> AppResult<EmbeddedPackMeta> {
+fn read_pack_meta(
+    path: &Path,
+    expected_id: &str,
+    fallback_name: &str,
+) -> AppResult<EmbeddedPackMeta> {
     let raw = fs::read_to_string(path)?;
     let meta: EmbeddedPackMeta = serde_json::from_str(&raw)?;
     if meta.id.trim().is_empty() || meta.version.trim().is_empty() {

@@ -1,30 +1,55 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { InstalledPack, KnowledgePackMeta, PackProject } from "@nest/shared";
-import { CloudOff, FolderInput } from "lucide-react";
+import type {
+  InstalledPack,
+  KnowledgePackMeta,
+  PackProject,
+} from "@nest/shared";
+import { CloudOff, FolderInput, Info, Settings2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { BrowseTab } from "@/components/hub/BrowseTab";
 import { ImportPackDialog } from "@/components/hub/ImportPackDialog";
 import { InstalledTab } from "@/components/hub/InstalledTab";
 import { Badge } from "@/components/ui/badge";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { PanelHeader } from "@/components/ui/panel-header";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
+import { appErrorMessage } from "@/lib/errors";
+import { packMutationInvalidations, queryKeys } from "@/lib/query-keys";
 import { useI18n } from "@/lib/i18n";
 import { useUiStore } from "@/stores/ui";
 
 export function HubPanel() {
   const { t } = useI18n();
   const clearPathsUnder = useUiStore((s) => s.clearPathsUnder);
+  const openAccountSettingsTab = useUiStore(
+    (s) => s.openAccountSettingsTab,
+  );
   const queryClient = useQueryClient();
   const [importOpen, setImportOpen] = useState(false);
   const [catalogSearch, setCatalogSearch] = useState("");
   const [tab, setTab] = useState<"browse" | "installed">("browse");
+  const [pendingOverwrite, setPendingOverwrite] = useState<{
+    kind: "zip" | "folder";
+    sourcePath: string;
+    metadata: KnowledgePackMeta;
+    installed: InstalledPack;
+  } | null>(null);
 
   const hubStatusQuery = useQuery({
-    queryKey: ["hub-status"],
+    queryKey: queryKeys.hubStatus,
     queryFn: api.hubStatus,
     refetchInterval: 15_000,
     retry: 1,
@@ -33,6 +58,7 @@ export function HubPanel() {
   const hubOnline = hubStatusQuery.data?.online === true;
   const hubOffline = hubStatusQuery.data?.online === false;
   const wasOnlineRef = useRef<boolean | null>(null);
+  const publishToastRef = useRef<string | number | undefined>(undefined);
 
   useEffect(() => {
     if (hubStatusQuery.data == null) return;
@@ -42,20 +68,26 @@ export function HubPanel() {
     // Toast on first known offline, or when connection drops.
     if (!online && prev !== false) {
       toast.warning(t("hub.offlineToastTitle"), {
-        description: hubStatusQuery.data.message || t("hub.offlineToastDescription"),
+        description:
+          hubStatusQuery.data.message || t("hub.offlineToastDescription"),
       });
     }
   }, [hubStatusQuery.data, t]);
 
+  const authQuery = useQuery({
+    queryKey: queryKeys.hubAuth,
+    queryFn: api.hubAuthState,
+  });
+
   const packsQuery = useQuery({
-    queryKey: ["packs"],
+    queryKey: queryKeys.catalog,
     queryFn: api.hubListPacks,
-    enabled: hubOnline,
+    enabled: hubOnline && !authQuery.isLoading,
     retry: 1,
   });
 
   const installedQuery = useQuery({
-    queryKey: ["installed-packs"],
+    queryKey: queryKeys.installedPacks,
     queryFn: api.hubListInstalled,
   });
 
@@ -90,11 +122,9 @@ export function HubPanel() {
   }, [packsQuery.data, catalogSearch]);
 
   const invalidateAfterPackChange = () => {
-    queryClient.invalidateQueries({ queryKey: ["tree"] });
-    queryClient.invalidateQueries({ queryKey: ["index-status"] });
-    queryClient.invalidateQueries({ queryKey: ["installed-packs"] });
-    queryClient.invalidateQueries({ queryKey: ["file"] });
-    queryClient.invalidateQueries({ queryKey: ["chat-messages"] });
+    for (const queryKey of packMutationInvalidations) {
+      void queryClient.invalidateQueries({ queryKey });
+    }
   };
 
   const download = useMutation({
@@ -114,12 +144,20 @@ export function HubPanel() {
         toast.success(t("hub.packDownloaded"));
       }
     },
-    onError: (e: Error) => toast.error(t("hub.downloadFailed"), { description: e.message }),
+    onError: (e: Error) =>
+      toast.error(t("hub.downloadFailed"), { description: e.message }),
   });
 
   const importLocal = useMutation({
-    mutationFn: (sourcePath: string) => api.hubImportLocalPack(sourcePath),
+    mutationFn: ({
+      sourcePath,
+      overwrite,
+    }: {
+      sourcePath: string;
+      overwrite: boolean;
+    }) => api.hubImportLocalPack(sourcePath, overwrite),
     onSuccess: () => {
+      setPendingOverwrite(null);
       setImportOpen(false);
       invalidateAfterPackChange();
       toast.success(t("hub.packImported"));
@@ -130,24 +168,62 @@ export function HubPanel() {
       }),
   });
 
+  const inspectLocal = useMutation({
+    mutationFn: api.hubInspectLocalPack,
+    onSuccess: (metadata, sourcePath) => {
+      const installed = installedById.get(metadata.id);
+      if (installed) {
+        setPendingOverwrite({
+          kind: "zip",
+          sourcePath,
+          metadata,
+          installed,
+        });
+      } else {
+        importLocal.mutate({ sourcePath, overwrite: false });
+      }
+    },
+    onError: (e: Error) =>
+      toast.error(t("hub.importFailed"), {
+        description: e.message || String(e),
+      }),
+  });
+
   const createFromFolder = useMutation({
-    mutationFn: ({ sourcePath, metadata }: { sourcePath: string; metadata: KnowledgePackMeta }) =>
-      api.hubCreatePackFromFolder(sourcePath, metadata),
+    mutationFn: ({
+      sourcePath,
+      metadata,
+      overwrite,
+    }: {
+      sourcePath: string;
+      metadata: KnowledgePackMeta;
+      overwrite: boolean;
+    }) => api.hubCreatePackFromFolder(sourcePath, metadata, overwrite),
     onSuccess: () => {
+      setPendingOverwrite(null);
       setImportOpen(false);
       invalidateAfterPackChange();
       toast.success(t("hub.packCreated"));
     },
     onError: (e: Error) =>
-      toast.error(t("hub.createFailed"), { description: e.message || String(e) }),
+      toast.error(t("hub.createFailed"), {
+        description: e.message || String(e),
+      }),
   });
 
   const exportPack = useMutation({
-    mutationFn: ({ packId, destinationPath }: { packId: string; destinationPath: string }) =>
-      api.hubExportPack(packId, destinationPath),
+    mutationFn: ({
+      packId,
+      destinationPath,
+    }: {
+      packId: string;
+      destinationPath: string;
+    }) => api.hubExportPack(packId, destinationPath),
     onSuccess: () => toast.success(t("hub.packExported")),
     onError: (e: Error) =>
-      toast.error(t("hub.exportFailed"), { description: e.message || String(e) }),
+      toast.error(t("hub.exportFailed"), {
+        description: e.message || String(e),
+      }),
   });
 
   const remove = useMutation({
@@ -166,8 +242,43 @@ export function HubPanel() {
       }),
   });
 
-  const busy = download.isPending || remove.isPending || createFromFolder.isPending || importLocal.isPending || exportPack.isPending;
-  const downloadPendingId = download.isPending ? download.variables?.packId : undefined;
+  const publish = useMutation({
+    mutationFn: api.hubPublishPack,
+    onMutate: () => {
+      publishToastRef.current = toast.loading(
+        "Uploading knowledge pack to Hub…",
+      );
+    },
+    onSuccess: () => {
+      toast.success("Pack submitted for administrator review", {
+        id: publishToastRef.current,
+      });
+      publishToastRef.current = undefined;
+      queryClient.invalidateQueries({ queryKey: queryKeys.publishRequests });
+    },
+    onError: (error: unknown) => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.hubAuth });
+      toast.error(appErrorMessage(error, "Could not publish pack"), {
+        id: publishToastRef.current,
+      });
+      publishToastRef.current = undefined;
+    },
+  });
+
+  const busy =
+    download.isPending ||
+    remove.isPending ||
+    createFromFolder.isPending ||
+    importLocal.isPending ||
+    exportPack.isPending ||
+    publish.isPending;
+  const importing =
+    importLocal.isPending ||
+    createFromFolder.isPending ||
+    inspectLocal.isPending;
+  const downloadPendingId = download.isPending
+    ? download.variables?.packId
+    : undefined;
   const removePendingId = remove.isPending ? remove.variables : undefined;
   const installedCount = installedQuery.data?.length ?? 0;
 
@@ -188,16 +299,50 @@ export function HubPanel() {
           </>
         }
         actions={
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={openAccountSettingsTab}
+            >
+              <Settings2 className="size-4" />
+              {authQuery.data?.user?.name ?? "Account settings"}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setImportOpen(true)}
+            >
+              <FolderInput className="size-4" />
+              {t("hub.import")}
+            </Button>
+          </div>
+        }
+      />
+
+      {!authQuery.isLoading && !authQuery.data?.authenticated && (
+        <div className="mx-4 mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-primary/20 bg-primary/5 px-4 py-3">
+          <div className="grid size-8 shrink-0 place-items-center rounded-full bg-primary/10 text-primary">
+            <Info className="size-4" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium">
+              Nest works locally without an account
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Create an account or sign in only when you want to publish a pack
+              or access restricted knowledge packs.
+            </p>
+          </div>
           <Button
             size="sm"
             variant="outline"
-            onClick={() => setImportOpen(true)}
+            onClick={openAccountSettingsTab}
           >
-            <FolderInput className="size-4" />
-            {t("hub.import")}
+            Sign in or register
           </Button>
-        }
-      />
+        </div>
+      )}
 
       <Tabs
         value={tab}
@@ -256,7 +401,12 @@ export function HubPanel() {
                 onRemove={(packId) => remove.mutate(packId)}
                 onOpenImport={() => setImportOpen(true)}
                 onBrowse={() => setTab("browse")}
-                onExport={(packId, destinationPath) => exportPack.mutate({ packId, destinationPath })}
+                onExport={(packId, destinationPath) =>
+                  exportPack.mutate({ packId, destinationPath })
+                }
+                authenticated={authQuery.data?.authenticated === true}
+                onSignIn={openAccountSettingsTab}
+                onPublish={(packId) => publish.mutate(packId)}
               />
             </div>
           </ScrollArea>
@@ -266,10 +416,67 @@ export function HubPanel() {
       <ImportPackDialog
         open={importOpen}
         onOpenChange={setImportOpen}
-        importing={importLocal.isPending || createFromFolder.isPending}
-        onImportZip={(path) => importLocal.mutate(path)}
-        onCreateFromFolder={(sourcePath, metadata) => createFromFolder.mutate({ sourcePath, metadata })}
+        importing={importing}
+        onImportZip={(path) => inspectLocal.mutate(path)}
+        onCreateFromFolder={(sourcePath, metadata) => {
+          const installed = installedById.get(metadata.id.trim());
+          if (installed) {
+            setPendingOverwrite({
+              kind: "folder",
+              sourcePath,
+              metadata,
+              installed,
+            });
+          } else {
+            createFromFolder.mutate({
+              sourcePath,
+              metadata,
+              overwrite: false,
+            });
+          }
+        }}
       />
+      <AlertDialog
+        open={Boolean(pendingOverwrite)}
+        onOpenChange={(open) => !open && setPendingOverwrite(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Replace installed knowledge pack?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingOverwrite
+                ? `“${pendingOverwrite.installed.name}” ${pendingOverwrite.installed.version} is already installed. Importing “${pendingOverwrite.metadata.name}” ${pendingOverwrite.metadata.version} will replace it because Nest keeps one installed version per pack.`
+                : "The installed knowledge pack will be replaced."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={importing}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={!pendingOverwrite || importing}
+              onClick={(event) => {
+                event.preventDefault();
+                if (!pendingOverwrite) return;
+                if (pendingOverwrite.kind === "zip") {
+                  importLocal.mutate({
+                    sourcePath: pendingOverwrite.sourcePath,
+                    overwrite: true,
+                  });
+                } else {
+                  createFromFolder.mutate({
+                    sourcePath: pendingOverwrite.sourcePath,
+                    metadata: pendingOverwrite.metadata,
+                    overwrite: true,
+                  });
+                }
+              }}
+            >
+              {importing ? "Replacing…" : "Replace pack"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

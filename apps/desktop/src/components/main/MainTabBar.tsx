@@ -1,18 +1,27 @@
-import { Cloud, FileText, Settings2 } from "lucide-react";
+import { Bell, Cloud, FileText, Settings2 } from "lucide-react";
 import { TabStrip } from "@/components/ui/tab-strip";
 import { useI18n } from "@/lib/i18n";
-import { HUB_TAB_ID, SETTINGS_TAB_ID, useUiStore } from "@/stores/ui";
+import {
+  HUB_TAB_ID,
+  MESSAGES_TAB_ID,
+  SETTINGS_TAB_ID,
+  useUiStore,
+} from "@/stores/ui";
 
 function tabLabel(id: string, t: ReturnType<typeof useI18n>["t"]) {
   if (id === HUB_TAB_ID) return t("shell.hub");
   if (id === SETTINGS_TAB_ID) return t("shell.settings");
+  if (id === MESSAGES_TAB_ID) return "Messages";
   return id.split("/").pop() || id;
 }
 
 function tabIcon(id: string) {
-  if (id === HUB_TAB_ID) return <Cloud className="size-3 shrink-0 text-accent" />;
+  if (id === HUB_TAB_ID)
+    return <Cloud className="size-3 shrink-0 text-accent" />;
   if (id === SETTINGS_TAB_ID)
     return <Settings2 className="size-3 shrink-0 text-accent" />;
+  if (id === MESSAGES_TAB_ID)
+    return <Bell className="size-3 shrink-0 text-accent" />;
   return <FileText className="size-3 shrink-0 text-primary" />;
 }
 

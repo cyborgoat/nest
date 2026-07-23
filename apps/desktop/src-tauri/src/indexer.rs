@@ -17,6 +17,16 @@ pub struct TextChunk {
     pub end: usize,
 }
 
+#[derive(Debug, Clone)]
+pub struct PendingChunk {
+    pub id: String,
+    pub file_path: String,
+    pub title: String,
+    pub content: String,
+    pub start: usize,
+    pub end: usize,
+}
+
 pub fn chunk_markdown(text: &str, fallback_title: &str) -> Vec<TextChunk> {
     let mut chunks = Vec::new();
     let mut current_title = fallback_title.to_string();
@@ -84,10 +94,8 @@ pub fn chunk_markdown(text: &str, fallback_title: &str) -> Vec<TextChunk> {
 }
 
 /// Gather Markdown chunks from the vault (no DB / no network).
-pub fn collect_pending_chunks(
-    vault_root: &Path,
-) -> AppResult<Vec<(String, String, String, String, usize, usize)>> {
-    let mut pending: Vec<(String, String, String, String, usize, usize)> = Vec::new();
+pub fn collect_pending_chunks(vault_root: &Path) -> AppResult<Vec<PendingChunk>> {
+    let mut pending = Vec::new();
 
     for entry in WalkDir::new(vault_root).into_iter().filter_map(|e| e.ok()) {
         let path = entry.path();
@@ -117,37 +125,36 @@ pub fn collect_pending_chunks(
             .unwrap_or("untitled")
             .to_string();
         for ch in chunk_markdown(&content, &fallback) {
-            pending.push((
-                Uuid::new_v4().to_string(),
-                rel.clone(),
-                ch.title,
-                ch.content,
-                ch.start,
-                ch.end,
-            ));
+            pending.push(PendingChunk {
+                id: Uuid::new_v4().to_string(),
+                file_path: rel.clone(),
+                title: ch.title,
+                content: ch.content,
+                start: ch.start,
+                end: ch.end,
+            });
         }
     }
     Ok(pending)
 }
 
 /// Persist chunks into SQLite + FTS5.
-pub fn persist_chunks(
-    conn: &Connection,
-    pending: &[(String, String, String, String, usize, usize)],
-) -> AppResult<(u32, u32)> {
+pub fn persist_chunks(conn: &Connection, pending: &[PendingChunk]) -> AppResult<(u32, u32)> {
     db::clear_chunks(conn)?;
     let mut files = std::collections::HashSet::new();
-    for (id, file_path, title, content, start, end) in pending {
-        files.insert(file_path.clone());
-        db::insert_chunk(conn, id, file_path, title, content, *start, *end)?;
+    for chunk in pending {
+        files.insert(chunk.file_path.clone());
+        db::insert_chunk(
+            conn,
+            &chunk.id,
+            &chunk.file_path,
+            &chunk.title,
+            &chunk.content,
+            chunk.start,
+            chunk.end,
+        )?;
     }
     let file_count = files.len() as u32;
     let chunk_count = pending.len() as u32;
-    db::set_index_meta(
-        conn,
-        file_count,
-        chunk_count,
-        Some("Local FTS + vector index (FastEmbed)"),
-    )?;
     Ok((file_count, chunk_count))
 }

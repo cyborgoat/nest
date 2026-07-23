@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import type { TreeNode } from "@nest/shared";
-import { Cloud, MessageSquare, PanelLeft, Settings2 } from "lucide-react";
+import { Bell, Cloud, MessageSquare, PanelLeft, Settings2 } from "lucide-react";
 import { useEffect, useRef, type ReactNode } from "react";
 import { usePanelRef } from "react-resizable-panels";
 import { ChatPanel } from "@/components/chat/ChatPanel";
@@ -15,13 +15,16 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Toaster } from "@/components/ui/sonner";
 import { api } from "@/lib/api";
+import { queryKeys } from "@/lib/query-keys";
 import { I18nProvider } from "@/lib/i18n";
-import {
-  animatePanelSize,
-  cancelPanelAnimation,
-} from "@/lib/panel-animation";
+import { animatePanelSize, cancelPanelAnimation } from "@/lib/panel-animation";
 import { cn } from "@/lib/utils";
-import { HUB_TAB_ID, SETTINGS_TAB_ID, useUiStore } from "@/stores/ui";
+import {
+  HUB_TAB_ID,
+  MESSAGES_TAB_ID,
+  SETTINGS_TAB_ID,
+  useUiStore,
+} from "@/stores/ui";
 
 const LIBRARY_DEFAULT_PX = 260;
 const LIBRARY_MIN_PX = 180;
@@ -40,6 +43,7 @@ export default function App() {
   const activeMainTabId = useUiStore((s) => s.activeMainTabId);
   const openHubTab = useUiStore((s) => s.openHubTab);
   const openSettingsTab = useUiStore((s) => s.openSettingsTab);
+  const openMessagesTab = useUiStore((s) => s.openMessagesTab);
   const pruneMainFileTabs = useUiStore((s) => s.pruneMainFileTabs);
   const sidebarOpen = useUiStore((s) => s.sidebarOpen);
   const setSidebarOpen = useUiStore((s) => s.setSidebarOpen);
@@ -60,24 +64,35 @@ export default function App() {
   const chatReadyRef = useRef(false);
 
   const treeQuery = useQuery({
-    queryKey: ["tree"],
+    queryKey: queryKeys.tree,
     queryFn: api.vaultListTree,
   });
 
   const installedQuery = useQuery({
-    queryKey: ["installed-packs"],
+    queryKey: queryKeys.installedPacks,
     queryFn: api.hubListInstalled,
   });
 
   const indexQuery = useQuery({
-    queryKey: ["index-status"],
+    queryKey: queryKeys.index,
     queryFn: api.indexStatus,
     refetchInterval: (q) => (q.state.data?.is_indexing ? 1000 : 10_000),
   });
 
   const settingsQuery = useQuery({
-    queryKey: ["settings"],
+    queryKey: queryKeys.settings,
     queryFn: api.settingsGet,
+  });
+
+  const hubAuthQuery = useQuery({
+    queryKey: queryKeys.hubAuth,
+    queryFn: api.hubAuthState,
+  });
+  const messageCountQuery = useQuery({
+    queryKey: queryKeys.messageCount,
+    queryFn: api.hubUnreadMessageCount,
+    enabled: hubAuthQuery.data?.authenticated === true,
+    refetchInterval: 30_000,
   });
 
   const fontSizePt = settingsQuery.data?.font_size_pt ?? 10;
@@ -99,7 +114,10 @@ export default function App() {
   };
 
   useEffect(() => {
-    document.documentElement.style.setProperty("--app-font-size", `${fontSizePt}pt`);
+    document.documentElement.style.setProperty(
+      "--app-font-size",
+      `${fontSizePt}pt`,
+    );
     document.documentElement.lang = "en";
     document.documentElement.dataset.locale = "en";
   }, [fontSizePt]);
@@ -193,164 +211,179 @@ export default function App() {
   return (
     <I18nProvider locale="en">
       <div className="flex h-full flex-col">
-      <header className="flex items-center justify-between border-b border-border bg-panel/80 px-4 py-2.5 backdrop-blur">
-        <div className="flex items-center gap-3">
-          <Button
-            size="icon"
-            variant={sidebarOpen ? "secondary" : "ghost"}
-            onClick={handleToggleSidebar}
-            title={sidebarOpen ? shell.collapseLibrary : shell.expandLibrary}
-            aria-label={sidebarOpen ? shell.collapseLibrary : shell.expandLibrary}
-          >
-            <PanelLeft className="size-5" />
-          </Button>
-          <Separator orientation="vertical" className="h-6" />
+        <header className="flex items-center justify-between border-b border-border bg-panel/80 px-4 py-2.5 backdrop-blur">
           <div className="flex items-center gap-3">
-            <img
-              src="/nest-logo-transparent.png"
-              alt=""
-              className="size-8 object-contain"
-              draggable={false}
-            />
-            <div>
-              <h1 className="font-display text-lg leading-none tracking-tight">Nest</h1>
-              <p className="text-[11px] text-muted-foreground">{shell.appSubtitle}</p>
+            <Button
+              size="icon"
+              variant={sidebarOpen ? "secondary" : "ghost"}
+              onClick={handleToggleSidebar}
+              title={sidebarOpen ? shell.collapseLibrary : shell.expandLibrary}
+              aria-label={
+                sidebarOpen ? shell.collapseLibrary : shell.expandLibrary
+              }
+            >
+              <PanelLeft className="size-5" />
+            </Button>
+            <Separator orientation="vertical" className="h-6" />
+            <div className="flex items-center gap-3">
+              <img
+                src="/nest-logo-transparent.png"
+                alt=""
+                className="size-8 object-contain"
+                draggable={false}
+              />
+              <div>
+                <h1 className="font-display text-lg leading-none tracking-tight">
+                  Nest
+                </h1>
+                <p className="text-[11px] text-muted-foreground">
+                  {shell.appSubtitle}
+                </p>
+              </div>
             </div>
           </div>
+          <nav className="flex items-center gap-1">
+            <NavButton
+              active={activeMainTabId === HUB_TAB_ID}
+              onClick={openHubTab}
+              icon={<Cloud className="size-4" />}
+              label={shell.hub}
+            />
+            <NavButton
+              active={activeMainTabId === MESSAGES_TAB_ID}
+              onClick={openMessagesTab}
+              icon={<Bell className="size-4" />}
+              label="Messages"
+              badge={messageCountQuery.data?.count ?? 0}
+            />
+            <NavButton
+              active={activeMainTabId === SETTINGS_TAB_ID}
+              onClick={openSettingsTab}
+              icon={<Settings2 className="size-4" />}
+              label={shell.settings}
+            />
+            <Separator orientation="vertical" className="mx-1 h-6" />
+            <NavButton
+              active={chatOpen}
+              onClick={handleToggleChat}
+              icon={<MessageSquare className="size-4" />}
+              label={shell.chat}
+              title={chatOpen ? shell.collapseChat : shell.expandChat}
+            />
+          </nav>
+        </header>
+
+        <div className="min-h-0 flex-1">
+          <ResizablePanelGroup orientation="horizontal" className="h-full">
+            <ResizablePanel
+              id="library"
+              panelRef={libraryPanelRef}
+              collapsible
+              collapsedSize={0}
+              defaultSize={sidebarOpen ? LIBRARY_DEFAULT_PX : 0}
+              // minSize must stay 0 so collapse can animate through every pixel;
+              // react-resizable-panels snaps anything between collapsedSize and minSize.
+              minSize={0}
+              maxSize={420}
+              className="overflow-hidden bg-sidebar"
+              onResize={(size) => {
+                if (syncingLibrary.current) return;
+                if (size.inPixels >= LIBRARY_MIN_PX) {
+                  libraryLastSizeRef.current = size.inPixels;
+                }
+                const open = size.inPixels > 8;
+                if (open !== sidebarOpen) setSidebarOpen(open);
+              }}
+            >
+              <aside className="flex h-full min-h-0 flex-col border-r border-border">
+                <div className="min-h-0 flex-1">
+                  {treeQuery.isLoading ? (
+                    <p className="p-4 text-sm text-muted-foreground">
+                      {shell.loading}
+                    </p>
+                  ) : treeQuery.error ? (
+                    <p className="p-4 text-sm text-destructive">
+                      {(treeQuery.error as Error).message}
+                    </p>
+                  ) : (
+                    <LibraryTree
+                      tree={treeQuery.data ?? []}
+                      installed={installedQuery.data ?? []}
+                    />
+                  )}
+                </div>
+              </aside>
+            </ResizablePanel>
+
+            {/* Keep handle mounted so layout does not snap when collapsing. */}
+            <ResizableHandle
+              withHandle={libraryVisible}
+              disabled={!libraryVisible}
+              className={cn(
+                "transition-[width,opacity] duration-200 ease-out",
+                libraryVisible
+                  ? "w-px opacity-100"
+                  : "w-0 opacity-0 pointer-events-none",
+              )}
+            />
+
+            <ResizablePanel
+              id="main"
+              minSize="30%"
+              defaultSize="50%"
+              className="bg-card/60"
+            >
+              <main className="h-full min-w-0 overflow-hidden">
+                <MainTabArea />
+              </main>
+            </ResizablePanel>
+
+            <ResizableHandle
+              withHandle={chatOpen}
+              disabled={!chatOpen}
+              className={cn(
+                "transition-[width,opacity] duration-200 ease-out",
+                chatOpen
+                  ? "w-px opacity-100"
+                  : "w-0 opacity-0 pointer-events-none",
+              )}
+            />
+
+            <ResizablePanel
+              id="chat"
+              panelRef={chatPanelRef}
+              collapsible
+              collapsedSize={0}
+              defaultSize={chatOpen ? CHAT_DEFAULT_PX : 0}
+              minSize={0}
+              maxSize={640}
+              className="overflow-hidden bg-panel"
+              onResize={(size) => {
+                if (syncingChat.current) return;
+                if (size.inPixels >= CHAT_MIN_PX) {
+                  chatLastSizeRef.current = size.inPixels;
+                }
+                const open = size.inPixels > 8;
+                if (open !== chatOpen) setChatOpen(open);
+              }}
+            >
+              <aside className="flex h-full flex-col border-l border-border">
+                <ChatPanel />
+              </aside>
+            </ResizablePanel>
+          </ResizablePanelGroup>
         </div>
-        <nav className="flex items-center gap-1">
-          <NavButton
-            active={activeMainTabId === HUB_TAB_ID}
-            onClick={openHubTab}
-            icon={<Cloud className="size-4" />}
-            label={shell.hub}
-          />
-          <NavButton
-            active={activeMainTabId === SETTINGS_TAB_ID}
-            onClick={openSettingsTab}
-            icon={<Settings2 className="size-4" />}
-            label={shell.settings}
-          />
-          <Separator orientation="vertical" className="mx-1 h-6" />
-          <NavButton
-            active={chatOpen}
-            onClick={handleToggleChat}
-            icon={<MessageSquare className="size-4" />}
-            label={shell.chat}
-            title={chatOpen ? shell.collapseChat : shell.expandChat}
-          />
-        </nav>
-      </header>
 
-      <div className="min-h-0 flex-1">
-        <ResizablePanelGroup orientation="horizontal" className="h-full">
-          <ResizablePanel
-            id="library"
-            panelRef={libraryPanelRef}
-            collapsible
-            collapsedSize={0}
-            defaultSize={sidebarOpen ? LIBRARY_DEFAULT_PX : 0}
-            // minSize must stay 0 so collapse can animate through every pixel;
-            // react-resizable-panels snaps anything between collapsedSize and minSize.
-            minSize={0}
-            maxSize={420}
-            className="overflow-hidden bg-sidebar"
-            onResize={(size) => {
-              if (syncingLibrary.current) return;
-              if (size.inPixels >= LIBRARY_MIN_PX) {
-                libraryLastSizeRef.current = size.inPixels;
-              }
-              const open = size.inPixels > 8;
-              if (open !== sidebarOpen) setSidebarOpen(open);
-            }}
-          >
-            <aside className="flex h-full min-h-0 flex-col border-r border-border">
-              <div className="min-h-0 flex-1">
-                {treeQuery.isLoading ? (
-                  <p className="p-4 text-sm text-muted-foreground">{shell.loading}</p>
-                ) : treeQuery.error ? (
-                  <p className="p-4 text-sm text-destructive">
-                    {(treeQuery.error as Error).message}
-                  </p>
-                ) : (
-                  <LibraryTree
-                    tree={treeQuery.data ?? []}
-                    installed={installedQuery.data ?? []}
-                  />
-                )}
-              </div>
-            </aside>
-          </ResizablePanel>
+        <footer className="flex items-center justify-between border-t border-border bg-panel/90 px-4 py-1.5 text-[11px] text-muted-foreground">
+          <span>
+            {shell.index}: {indexQuery.data?.indexed_files ?? 0} {shell.files} /{" "}
+            {indexQuery.data?.indexed_chunks ?? 0} {shell.chunks}
+            {indexQuery.data?.is_indexing ? shell.indexing : ""}
+          </span>
+          <span className="truncate pl-4">{statusMessage ?? shell.ready}</span>
+        </footer>
 
-          {/* Keep handle mounted so layout does not snap when collapsing. */}
-          <ResizableHandle
-            withHandle={libraryVisible}
-            disabled={!libraryVisible}
-            className={cn(
-              "transition-[width,opacity] duration-200 ease-out",
-              libraryVisible
-                ? "w-px opacity-100"
-                : "w-0 opacity-0 pointer-events-none",
-            )}
-          />
-
-          <ResizablePanel
-            id="main"
-            minSize="30%"
-            defaultSize="50%"
-            className="bg-card/60"
-          >
-            <main className="h-full min-w-0 overflow-hidden">
-              <MainTabArea />
-            </main>
-          </ResizablePanel>
-
-          <ResizableHandle
-            withHandle={chatOpen}
-            disabled={!chatOpen}
-            className={cn(
-              "transition-[width,opacity] duration-200 ease-out",
-              chatOpen
-                ? "w-px opacity-100"
-                : "w-0 opacity-0 pointer-events-none",
-            )}
-          />
-
-          <ResizablePanel
-            id="chat"
-            panelRef={chatPanelRef}
-            collapsible
-            collapsedSize={0}
-            defaultSize={chatOpen ? CHAT_DEFAULT_PX : 0}
-            minSize={0}
-            maxSize={640}
-            className="overflow-hidden bg-panel"
-            onResize={(size) => {
-              if (syncingChat.current) return;
-              if (size.inPixels >= CHAT_MIN_PX) {
-                chatLastSizeRef.current = size.inPixels;
-              }
-              const open = size.inPixels > 8;
-              if (open !== chatOpen) setChatOpen(open);
-            }}
-          >
-            <aside className="flex h-full flex-col border-l border-border">
-              <ChatPanel />
-            </aside>
-          </ResizablePanel>
-        </ResizablePanelGroup>
-      </div>
-
-      <footer className="flex items-center justify-between border-t border-border bg-panel/90 px-4 py-1.5 text-[11px] text-muted-foreground">
-        <span>
-          {shell.index}: {indexQuery.data?.indexed_files ?? 0} {shell.files} /{" "}
-          {indexQuery.data?.indexed_chunks ?? 0} {shell.chunks}
-          {indexQuery.data?.is_indexing ? shell.indexing : ""}
-        </span>
-        <span className="truncate pl-4">{statusMessage ?? shell.ready}</span>
-      </footer>
-
-      <Toaster position="bottom-right" closeButton />
+        <Toaster position="bottom-right" closeButton />
       </div>
     </I18nProvider>
   );
@@ -362,12 +395,14 @@ function NavButton({
   icon,
   label,
   title,
+  badge,
 }: {
   active: boolean;
   onClick: () => void;
   icon: ReactNode;
   label: string;
   title?: string;
+  badge?: number;
 }) {
   return (
     <Button
@@ -378,6 +413,11 @@ function NavButton({
     >
       {icon}
       {label}
+      {badge ? (
+        <span className="ml-0.5 min-w-5 rounded-full bg-primary px-1.5 py-0.5 text-center text-[10px] font-semibold leading-none text-primary-foreground">
+          {badge > 99 ? "99+" : badge}
+        </span>
+      ) : null}
     </Button>
   );
 }

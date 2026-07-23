@@ -1,9 +1,9 @@
 import { ConfigService } from '@nestjs/config';
+import { Injectable } from '@nestjs/common';
 import * as path from 'path';
 
 export type HubCorsConfig =
-  | { mode: 'all' }
-  | { mode: 'origins'; origins: string[] };
+  { mode: 'all' } | { mode: 'origins'; origins: string[] };
 
 export type HubConfig = {
   host: string;
@@ -13,9 +13,20 @@ export type HubConfig = {
   debug: boolean;
   cors: HubCorsConfig;
   downloadTimeoutMs: number;
+  databasePath: string;
+  stagingPath: string;
+  maxPackUploadBytes: number;
+  jwtSecret: string;
+  minPasswordLength: number;
+  superuserId?: string;
+  superuserPassword?: string;
+  superuserName: string;
 };
 
-function optionalString(config: ConfigService, key: string): string | undefined {
+function optionalString(
+  config: ConfigService,
+  key: string,
+): string | undefined {
   const value = config.get<string>(key);
   if (value == null || String(value).trim() === '') {
     return undefined;
@@ -34,7 +45,9 @@ function requireString(config: ConfigService, key: string): string {
 }
 
 function parseTruthy(value: string | undefined): boolean {
-  return ['1', 'true', 'yes', 'on'].includes((value ?? '').trim().toLowerCase());
+  return ['1', 'true', 'yes', 'on'].includes(
+    (value ?? '').trim().toLowerCase(),
+  );
 }
 
 function parseCors(raw: string): HubCorsConfig {
@@ -52,30 +65,17 @@ function parseCors(raw: string): HubCorsConfig {
   return { mode: 'origins', origins };
 }
 
-/** DEBUG_MODE preferred; NEST_DEBUG kept as deprecated alias. */
-export function isDebugEnabled(config: ConfigService): boolean {
-  const debugMode = config.get<string>('DEBUG_MODE');
-  if (debugMode != null && String(debugMode).trim() !== '') {
-    return parseTruthy(debugMode);
-  }
-  return parseTruthy(config.get<string>('NEST_DEBUG'));
+function resolveRegistryPath(config: ConfigService): string {
+  return path.resolve(process.cwd(), requireString(config, 'REGISTRY_PATH'));
 }
 
-/**
- * REGISTRY_PATH preferred.
- * VAULT_PATH and FIXTURES_PATH kept as deprecated aliases.
- */
-function resolveRegistryPath(config: ConfigService): string {
-  const configured =
-    optionalString(config, 'REGISTRY_PATH') ??
-    optionalString(config, 'VAULT_PATH') ??
-    optionalString(config, 'FIXTURES_PATH');
-  if (configured == null) {
-    throw new Error(
-      'REGISTRY_PATH is not set. Copy apps/hub/.env.example to apps/hub/.env and configure it.',
-    );
+function positiveInteger(config: ConfigService, key: string): number {
+  const raw = requireString(config, key);
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new Error(`${key} must be a positive integer, got: ${raw}`);
   }
-  return path.resolve(process.cwd(), configured);
+  return value;
 }
 
 export function loadHubConfig(config: ConfigService): HubConfig {
@@ -89,20 +89,41 @@ export function loadHubConfig(config: ConfigService): HubConfig {
   const registryPath = resolveRegistryPath(config);
 
   const corsRaw = config.get<string>('CORS_ORIGIN') ?? '*';
-  const timeoutRaw = (config.get<string>('DOWNLOAD_TIMEOUT_MS') ?? '120000').trim();
-  const downloadTimeoutMs = Number(timeoutRaw);
-  if (!Number.isFinite(downloadTimeoutMs) || downloadTimeoutMs <= 0) {
-    throw new Error(
-      `DOWNLOAD_TIMEOUT_MS must be a positive number of milliseconds, got: ${timeoutRaw}`,
-    );
+  const downloadTimeoutMs = positiveInteger(config, 'DOWNLOAD_TIMEOUT_MS');
+  const jwtSecret = requireString(config, 'JWT_SECRET');
+  if (jwtSecret.length < 32) {
+    throw new Error('JWT_SECRET must contain at least 32 characters');
   }
 
   return {
     host,
     port,
     registryPath,
-    debug: isDebugEnabled(config),
+    debug: parseTruthy(requireString(config, 'DEBUG_MODE')),
     cors: parseCors(corsRaw),
     downloadTimeoutMs,
+    databasePath: path.resolve(
+      process.cwd(),
+      requireString(config, 'DATABASE_PATH'),
+    ),
+    stagingPath: path.resolve(
+      process.cwd(),
+      requireString(config, 'STAGING_PATH'),
+    ),
+    maxPackUploadBytes: positiveInteger(config, 'MAX_PACK_UPLOAD_BYTES'),
+    jwtSecret,
+    minPasswordLength: positiveInteger(config, 'MIN_PASSWORD_LENGTH'),
+    superuserId: optionalString(config, 'SUPERUSER_ID')?.toLowerCase(),
+    superuserPassword: optionalString(config, 'SUPERUSER_PASSWORD'),
+    superuserName: optionalString(config, 'SUPERUSER_NAME') ?? 'Administrator',
   };
+}
+
+@Injectable()
+export class HubRuntimeConfig {
+  readonly value: HubConfig;
+
+  constructor(config: ConfigService) {
+    this.value = loadHubConfig(config);
+  }
 }

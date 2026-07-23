@@ -1,124 +1,26 @@
-//! Rig agent: OpenAI-compatible chat + local vault_search tool + streaming.
+//! Rig agent: eager local retrieval + one OpenAI-compatible streaming turn.
 
 use crate::db::{self, AppSettings, Citation};
 use crate::error::{AppError, AppResult};
 use crate::llm::ChatStreamEvent;
-use crate::memory::SqliteConversationMemory;
-use crate::retrieval::{self, agent_preamble, format_citations_for_tool, DEFAULT_TOP_K};
+use crate::retrieval::{self, agent_preamble, format_citations_for_prompt, DEFAULT_TOP_K};
 use crate::state::SharedState;
 use crate::vault;
 use futures::StreamExt;
-use parking_lot::Mutex;
 use rig::agent::MultiTurnStreamItem;
 use rig::client::CompletionClient;
 use rig::completion::message::Text;
 use rig::completion::Message;
 use rig::providers::openai;
 use rig::streaming::{StreamedAssistantContent, StreamingChat};
-use rig::tool::Tool;
-use serde::Deserialize;
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
-use thiserror::Error;
 
-#[derive(Debug, Error)]
-#[error("{0}")]
-pub struct VaultSearchError(String);
-
-#[derive(Deserialize)]
-pub struct VaultSearchArgs {
-    pub query: String,
-    pub top_k: Option<u32>,
-}
-
-#[derive(Clone)]
-pub struct VaultSearchTool {
-    state: SharedState,
-    app: AppHandle,
-    stream_event: String,
-    app_data_dir: PathBuf,
-    embedding_model_id: String,
-    default_top_k: u32,
-    retrieval_prefixes: Arc<Vec<String>>,
-    citations: Arc<Mutex<Vec<Citation>>>,
-}
-
-impl Tool for VaultSearchTool {
-    const NAME: &'static str = "vault_search";
-
-    type Error = VaultSearchError;
-    type Args = VaultSearchArgs;
-    type Output = String;
-
-    fn description(&self) -> String {
-        "Search the local Nest knowledge vault (Markdown packs) for passages relevant to a query. \
-         Always call this before answering factual questions about library content."
-            .into()
-    }
-
-    fn parameters(&self) -> serde_json::Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "Natural-language search query"
-                },
-                "top_k": {
-                    "type": "integer",
-                    "description": "Max passages to return (default from settings)"
-                }
-            },
-            "required": ["query"]
-        })
-    }
-
-    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let top_k = args.top_k.unwrap_or(self.default_top_k).max(1);
-        crate::nest_debug!(
-            "vault_search",
-            "query={:?} top_k={top_k} prefixes={:?}",
-            args.query,
-            self.retrieval_prefixes
-        );
-        let citations = retrieval::retrieve(
-            &self.app_data_dir,
-            &self.state,
-            &self.embedding_model_id,
-            &args.query,
-            &self.retrieval_prefixes,
-            top_k,
-        )
-        .await
-        .map_err(|e| {
-            crate::nest_debug!("vault_search", "retrieve error: {e}");
-            VaultSearchError(e.to_string())
-        })?;
-
-        crate::nest_debug!(
-            "vault_search",
-            "hits={} paths={:?}",
-            citations.len(),
-            citations
-                .iter()
-                .map(|c| c.file_path.as_str())
-                .collect::<Vec<_>>()
-        );
-
-        emit_reading_files(&self.app, &self.stream_event, &citations).await;
-        *self.citations.lock() = citations.clone();
-        let _ = self.app.emit(
-            &self.stream_event,
-            ChatStreamEvent::Citations {
-                citations: citations.clone(),
-            },
-        );
-        Ok(format_citations_for_tool(&citations))
-    }
-}
+const MAX_FOCUS_FILES: usize = 16;
+const MAX_FOCUS_CHARS_PER_FILE: usize = 6_000;
+const MAX_FOCUS_CHARS_TOTAL: usize = 48_000;
 
 /// Result of a completed agent chat run.
 pub struct AgentChatResult {
@@ -128,58 +30,56 @@ pub struct AgentChatResult {
     pub thinking_seconds: Option<f64>,
 }
 
-async fn emit_reading_files(app: &AppHandle, stream_event: &str, citations: &[Citation]) {
+pub struct AgentChatRequest {
+    pub app: AppHandle,
+    pub state: SharedState,
+    pub app_data_dir: PathBuf,
+    pub settings: AppSettings,
+    pub session_id: String,
+    pub query: String,
+    pub focus_paths: Vec<String>,
+    pub stream_event: String,
+    pub prior_history: Vec<Message>,
+}
+
+#[derive(Default)]
+struct FocusContext {
+    text: String,
+    citations: Vec<Citation>,
+}
+
+async fn emit_reading_files(app: &AppHandle, stream_event: &str, paths: &[String]) {
     let mut seen = HashSet::new();
-    for c in citations {
-        if !seen.insert(c.file_path.clone()) {
+    for path in paths {
+        if !seen.insert(path.clone()) {
             continue;
         }
         let _ = app.emit(
             stream_event,
-            ChatStreamEvent::Reading {
-                path: c.file_path.clone(),
-            },
+            ChatStreamEvent::Reading { path: path.clone() },
         );
         // Brief pause so the UI can show each file before the next.
         tokio::time::sleep(Duration::from_millis(90)).await;
     }
 }
 
-fn not_found_reply() -> &'static str {
-    "I couldn't find anything relevant in your local knowledge library for that. \
-     Nest only answers from Markdown packs you've downloaded — open Hub to download a \
-     pack that covers this topic, then ask again."
-}
-
-async fn emit_soft_reply(app: &AppHandle, stream_event: &str, reply: &str) -> AppResult<()> {
-    let _ = app.emit(stream_event, ChatStreamEvent::Generating);
-    let _ = app.emit(
+pub async fn run_agent_chat(request: AgentChatRequest) -> AppResult<AgentChatResult> {
+    let AgentChatRequest {
+        app,
+        state,
+        app_data_dir,
+        settings,
+        session_id,
+        query,
+        focus_paths,
         stream_event,
-        ChatStreamEvent::Token {
-            content: reply.to_string(),
-        },
-    );
-    Ok(())
-}
-
-pub async fn run_agent_chat(
-    app: &AppHandle,
-    state: SharedState,
-    app_data_dir: PathBuf,
-    settings: &AppSettings,
-    session_id: &str,
-    query: &str,
-    focus_paths: Vec<String>,
-    stream_event: &str,
-    prior_history: Vec<Message>,
-) -> AppResult<AgentChatResult> {
+        prior_history,
+    } = request;
     if settings.llm_api_key.trim().is_empty() {
         return Err(AppError::msg("API key not configured"));
     }
 
     let mut cancel_rx = state.begin_chat_cancel();
-
-    let citations_slot: Arc<Mutex<Vec<Citation>>> = Arc::new(Mutex::new(Vec::new()));
 
     // Active packs form the retrieval scope; @ focus narrows further.
     let retrieval_prefixes = {
@@ -187,25 +87,23 @@ pub async fn run_agent_chat(
         db::resolve_retrieval_prefixes(&conn, &focus_paths)?
     };
 
-    let focus_context = build_focus_context(&state, &focus_paths);
-    let agent_query = if focus_context.is_empty() {
-        query.to_string()
+    // `resolve_retrieval_prefixes` rejects focus outside active packs. Reuse
+    // that decision before reading files so crafted IPC input cannot make an
+    // inactive pack part of the prompt.
+    let valid_focus_paths = focus_paths
+        .iter()
+        .filter(|path| retrieval_prefixes.contains(path))
+        .cloned()
+        .collect::<Vec<_>>();
+    let focus_context = build_focus_context(&state, &valid_focus_paths)?;
+    let agent_query = if focus_context.text.is_empty() {
+        query.clone()
     } else {
-        format!("{query}\n\n---\nUser asked to focus on these vault paths:\n{focus_context}")
+        format!(
+            "{query}\n\n---\nExplicitly selected vault content:\n{}",
+            focus_context.text
+        )
     };
-
-    let tool = VaultSearchTool {
-        state: state.clone(),
-        app: app.clone(),
-        stream_event: stream_event.to_string(),
-        app_data_dir: app_data_dir.clone(),
-        embedding_model_id: settings.embedding_model.clone(),
-        default_top_k: DEFAULT_TOP_K,
-        retrieval_prefixes: Arc::new(retrieval_prefixes.clone()),
-        citations: citations_slot.clone(),
-    };
-
-    let memory = SqliteConversationMemory::new(state.clone());
 
     let openai = openai::Client::builder()
         .api_key(settings.llm_api_key.clone())
@@ -230,7 +128,7 @@ pub async fn run_agent_chat(
         &app_data_dir,
         &state,
         &settings.embedding_model,
-        query,
+        &query,
         &retrieval_prefixes,
         DEFAULT_TOP_K,
     )
@@ -239,38 +137,34 @@ pub async fn run_agent_chat(
         return Err(AppError::msg("cancelled"));
     }
     crate::nest_debug!("agent", "eager_retrieval hits={}", eager.len());
-    let preamble = agent_preamble_with_retrieval(&eager);
-    if !eager.is_empty() {
-        emit_reading_files(app, stream_event, &eager).await;
-        *citations_slot.lock() = eager;
-        let _ = app.emit(
-            stream_event,
-            ChatStreamEvent::Citations {
-                citations: citations_slot.lock().clone(),
-            },
-        );
-    }
+    let focus_count = focus_context.citations.len();
+    let citations = merge_citations(focus_context.citations, eager);
+    let preamble = agent_preamble_with_retrieval(&citations, focus_count > 0);
+    let reading_paths = citations
+        .iter()
+        .map(|citation| citation.file_path.clone())
+        .collect::<Vec<_>>();
+    emit_reading_files(&app, &stream_event, &reading_paths).await;
+    let _ = app.emit(
+        &stream_event,
+        ChatStreamEvent::Citations {
+            citations: citations.clone(),
+        },
+    );
 
     let agent = openai
         .agent(&settings.chat_model)
         .preamble(&preamble)
-        .tool(tool)
-        .memory(memory)
         .build();
 
-    let _ = app.emit(stream_event, ChatStreamEvent::Generating);
+    let _ = app.emit(&stream_event, ChatStreamEvent::Generating);
 
-    let mut stream = agent
-        .stream_chat(agent_query, prior_history)
-        .max_turns(3)
-        .conversation(session_id)
-        .await;
+    let mut stream = agent.stream_chat(agent_query, prior_history).await;
 
     let mut full = String::new();
     let mut thinking = String::new();
     let mut thinking_started: Option<Instant> = None;
     let mut cancelled = false;
-    let mut emitted_generating = true;
 
     loop {
         if *cancel_rx.borrow() {
@@ -291,33 +185,11 @@ pub async fn run_agent_chat(
             Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Text(
                 Text { text, .. },
             ))) => {
-                if !emitted_generating {
-                    let _ = app.emit(stream_event, ChatStreamEvent::Generating);
-                    emitted_generating = true;
-                }
                 full.push_str(&text);
                 let _ = app.emit(
-                    stream_event,
+                    &stream_event,
                     ChatStreamEvent::Token {
                         content: text.clone(),
-                    },
-                );
-            }
-            Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::ToolCall {
-                tool_call,
-                ..
-            })) => {
-                emitted_generating = false;
-                let name = tool_call.function.name.clone();
-                crate::nest_debug!("agent", "tool_call name={name}");
-                let _ = app.emit(
-                    stream_event,
-                    ChatStreamEvent::Reading {
-                        path: if name.is_empty() {
-                            "vault_search".into()
-                        } else {
-                            name
-                        },
                     },
                 );
             }
@@ -328,7 +200,7 @@ pub async fn run_agent_chat(
                     thinking_started.get_or_insert_with(Instant::now);
                     thinking.push_str(&reasoning);
                     let _ = app.emit(
-                        stream_event,
+                        &stream_event,
                         ChatStreamEvent::Thinking { content: reasoning },
                     );
                 }
@@ -339,8 +211,18 @@ pub async fn run_agent_chat(
                 let content = reasoning.display_text();
                 if !content.is_empty() {
                     thinking_started.get_or_insert_with(Instant::now);
+                    let delta = if content.starts_with(&thinking) {
+                        content[thinking.len()..].to_string()
+                    } else if thinking.is_empty() {
+                        content.clone()
+                    } else {
+                        String::new()
+                    };
                     thinking = content.clone();
-                    let _ = app.emit(stream_event, ChatStreamEvent::Thinking { content });
+                    if !delta.is_empty() {
+                        let _ =
+                            app.emit(&stream_event, ChatStreamEvent::Thinking { content: delta });
+                    }
                 }
             }
             Ok(MultiTurnStreamItem::FinalResponse(resp)) => {
@@ -352,7 +234,15 @@ pub async fn run_agent_chat(
                 );
                 if full.trim().is_empty() && !resp.output.trim().is_empty() {
                     full = resp.output;
+                    let _ = app.emit(&stream_event, ChatStreamEvent::Generating);
+                    let _ = app.emit(
+                        &stream_event,
+                        ChatStreamEvent::Token {
+                            content: full.clone(),
+                        },
+                    );
                 }
+                break;
             }
             Ok(_) => {}
             Err(e) => {
@@ -371,10 +261,9 @@ pub async fn run_agent_chat(
         cancelled = true;
     }
 
-    let citations = citations_slot.lock().clone();
     if !citations.is_empty() {
         let _ = app.emit(
-            stream_event,
+            &stream_event,
             ChatStreamEvent::Citations {
                 citations: citations.clone(),
             },
@@ -388,19 +277,9 @@ pub async fn run_agent_chat(
     }
 
     if full.trim().is_empty() {
-        crate::nest_debug!(
-            "agent",
-            "empty answer after stream; citations={} — soft not-found reply",
-            citations.len()
-        );
-        let reply = not_found_reply().to_string();
-        emit_soft_reply(app, stream_event, &reply).await?;
-        return Ok(AgentChatResult {
-            answer: reply,
-            citations,
-            thinking: (!thinking.trim().is_empty()).then_some(thinking),
-            thinking_seconds: thinking_started.map(|start| start.elapsed().as_secs_f64()),
-        });
+        return Err(AppError::msg(
+            "The model finished without returning an answer after reasoning",
+        ));
     }
 
     crate::nest_debug!(
@@ -418,39 +297,215 @@ pub async fn run_agent_chat(
     })
 }
 
-fn agent_preamble_with_retrieval(citations: &[Citation]) -> String {
-    if citations.is_empty() {
-        return agent_preamble().to_string();
+fn agent_preamble_with_retrieval(citations: &[Citation], has_focus_content: bool) -> String {
+    if citations.is_empty() && !has_focus_content {
+        return format!(
+            "{}\n\nNo relevant passages were retrieved for this request. Only answer if the prior conversation already contains the necessary vault evidence; otherwise say that the local library has no matching knowledge and suggest finding a relevant pack in Hub.",
+            agent_preamble()
+        );
     }
+    if citations.is_empty() {
+        return format!(
+            "{}\n\nThe user explicitly selected vault files. Their contents are included in the request under 'Explicitly selected vault content'. Treat that content as authoritative local evidence and answer from it; do not claim that the local library has no matching knowledge merely because indexed retrieval returned no passages.",
+            agent_preamble()
+        );
+    }
+    let focus_instruction = if has_focus_content {
+        " The request also contains full explicitly selected vault files corresponding to the initial references; treat them as authoritative local evidence and use both sources."
+    } else {
+        ""
+    };
     format!(
-        "{}\n\nThe following passages were retrieved locally for this request. Use them as the primary evidence; only call vault_search again if you need a different query.\n\n{}",
+        "{}\n\nThe following passages were retrieved locally for this request. Use them as factual evidence for the answer.{focus_instruction}\n\n{}",
         agent_preamble(),
-        format_citations_for_tool(citations),
+        format_citations_for_prompt(citations),
     )
 }
 
-fn build_focus_context(state: &SharedState, focus_paths: &[String]) -> String {
+fn build_focus_context(state: &SharedState, focus_paths: &[String]) -> AppResult<FocusContext> {
+    if focus_paths.is_empty() {
+        return Ok(FocusContext::default());
+    }
     let vault = state.vault_path();
-    let mut parts = Vec::new();
+    let tree = vault::list_tree(&vault)?;
+    let mut files = Vec::new();
     for path in focus_paths {
-        let full = vault.join(path);
-        if full.is_file() {
-            match vault::read_file(&vault, path) {
-                Ok(content) => {
-                    let truncated = if content.len() > 4000 {
-                        format!("{}…", &content[..4000])
-                    } else {
-                        content
-                    };
-                    parts.push(format!("### File: {path}\n{truncated}"));
-                }
-                Err(_) => parts.push(format!("### File: {path} (unreadable)")),
-            }
-        } else if full.is_dir() {
-            parts.push(format!(
-                "### Folder focus: {path}/ (prefer passages under this path)"
-            ));
+        if let Some(node) = find_tree_node(&tree, path) {
+            collect_markdown_files(node, &mut files);
         }
     }
-    parts.join("\n\n")
+    let mut seen = HashSet::new();
+    files.retain(|path| seen.insert(path.clone()));
+
+    let mut parts = Vec::new();
+    let mut citations = Vec::new();
+    let mut remaining_chars = MAX_FOCUS_CHARS_TOTAL;
+    let total_files = files.len();
+    for path in files.iter().take(MAX_FOCUS_FILES) {
+        if remaining_chars == 0 {
+            break;
+        }
+        if let Ok(content) = vault::read_file(&vault, path) {
+            let limit = MAX_FOCUS_CHARS_PER_FILE.min(remaining_chars);
+            let truncated = truncate_chars(&content, limit);
+            remaining_chars = remaining_chars.saturating_sub(truncated.chars().count());
+            let reference_number = citations.len() + 1;
+            parts.push(format!(
+                "### [{reference_number}] Focus file: {path}\n{truncated}"
+            ));
+            citations.push(Citation {
+                chunk_id: format!("focus:{path}"),
+                file_path: path.clone(),
+                title: path.rsplit('/').next().unwrap_or(path).to_string(),
+                snippet: truncate_chars(&content, 280),
+                score: 1.0,
+            });
+        }
+    }
+    if citations.len() < total_files {
+        parts.push(format!(
+            "[Focus selection bounded: included {} of {total_files} Markdown files.]",
+            citations.len()
+        ));
+    }
+    Ok(FocusContext {
+        text: parts.join("\n\n"),
+        citations,
+    })
+}
+
+fn merge_citations(focused: Vec<Citation>, retrieved: Vec<Citation>) -> Vec<Citation> {
+    let mut merged = Vec::with_capacity(focused.len() + retrieved.len());
+    let mut seen_paths = HashSet::new();
+    for citation in focused.into_iter().chain(retrieved) {
+        if seen_paths.insert(citation.file_path.clone()) {
+            merged.push(citation);
+        }
+    }
+    merged
+}
+
+fn find_tree_node<'a>(nodes: &'a [vault::TreeNode], path: &str) -> Option<&'a vault::TreeNode> {
+    for node in nodes {
+        if node.path == path {
+            return Some(node);
+        }
+        if let Some(found) = node
+            .children
+            .as_deref()
+            .and_then(|children| find_tree_node(children, path))
+        {
+            return Some(found);
+        }
+    }
+    None
+}
+
+fn collect_markdown_files(node: &vault::TreeNode, files: &mut Vec<String>) {
+    match node.kind {
+        vault::TreeNodeKind::File => files.push(node.path.clone()),
+        vault::TreeNodeKind::Folder => {
+            if let Some(children) = &node.children {
+                for child in children {
+                    collect_markdown_files(child, files);
+                }
+            }
+        }
+    }
+}
+
+fn truncate_chars(content: &str, max_chars: usize) -> String {
+    let mut chars = content.chars();
+    let prefix = chars.by_ref().take(max_chars).collect::<String>();
+    if chars.next().is_some() {
+        format!("{prefix}…")
+    } else {
+        prefix
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        agent_preamble_with_retrieval, collect_markdown_files, merge_citations, truncate_chars,
+    };
+    use crate::db::Citation;
+    use crate::vault::{TreeNode, TreeNodeKind};
+
+    #[test]
+    fn truncates_unicode_on_character_boundaries() {
+        assert_eq!(truncate_chars("知识库 content", 3), "知识库…");
+        assert_eq!(truncate_chars("短文", 4), "短文");
+    }
+
+    #[test]
+    fn folder_focus_collects_nested_markdown_files() {
+        let folder = TreeNode {
+            name: "cubicles".into(),
+            path: "cubicles".into(),
+            kind: TreeNodeKind::Folder,
+            children: Some(vec![
+                TreeNode {
+                    name: "README.md".into(),
+                    path: "cubicles/README.md".into(),
+                    kind: TreeNodeKind::File,
+                    children: None,
+                },
+                TreeNode {
+                    name: "guides".into(),
+                    path: "cubicles/guides".into(),
+                    kind: TreeNodeKind::Folder,
+                    children: Some(vec![TreeNode {
+                        name: "usage.md".into(),
+                        path: "cubicles/guides/usage.md".into(),
+                        kind: TreeNodeKind::File,
+                        children: None,
+                    }]),
+                },
+            ]),
+        };
+
+        let mut files = Vec::new();
+        collect_markdown_files(&folder, &mut files);
+        assert_eq!(
+            files,
+            vec!["cubicles/README.md", "cubicles/guides/usage.md"]
+        );
+    }
+
+    #[test]
+    fn direct_focus_is_evidence_when_indexed_retrieval_is_empty() {
+        let focused = Citation {
+            chunk_id: "focus:cubicles/README.md".into(),
+            file_path: "cubicles/README.md".into(),
+            title: "README.md".into(),
+            snippet: "Cubicles documentation".into(),
+            score: 1.0,
+        };
+        let preamble = agent_preamble_with_retrieval(&[focused], true);
+        assert!(preamble.contains("authoritative local evidence"));
+        assert!(!preamble.contains("No relevant passages were retrieved"));
+    }
+
+    #[test]
+    fn focused_references_are_kept_and_deduplicate_search_hits_by_file() {
+        let focused = Citation {
+            chunk_id: "focus:cubicles/README.md".into(),
+            file_path: "cubicles/README.md".into(),
+            title: "README.md".into(),
+            snippet: "full focused file".into(),
+            score: 1.0,
+        };
+        let duplicate_hit = Citation {
+            chunk_id: "chunk-1".into(),
+            file_path: "cubicles/README.md".into(),
+            title: "Cubicles".into(),
+            snippet: "search excerpt".into(),
+            score: 0.8,
+        };
+
+        let merged = merge_citations(vec![focused], vec![duplicate_hit]);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].chunk_id, "focus:cubicles/README.md");
+    }
 }

@@ -22,6 +22,9 @@ export function InstalledTab({
   onOpenImport,
   onBrowse,
   onExport,
+  authenticated,
+  onSignIn,
+  onPublish,
 }: {
   installed: InstalledPack[];
   isLoading: boolean;
@@ -35,10 +38,15 @@ export function InstalledTab({
   onOpenImport: () => void;
   onBrowse: () => void;
   onExport: (packId: string, destinationPath: string) => void;
+  authenticated: boolean;
+  onSignIn: () => void;
+  onPublish: (packId: string) => void;
 }) {
   const { t } = useI18n();
   if (isLoading) {
-    return <p className="text-sm text-muted-foreground">{t("hub.loadingPacks")}</p>;
+    return (
+      <p className="text-sm text-muted-foreground">{t("hub.loadingPacks")}</p>
+    );
   }
 
   if (installed.length === 0) {
@@ -48,11 +56,7 @@ export function InstalledTab({
         icon={<Package className="size-6" />}
         title={t("hub.registryEmpty")}
         description={t("hub.havePackFileBody")}
-        footnote={
-          hubOnline
-            ? undefined
-            : t("hub.offlineToastDescription")
-        }
+        footnote={hubOnline ? undefined : t("hub.offlineToastDescription")}
       >
         <div className="flex flex-wrap items-center justify-center gap-2">
           <Button
@@ -81,7 +85,6 @@ export function InstalledTab({
           index={i}
           pack={pack}
           catalogEntry={catalogById?.get(pack.pack_id)}
-          catalogAvailable={catalogById != null}
           busy={busy}
           downloading={downloadPendingId === pack.pack_id}
           removePending={removePendingId === pack.pack_id}
@@ -89,6 +92,9 @@ export function InstalledTab({
           onUpgrade={onUpgrade}
           onRemove={() => onRemove(pack.pack_id)}
           onExport={onExport}
+          authenticated={authenticated}
+          onSignIn={onSignIn}
+          onPublish={onPublish}
         />
       ))}
       <Button
@@ -107,7 +113,6 @@ function InstalledPackRow({
   index,
   pack,
   catalogEntry,
-  catalogAvailable,
   busy,
   downloading,
   removePending,
@@ -115,11 +120,13 @@ function InstalledPackRow({
   onUpgrade,
   onRemove,
   onExport,
+  authenticated,
+  onSignIn,
+  onPublish,
 }: {
   index: number;
   pack: InstalledPack;
   catalogEntry: PackProject | undefined;
-  catalogAvailable: boolean;
   busy: boolean;
   downloading: boolean;
   removePending: boolean;
@@ -127,6 +134,9 @@ function InstalledPackRow({
   onUpgrade: (packId: string, version: string, previousVersion: string) => void;
   onRemove: () => void;
   onExport: (packId: string, destinationPath: string) => void;
+  authenticated: boolean;
+  onSignIn: () => void;
+  onPublish: (packId: string) => void;
 }) {
   const updateAvailable =
     catalogEntry != null && catalogEntry.latest_version !== pack.version;
@@ -152,22 +162,33 @@ function InstalledPackRow({
           if (destination) onExport(pack.pack_id, destination);
         }}
         onConfirm={onRemove}
+        onPublish={
+          pack.origin === "local"
+            ? () => (authenticated ? onPublish(pack.pack_id) : onSignIn())
+            : undefined
+        }
+        publishLabel={authenticated ? "Publish" : "Sign in to publish"}
       />
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2 pr-7">
           <Package className="size-4 text-primary" />
           <h3 className="font-medium">{pack.name}</h3>
           <span className="text-xs text-muted-foreground">v{pack.version}</span>
-          {catalogAvailable ? (
-            catalogEntry ? (
-              <Badge variant="muted">{t("hub.fromRegistry")}</Badge>
-            ) : (
-              <Badge variant="accent">{t("hub.importedLocally")}</Badge>
-            )
-          ) : (
-            <Badge variant="muted">{t("hub.inVault")}</Badge>
+          {pack.origin === "local" && (
+            <Badge variant="accent">{t("hub.importedLocally")}</Badge>
           )}
-          {updateAvailable && <Badge variant="update">{t("hub.updateAvailable")}</Badge>}
+          {pack.origin === "registry" && (
+            <Badge variant="muted">{t("hub.fromRegistry")}</Badge>
+          )}
+          {pack.origin === "bundled" && (
+            <Badge variant="muted">{t("hub.bundledPack")}</Badge>
+          )}
+          {pack.origin === "unknown" && (
+            <Badge variant="muted">{t("hub.unknownOrigin")}</Badge>
+          )}
+          {updateAvailable && (
+            <Badge variant="update">{t("hub.updateAvailable")}</Badge>
+          )}
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
           {t("hub.localFolder", { path: pack.local_path })}

@@ -3,6 +3,7 @@ import { Lock } from "lucide-react";
 import { motion } from "motion/react";
 import { Fragment } from "react";
 import { api } from "@/lib/api";
+import { queryKeys } from "@/lib/query-keys";
 import { MarkdownBody } from "@/components/markdown/MarkdownBody";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -17,7 +18,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 
 export function MarkdownViewer({ path }: { path: string }) {
   const { data, isLoading, error } = useQuery({
-    queryKey: ["file", path],
+    queryKey: queryKeys.file(path),
     queryFn: () => api.vaultReadFile(path),
   });
 

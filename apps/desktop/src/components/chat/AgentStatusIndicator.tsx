@@ -8,7 +8,6 @@ export type AgentActivity =
 
 function labelFor(activity: NonNullable<AgentActivity>): string {
   if (activity.kind === "generating") return "Generating response…";
-  if (activity.path === "vault_search") return "Searching the vault…";
   const name = activity.path.split("/").pop() || activity.path;
   return `Reading ${name}…`;
 }

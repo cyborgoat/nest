@@ -3,6 +3,8 @@ import { persist } from "zustand/middleware";
 
 export const HUB_TAB_ID = "__hub__";
 export const SETTINGS_TAB_ID = "__settings__";
+export const MESSAGES_TAB_ID = "__messages__";
+export type SettingsSection = "general" | "account";
 
 type UiState = {
   sidebarOpen: boolean;
@@ -15,6 +17,7 @@ type UiState = {
   /** Browser-style open main-content tabs (file paths, or HUB_TAB_ID/SETTINGS_TAB_ID) */
   openMainTabs: string[];
   activeMainTabId: string | null;
+  settingsSection: SettingsSection;
   /** VS Code-style "preview" tab: at most one, replaced (not appended) by the
    * next single-clicked file until it's promoted to a permanent tab. */
   previewMainTabId: string | null;
@@ -30,6 +33,9 @@ type UiState = {
   openFileTab: (path: string, opts?: { preview?: boolean }) => void;
   openHubTab: () => void;
   openSettingsTab: () => void;
+  openAccountSettingsTab: () => void;
+  setSettingsSection: (section: SettingsSection) => void;
+  openMessagesTab: () => void;
   closeMainTab: (id: string) => void;
   pruneMainFileTabs: (validPaths: Set<string>) => void;
 };
@@ -48,7 +54,10 @@ function nextActiveAfterRemoval(
   if (activeId === null) return null;
   if (nextTabs.includes(activeId)) return activeId;
   const idx = oldTabs.indexOf(activeId);
-  return nextTabs[Math.min(Math.max(idx, 0), Math.max(0, nextTabs.length - 1))] ?? null;
+  return (
+    nextTabs[Math.min(Math.max(idx, 0), Math.max(0, nextTabs.length - 1))] ??
+    null
+  );
 }
 
 /** Insert `path` in place of the current preview tab (if any), otherwise append. */
@@ -69,7 +78,11 @@ function prunedPreview(previewId: string | null, nextTabs: string[]) {
   return previewId && nextTabs.includes(previewId) ? previewId : null;
 }
 
-const EPHEMERAL_TAB_IDS = new Set([HUB_TAB_ID, SETTINGS_TAB_ID]);
+const EPHEMERAL_TAB_IDS = new Set([
+  HUB_TAB_ID,
+  SETTINGS_TAB_ID,
+  MESSAGES_TAB_ID,
+]);
 
 /** Hub/Settings tabs are ephemeral: they only exist while active, and close
  * themselves the moment focus moves to a different tab. */
@@ -87,6 +100,7 @@ export const useUiStore = create<UiState>()(
       openChatTabs: [],
       openMainTabs: [],
       activeMainTabId: null,
+      settingsSection: "general",
       previewMainTabId: null,
       setActiveMainTab: (id) => {
         const { openMainTabs } = get();
@@ -152,7 +166,8 @@ export const useUiStore = create<UiState>()(
             openMainTabs: cleaned,
             activeMainTabId: path,
             // Opening an already-open tab again promotes it out of preview.
-            previewMainTabId: previewMainTabId === path ? null : previewMainTabId,
+            previewMainTabId:
+              previewMainTabId === path ? null : previewMainTabId,
           });
           return;
         }
@@ -180,6 +195,29 @@ export const useUiStore = create<UiState>()(
             ? cleaned
             : [...cleaned, SETTINGS_TAB_ID],
           activeMainTabId: SETTINGS_TAB_ID,
+          settingsSection: "general",
+        });
+      },
+      openAccountSettingsTab: () => {
+        const { openMainTabs } = get();
+        const cleaned = closeEphemeralExcept(openMainTabs, SETTINGS_TAB_ID);
+        set({
+          openMainTabs: cleaned.includes(SETTINGS_TAB_ID)
+            ? cleaned
+            : [...cleaned, SETTINGS_TAB_ID],
+          activeMainTabId: SETTINGS_TAB_ID,
+          settingsSection: "account",
+        });
+      },
+      setSettingsSection: (settingsSection) => set({ settingsSection }),
+      openMessagesTab: () => {
+        const { openMainTabs } = get();
+        const cleaned = closeEphemeralExcept(openMainTabs, MESSAGES_TAB_ID);
+        set({
+          openMainTabs: cleaned.includes(MESSAGES_TAB_ID)
+            ? cleaned
+            : [...cleaned, MESSAGES_TAB_ID],
+          activeMainTabId: MESSAGES_TAB_ID,
         });
       },
       closeMainTab: (id) => {
@@ -199,7 +237,10 @@ export const useUiStore = create<UiState>()(
         const { openMainTabs, activeMainTabId, previewMainTabId } = get();
         const nextTabs = openMainTabs.filter(
           (id) =>
-            id === HUB_TAB_ID || id === SETTINGS_TAB_ID || validPaths.has(id),
+            id === HUB_TAB_ID ||
+            id === SETTINGS_TAB_ID ||
+            id === MESSAGES_TAB_ID ||
+            validPaths.has(id),
         );
         set({
           openMainTabs: nextTabs,

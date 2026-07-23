@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { ImageOff } from "lucide-react";
 import { api } from "@/lib/api";
+import { queryKeys } from "@/lib/query-keys";
 
 const EXTERNAL_SRC = /^([a-z][a-z0-9+.-]*:|\/\/)/i;
 
@@ -26,7 +27,7 @@ export function VaultImage({ src, alt, baseDir }: Props) {
   const resolved = external ? "" : resolveVaultAssetPath(baseDir, src);
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ["vault-image", resolved],
+    queryKey: queryKeys.vaultImage(resolved),
     queryFn: () => api.vaultReadImage(resolved),
     enabled: !external && !!resolved,
     staleTime: Infinity,

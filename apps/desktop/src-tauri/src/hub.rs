@@ -10,6 +10,245 @@ use std::path::{Path, PathBuf};
 use zip::write::SimpleFileOptions;
 use zip::{ZipArchive, ZipWriter};
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HubUser {
+    pub uuid: String,
+    pub id: String,
+    pub name: String,
+    pub role: String,
+    #[serde(default)]
+    pub managed: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuthSession {
+    pub user: HubUser,
+    pub access_token: String,
+    pub refresh_token: String,
+    pub expires_in: u64,
+    #[serde(default)]
+    pub expires_at_epoch: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AuthState {
+    pub authenticated: bool,
+    pub user: Option<HubUser>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PublishRequest {
+    pub id: String,
+    pub pack_id: String,
+    pub version: String,
+    pub name: String,
+    pub description: String,
+    pub status: String,
+    pub review_note: Option<String>,
+    pub created_at: String,
+    pub reviewed_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HubMessage {
+    pub id: String,
+    pub kind: String,
+    pub title: String,
+    pub body: String,
+    pub pack_id: Option<String>,
+    pub publish_request_id: Option<String>,
+    pub read_at: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HubMessagePage {
+    pub items: Vec<HubMessage>,
+    pub next_cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UnreadCount {
+    pub count: u64,
+}
+
+#[derive(Serialize)]
+struct LoginBody<'a> {
+    id: &'a str,
+    password: &'a str,
+}
+#[derive(Serialize)]
+struct RegisterBody<'a> {
+    id: &'a str,
+    password: &'a str,
+    name: &'a str,
+}
+#[derive(Serialize)]
+struct RefreshBody<'a> {
+    refresh_token: &'a str,
+}
+#[derive(Serialize)]
+struct ProfileBody<'a> {
+    name: &'a str,
+}
+#[derive(Serialize)]
+struct ChangePasswordBody<'a> {
+    current_password: &'a str,
+    new_password: &'a str,
+}
+
+pub async fn login_remote(
+    hub_base_url: &str,
+    proxy_url: &str,
+    id: &str,
+    password: &str,
+) -> AppResult<AuthSession> {
+    let session = auth_request(
+        hub_base_url,
+        proxy_url,
+        "login",
+        &LoginBody { id, password },
+    )
+    .await?;
+    Ok(with_expiry(session))
+}
+
+pub async fn register_remote(
+    hub_base_url: &str,
+    proxy_url: &str,
+    id: &str,
+    password: &str,
+    name: &str,
+) -> AppResult<AuthSession> {
+    let session = auth_request(
+        hub_base_url,
+        proxy_url,
+        "register",
+        &RegisterBody { id, password, name },
+    )
+    .await?;
+    Ok(with_expiry(session))
+}
+
+pub async fn refresh_remote(
+    hub_base_url: &str,
+    proxy_url: &str,
+    refresh_token: &str,
+) -> AppResult<AuthSession> {
+    let session = auth_request(
+        hub_base_url,
+        proxy_url,
+        "refresh",
+        &RefreshBody { refresh_token },
+    )
+    .await?;
+    Ok(with_expiry(session))
+}
+
+pub async fn update_profile_remote(
+    hub_base_url: &str,
+    proxy_url: &str,
+    access_token: &str,
+    name: &str,
+) -> AppResult<HubUser> {
+    let response = http::build_client(proxy_url)?
+        .patch(format!(
+            "{}/api/auth/profile",
+            hub_base_url.trim_end_matches('/')
+        ))
+        .bearer_auth(access_token)
+        .json(&ProfileBody { name })
+        .send()
+        .await
+        .map_err(|e| map_hub_http_error("Hub profile update", e))?;
+    parse_hub_response(response, "Hub profile update").await
+}
+
+pub async fn change_password_remote(
+    hub_base_url: &str,
+    proxy_url: &str,
+    access_token: &str,
+    current_password: &str,
+    new_password: &str,
+) -> AppResult<AuthSession> {
+    let response = http::build_client(proxy_url)?
+        .post(format!(
+            "{}/api/auth/password",
+            hub_base_url.trim_end_matches('/')
+        ))
+        .bearer_auth(access_token)
+        .json(&ChangePasswordBody {
+            current_password,
+            new_password,
+        })
+        .send()
+        .await
+        .map_err(|e| map_hub_http_error("Hub password update", e))?;
+    Ok(with_expiry(
+        parse_hub_response(response, "Hub password update").await?,
+    ))
+}
+
+fn with_expiry(mut session: AuthSession) -> AuthSession {
+    session.expires_at_epoch = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+        + session.expires_in;
+    session
+}
+
+async fn auth_request<T: Serialize + ?Sized>(
+    hub_base_url: &str,
+    proxy_url: &str,
+    action: &str,
+    body: &T,
+) -> AppResult<AuthSession> {
+    if hub_base_url.trim().is_empty() {
+        return Err(AppError::msg(
+            "Hub URL is not configured. Set it in Settings.",
+        ));
+    }
+    let url = format!("{}/api/auth/{action}", hub_base_url.trim_end_matches('/'));
+    let response = http::build_client(proxy_url)?
+        .post(url)
+        .json(body)
+        .send()
+        .await
+        .map_err(|e| map_hub_http_error("Hub authentication", e))?;
+    parse_hub_response(response, "Hub authentication").await
+}
+
+async fn parse_hub_response<T: serde::de::DeserializeOwned>(
+    response: reqwest::Response,
+    label: &str,
+) -> AppResult<T> {
+    if response.status().is_success() {
+        return Ok(response.json().await?);
+    }
+    let status = response.status();
+    let message = response
+        .json::<serde_json::Value>()
+        .await
+        .ok()
+        .and_then(|value| {
+            let message = value.get("message")?;
+            if let Some(text) = message.as_str() {
+                return Some(text.to_string());
+            }
+            message.as_array().map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| item.as_str())
+                    .collect::<Vec<_>>()
+                    .join(". ")
+            })
+        });
+    Err(AppError::msg(message.unwrap_or_else(|| {
+        format!("{label} failed: HTTP {status}")
+    })))
+}
+
 fn map_hub_http_error(label: &str, err: reqwest::Error) -> AppError {
     if err.is_timeout() {
         return AppError::msg(format!(
@@ -32,7 +271,11 @@ pub struct PackProject {
     pub versions: Vec<String>,
 }
 
-pub async fn list_packs_remote(hub_base_url: &str, proxy_url: &str) -> AppResult<Vec<PackProject>> {
+pub async fn list_packs_remote(
+    hub_base_url: &str,
+    proxy_url: &str,
+    access_token: Option<&str>,
+) -> AppResult<Vec<PackProject>> {
     if hub_base_url.trim().is_empty() {
         return Err(AppError::msg(
             "Hub URL is not configured. Set it in Settings.",
@@ -40,8 +283,11 @@ pub async fn list_packs_remote(hub_base_url: &str, proxy_url: &str) -> AppResult
     }
     let url = format!("{}/packs", hub_base_url.trim_end_matches('/'));
     let client = http::build_client(proxy_url)?;
-    let resp = client
-        .get(&url)
+    let mut request = client.get(&url);
+    if let Some(token) = access_token {
+        request = request.bearer_auth(token);
+    }
+    let resp = request
         .send()
         .await
         .map_err(|e| map_hub_http_error("Hub list", e))?;
@@ -110,10 +356,7 @@ pub async fn check_hub_status(hub_base_url: &str, proxy_url: &str) -> HubConnect
         Ok(resp) => HubConnectionStatus {
             online: false,
             hub_base_url: base,
-            message: Some(format!(
-                "Hub is not accessible (HTTP {})",
-                resp.status()
-            )),
+            message: Some(format!("Hub is not accessible (HTTP {})", resp.status())),
         },
         Err(e) => HubConnectionStatus {
             online: false,
@@ -130,6 +373,7 @@ pub async fn download_pack_remote(
     pack_id: &str,
     version: Option<&str>,
     vault_root: &Path,
+    access_token: Option<&str>,
 ) -> AppResult<PackMeta> {
     if hub_base_url.trim().is_empty() {
         return Err(AppError::msg(
@@ -142,8 +386,11 @@ pub async fn download_pack_remote(
         None => format!("{base}/packs/{pack_id}/download"),
     };
     let client = http::build_client(proxy_url)?;
-    let resp = client
-        .get(&url)
+    let mut request = client.get(&url);
+    if let Some(token) = access_token {
+        request = request.bearer_auth(token);
+    }
+    let resp = request
         .send()
         .await
         .map_err(|e| map_hub_http_error("Hub download", e))?;
@@ -178,6 +425,171 @@ pub async fn download_pack_remote(
         }
     }
     Ok(meta)
+}
+
+pub async fn publish_pack_remote(
+    hub_base_url: &str,
+    proxy_url: &str,
+    access_token: &str,
+    pack: &PackMeta,
+    vault_root: &Path,
+) -> AppResult<PublishRequest> {
+    if hub_base_url.trim().is_empty() {
+        return Err(AppError::msg(
+            "Hub URL is not configured. Set it in Settings.",
+        ));
+    }
+    let temp = std::env::temp_dir().join(format!(
+        "nest-publish-{}-{}.zip",
+        pack.id,
+        uuid::Uuid::new_v4()
+    ));
+    export_pack(pack, vault_root, &temp)?;
+    let bytes = fs::read(&temp)?;
+    let _ = fs::remove_file(&temp);
+    let part = reqwest::multipart::Part::bytes(bytes)
+        .file_name(format!("{}-{}.zip", pack.id, pack.version))
+        .mime_str("application/zip")?;
+    let form = reqwest::multipart::Form::new().part("file", part);
+    let url = format!(
+        "{}/api/publish-requests",
+        hub_base_url.trim_end_matches('/')
+    );
+    let response = http::build_client(proxy_url)?
+        .post(url)
+        .bearer_auth(access_token)
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|e| map_hub_http_error("Pack publish", e))?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let message = response
+            .json::<serde_json::Value>()
+            .await
+            .ok()
+            .and_then(|v| {
+                v.get("message").and_then(|message| match message {
+                    serde_json::Value::String(value) => Some(value.clone()),
+                    serde_json::Value::Array(values) => Some(
+                        values
+                            .iter()
+                            .filter_map(|value| value.as_str())
+                            .collect::<Vec<_>>()
+                            .join(". "),
+                    ),
+                    _ => None,
+                })
+            });
+        return Err(AppError::hub_response(
+            status.as_u16(),
+            message.unwrap_or_else(|| format!("Pack publish failed: HTTP {status}")),
+        ));
+    }
+    Ok(response.json().await?)
+}
+
+pub async fn list_publish_requests_remote(
+    hub_base_url: &str,
+    proxy_url: &str,
+    access_token: &str,
+) -> AppResult<Vec<PublishRequest>> {
+    let url = format!(
+        "{}/api/publish-requests/mine",
+        hub_base_url.trim_end_matches('/')
+    );
+    let response = http::build_client(proxy_url)?
+        .get(url)
+        .bearer_auth(access_token)
+        .send()
+        .await
+        .map_err(|e| map_hub_http_error("Publish request list", e))?;
+    if !response.status().is_success() {
+        return Err(AppError::msg(format!(
+            "Publish request list failed: HTTP {}",
+            response.status()
+        )));
+    }
+    Ok(response.json().await?)
+}
+
+async fn message_request(
+    hub_base_url: &str,
+    proxy_url: &str,
+    access_token: &str,
+    method: reqwest::Method,
+    path: &str,
+) -> AppResult<reqwest::Response> {
+    let url = format!(
+        "{}/api/messages{}",
+        hub_base_url.trim_end_matches('/'),
+        path
+    );
+    let response = http::build_client(proxy_url)?
+        .request(method, url)
+        .bearer_auth(access_token)
+        .send()
+        .await
+        .map_err(|e| map_hub_http_error("Hub messages", e))?;
+    if !response.status().is_success() {
+        return Err(AppError::msg(format!(
+            "Hub messages failed: HTTP {}",
+            response.status()
+        )));
+    }
+    Ok(response)
+}
+
+pub async fn list_messages_remote(
+    hub_base_url: &str,
+    proxy_url: &str,
+    access_token: &str,
+    filter: &str,
+    cursor: Option<&str>,
+) -> AppResult<HubMessagePage> {
+    let mut path = format!("?filter={}&limit=30", filter);
+    if let Some(cursor) = cursor.filter(|value| !value.is_empty()) {
+        path.push_str("&cursor=");
+        path.push_str(cursor);
+    }
+    Ok(message_request(
+        hub_base_url,
+        proxy_url,
+        access_token,
+        reqwest::Method::GET,
+        &path,
+    )
+    .await?
+    .json()
+    .await?)
+}
+
+pub async fn unread_count_remote(
+    hub_base_url: &str,
+    proxy_url: &str,
+    access_token: &str,
+) -> AppResult<UnreadCount> {
+    Ok(message_request(
+        hub_base_url,
+        proxy_url,
+        access_token,
+        reqwest::Method::GET,
+        "/unread-count",
+    )
+    .await?
+    .json()
+    .await?)
+}
+
+pub async fn mutate_message_remote(
+    hub_base_url: &str,
+    proxy_url: &str,
+    access_token: &str,
+    method: reqwest::Method,
+    path: &str,
+) -> AppResult<()> {
+    message_request(hub_base_url, proxy_url, access_token, method, path).await?;
+    Ok(())
 }
 
 fn extract_zip_to_dir(zip_path: &Path, dest_root: &Path) -> AppResult<()> {
@@ -231,8 +643,15 @@ fn extract_zip_to_vault(zip_path: &Path, vault_root: &Path) -> AppResult<PathBuf
     Ok(vault_root.join(top.unwrap_or_default()))
 }
 
-pub fn record_sync(conn: &Connection, pack: &PackMeta) -> AppResult<()> {
-    db::upsert_sync_state(conn, &pack.id, &pack.name, &pack.version, &pack.path)
+pub fn record_sync(conn: &Connection, pack: &PackMeta, origin: &str) -> AppResult<()> {
+    db::upsert_sync_state(
+        conn,
+        &pack.id,
+        &pack.name,
+        &pack.version,
+        &pack.path,
+        origin,
+    )
 }
 
 /// Build editable metadata defaults for a source folder. A malformed root
@@ -301,6 +720,7 @@ pub fn create_pack_from_folder(
     source: &Path,
     submitted: PackMeta,
     vault_root: &Path,
+    overwrite: bool,
 ) -> AppResult<PackMeta> {
     if !source.is_dir() {
         return Err(AppError::msg("Select a folder to create a knowledge pack"));
@@ -317,19 +737,38 @@ pub fn create_pack_from_folder(
             "This folder is already the installed knowledge pack",
         ));
     }
+    if destination.exists() && !overwrite {
+        return Err(AppError::msg(format!(
+            "Knowledge pack '{}' is already installed",
+            pack.id
+        )));
+    }
 
     let staging = vault_root.join(format!(".creating-{}", uuid::Uuid::new_v4()));
+    let backup = vault_root.join(format!(".replacing-{}", uuid::Uuid::new_v4()));
     let result = (|| {
         vault::copy_dir_recursive(source, &staging)?;
         write_pack_meta(&staging, &pack)?;
-        if destination.exists() {
-            fs::remove_dir_all(&destination)?;
+        let had_existing = destination.exists();
+        if had_existing {
+            fs::rename(&destination, &backup)?;
         }
-        fs::rename(&staging, &destination)?;
+        if let Err(error) = fs::rename(&staging, &destination) {
+            if had_existing {
+                let _ = fs::rename(&backup, &destination);
+            }
+            return Err(error.into());
+        }
+        if had_existing {
+            let _ = fs::remove_dir_all(&backup);
+        }
         Ok(pack.clone())
     })();
     if staging.exists() {
         let _ = fs::remove_dir_all(&staging);
+    }
+    if backup.exists() && destination.exists() {
+        let _ = fs::remove_dir_all(&backup);
     }
     result
 }
@@ -387,8 +826,58 @@ pub fn export_pack(pack: &PackMeta, vault_root: &Path, destination: &Path) -> Ap
     Ok(())
 }
 
+/// Inspect and validate a local `.zip` without installing it.
+pub fn inspect_local_pack(source: &Path, vault_root: &Path) -> AppResult<PackMeta> {
+    let (tmp, _, pack) = prepare_local_pack(source, vault_root)?;
+    let _ = fs::remove_dir_all(tmp);
+    Ok(pack)
+}
+
 /// Import a local `.zip` knowledge pack (must include `pack.json`).
-pub fn import_local_pack(source: &Path, vault_root: &Path) -> AppResult<PackMeta> {
+pub fn import_local_pack(source: &Path, vault_root: &Path, overwrite: bool) -> AppResult<PackMeta> {
+    let (tmp, content_root, pack) = prepare_local_pack(source, vault_root)?;
+    let dest = vault_root.join(&pack.path);
+    if dest.exists() && !overwrite {
+        let _ = fs::remove_dir_all(&tmp);
+        return Err(AppError::msg(format!(
+            "Knowledge pack '{}' is already installed",
+            pack.id
+        )));
+    }
+    let backup = vault_root.join(format!(".replacing-{}", uuid::Uuid::new_v4()));
+    let had_existing = dest.exists();
+    if had_existing {
+        if let Err(error) = fs::rename(&dest, &backup) {
+            let _ = fs::remove_dir_all(&tmp);
+            return Err(error.into());
+        }
+    }
+    if let Err(error) = fs::rename(&content_root, &dest) {
+        if had_existing {
+            let _ = fs::rename(&backup, &dest);
+        }
+        let _ = fs::remove_dir_all(&tmp);
+        return Err(error.into());
+    }
+    if had_existing {
+        let _ = fs::remove_dir_all(&backup);
+    }
+    if tmp.exists() {
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    crate::nest_debug!(
+        "hub",
+        "import_local_zip id={} path={} from={}",
+        pack.id,
+        pack.path,
+        source.display()
+    );
+
+    Ok(pack)
+}
+
+fn prepare_local_pack(source: &Path, vault_root: &Path) -> AppResult<(PathBuf, PathBuf, PackMeta)> {
     if !source.is_file() {
         return Err(AppError::msg("Select a .zip knowledge pack file"));
     }
@@ -439,28 +928,7 @@ pub fn import_local_pack(source: &Path, vault_root: &Path) -> AppResult<PackMeta
         ));
     }
 
-    let dest = vault_root.join(&pack.path);
-    if dest.exists() {
-        if let Err(e) = fs::remove_dir_all(&dest) {
-            cleanup();
-            return Err(e.into());
-        }
-    }
-    if let Err(e) = vault::copy_dir_recursive(&content_root, &dest) {
-        cleanup();
-        return Err(e);
-    }
-    cleanup();
-
-    crate::nest_debug!(
-        "hub",
-        "import_local_zip id={} path={} from={}",
-        pack.id,
-        pack.path,
-        source.display()
-    );
-
-    Ok(pack)
+    Ok((tmp, content_root, pack))
 }
 
 fn locate_pack_root(extracted: &Path) -> AppResult<(PathBuf, PackMeta)> {
@@ -621,4 +1089,82 @@ fn read_required_pack_meta(pack_root: &Path) -> AppResult<PackMeta> {
         version: pack.version,
         path,
     })
+}
+
+#[cfg(test)]
+mod local_pack_tests {
+    use super::*;
+
+    fn test_root(label: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("nest-{label}-{}", uuid::Uuid::new_v4()))
+    }
+
+    fn write_pack_zip(path: &Path, version: &str) {
+        let file = File::create(path).unwrap();
+        let mut zip = ZipWriter::new(file);
+        let options = SimpleFileOptions::default();
+        zip.start_file("sample/pack.json", options).unwrap();
+        zip.write_all(
+            serde_json::to_string(&PackMeta {
+                id: "sample".into(),
+                name: "Sample".into(),
+                description: String::new(),
+                version: version.into(),
+                path: "sample".into(),
+            })
+            .unwrap()
+            .as_bytes(),
+        )
+        .unwrap();
+        zip.start_file("sample/new.md", options).unwrap();
+        zip.write_all(b"# New content").unwrap();
+        zip.finish().unwrap();
+    }
+
+    #[test]
+    fn zip_import_requires_explicit_overwrite() {
+        let root = test_root("zip-overwrite");
+        let vault = root.join("vault");
+        fs::create_dir_all(vault.join("sample")).unwrap();
+        fs::write(vault.join("sample/old.md"), "# Old content").unwrap();
+        let zip_path = root.join("sample.zip");
+        write_pack_zip(&zip_path, "2.0.0");
+
+        let inspected = inspect_local_pack(&zip_path, &vault).unwrap();
+        assert_eq!(inspected.version, "2.0.0");
+        assert!(import_local_pack(&zip_path, &vault, false).is_err());
+        assert!(vault.join("sample/old.md").exists());
+
+        let imported = import_local_pack(&zip_path, &vault, true).unwrap();
+        assert_eq!(imported.version, "2.0.0");
+        assert!(vault.join("sample/new.md").exists());
+        assert!(!vault.join("sample/old.md").exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn folder_creation_requires_explicit_overwrite() {
+        let root = test_root("folder-overwrite");
+        let vault = root.join("vault");
+        let source = root.join("source");
+        fs::create_dir_all(vault.join("sample")).unwrap();
+        fs::create_dir_all(&source).unwrap();
+        fs::write(vault.join("sample/old.md"), "# Old content").unwrap();
+        fs::write(source.join("new.md"), "# New content").unwrap();
+        let metadata = PackMeta {
+            id: "sample".into(),
+            name: "Sample".into(),
+            description: String::new(),
+            version: "2.0.0".into(),
+            path: String::new(),
+        };
+
+        assert!(create_pack_from_folder(&source, metadata.clone(), &vault, false).is_err());
+        assert!(vault.join("sample/old.md").exists());
+        let created = create_pack_from_folder(&source, metadata, &vault, true).unwrap();
+        assert_eq!(created.version, "2.0.0");
+        assert!(vault.join("sample/new.md").exists());
+        assert!(!vault.join("sample/old.md").exists());
+        let _ = fs::remove_dir_all(root);
+    }
 }

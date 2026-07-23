@@ -3,28 +3,38 @@ import { BookOpen, Cloud, PackageOpen } from "lucide-react";
 import { HubPanel } from "@/components/hub/HubPanel";
 import { MainTabBar } from "@/components/main/MainTabBar";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
+import { MessagesPanel } from "@/components/messages/MessagesPanel";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { MarkdownViewer } from "@/components/viewer/MarkdownViewer";
 import { api } from "@/lib/api";
-import { HUB_TAB_ID, SETTINGS_TAB_ID, useUiStore } from "@/stores/ui";
+import { queryKeys } from "@/lib/query-keys";
+import {
+  HUB_TAB_ID,
+  MESSAGES_TAB_ID,
+  SETTINGS_TAB_ID,
+  useUiStore,
+} from "@/stores/ui";
 
 export function MainTabArea() {
   const activeMainTabId = useUiStore((s) => s.activeMainTabId);
   const openHubTab = useUiStore((s) => s.openHubTab);
 
   const treeQuery = useQuery({
-    queryKey: ["tree"],
+    queryKey: queryKeys.tree,
     queryFn: api.vaultListTree,
   });
 
-  const vaultEmpty = !treeQuery.isLoading && (treeQuery.data?.length ?? 0) === 0;
+  const vaultEmpty =
+    !treeQuery.isLoading && (treeQuery.data?.length ?? 0) === 0;
 
   let content;
   if (activeMainTabId === HUB_TAB_ID) {
     content = <HubPanel />;
   } else if (activeMainTabId === SETTINGS_TAB_ID) {
     content = <SettingsPanel />;
+  } else if (activeMainTabId === MESSAGES_TAB_ID) {
+    content = <MessagesPanel />;
   } else if (activeMainTabId) {
     content = <MarkdownViewer path={activeMainTabId} />;
   } else if (vaultEmpty) {

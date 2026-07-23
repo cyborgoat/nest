@@ -5,20 +5,46 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from './../src/app.module';
 import type { PackProject, PackRelease } from './../src/packs/pack.types';
+import { promises as fs } from 'fs';
+import AdmZip from 'adm-zip';
+import { DatabaseService } from './../src/database/database.service';
 
 describe('Hub (e2e)', () => {
   let app: INestApplication<App>;
+  const registryPath = path.join('/tmp', `nest-hub-registry-${process.pid}`);
 
-  beforeAll(() => {
+  beforeAll(async () => {
     process.env.HOST = process.env.HOST || '127.0.0.1';
     process.env.PORT = process.env.PORT || '8787';
-    process.env.REGISTRY_PATH =
-      process.env.REGISTRY_PATH ||
-      process.env.VAULT_PATH ||
-      path.resolve(__dirname, '../../../examples/knowledge-packs');
+    await fs.rm(registryPath, { recursive: true, force: true });
+    await fs.cp(
+      path.resolve(__dirname, '../../../examples/knowledge-packs'),
+      registryPath,
+      { recursive: true },
+    );
+    process.env.REGISTRY_PATH = registryPath;
     process.env.DEBUG_MODE = process.env.DEBUG_MODE || 'false';
     process.env.CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
-    process.env.DOWNLOAD_TIMEOUT_MS = process.env.DOWNLOAD_TIMEOUT_MS || '120000';
+    process.env.DOWNLOAD_TIMEOUT_MS =
+      process.env.DOWNLOAD_TIMEOUT_MS || '120000';
+    process.env.DATABASE_PATH = path.join(
+      '/tmp',
+      `nest-hub-e2e-${process.pid}.sqlite3`,
+    );
+    await fs.unlink(process.env.DATABASE_PATH).catch(() => undefined);
+    await fs.unlink(`${process.env.DATABASE_PATH}-wal`).catch(() => undefined);
+    await fs.unlink(`${process.env.DATABASE_PATH}-shm`).catch(() => undefined);
+    process.env.STAGING_PATH = path.join(
+      '/tmp',
+      `nest-hub-staging-${process.pid}`,
+    );
+    process.env.MAX_PACK_UPLOAD_BYTES = String(100 * 1024 * 1024);
+    process.env.JWT_SECRET =
+      'test-secret-that-is-at-least-thirty-two-characters';
+    process.env.SUPERUSER_ID = 'root-admin';
+    process.env.SUPERUSER_PASSWORD = 'test-superuser-password';
+    process.env.SUPERUSER_NAME = 'Root Admin';
+    process.env.MIN_PASSWORD_LENGTH = '12';
   });
 
   beforeEach(async () => {
@@ -33,6 +59,14 @@ describe('Hub (e2e)', () => {
 
   afterEach(async () => {
     await app.close();
+  });
+
+  afterAll(async () => {
+    await fs.unlink(process.env.DATABASE_PATH!).catch(() => undefined);
+    await fs.unlink(`${process.env.DATABASE_PATH!}-wal`).catch(() => undefined);
+    await fs.unlink(`${process.env.DATABASE_PATH!}-shm`).catch(() => undefined);
+    await fs.rm(registryPath, { recursive: true, force: true });
+    await fs.rm(process.env.STAGING_PATH!, { recursive: true, force: true });
   });
 
   it('/health (GET)', () => {
@@ -109,5 +143,444 @@ describe('Hub (e2e)', () => {
     );
     expect(res.headers['content-length']).toMatch(/^\d+$/);
     expect(res.headers['x-content-sha256']).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it('registers a regular user and returns authenticated identity', async () => {
+    const registration = await request(app.getHttpServer())
+      .post('/api/auth/register')
+      .send({
+        id: 'pack-author',
+        password: 'a-secure-password',
+        name: 'Pack Author',
+      })
+      .expect(201);
+    expect(registration.body.user).toMatchObject({
+      id: 'pack-author',
+      name: 'Pack Author',
+      role: 'user',
+    });
+    expect(registration.body.access_token).toEqual(expect.any(String));
+    await request(app.getHttpServer())
+      .get('/api/auth/me')
+      .set('Authorization', `Bearer ${registration.body.access_token}`)
+      .expect(200)
+      .expect(({ body }) => expect(body.id).toBe('pack-author'));
+  });
+
+  it('returns the configured password requirement when registration is too short', async () => {
+    const response = await request(app.getHttpServer())
+      .post('/api/auth/register')
+      .send({ id: 'short-password', password: 'too-short', name: 'Short' })
+      .expect(409);
+    expect(response.body.message).toBe(
+      'Password must contain at least 12 characters',
+    );
+  });
+
+  it('updates the profile name and rotates the account password without changing the ID', async () => {
+    const registration = await request(app.getHttpServer())
+      .post('/api/auth/register')
+      .send({
+        id: 'profile-user',
+        password: 'original-password',
+        name: 'Original Name',
+      })
+      .expect(201);
+    const profile = await request(app.getHttpServer())
+      .patch('/api/auth/profile')
+      .set('Authorization', `Bearer ${registration.body.access_token}`)
+      .send({ name: 'Updated Name' })
+      .expect(200);
+    expect(profile.body).toMatchObject({
+      id: 'profile-user',
+      name: 'Updated Name',
+    });
+    const password = await request(app.getHttpServer())
+      .post('/api/auth/password')
+      .set('Authorization', `Bearer ${registration.body.access_token}`)
+      .send({
+        current_password: 'original-password',
+        new_password: 'replacement-password',
+      })
+      .expect(201);
+    expect(password.body.user).toMatchObject({
+      id: 'profile-user',
+      name: 'Updated Name',
+    });
+    await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ id: 'profile-user', password: 'original-password' })
+      .expect(401);
+    await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ id: 'profile-user', password: 'replacement-password' })
+      .expect(201);
+  });
+
+  it('locks the configured superuser and exposes its managed status', async () => {
+    const login = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ id: 'root-admin', password: 'test-superuser-password' })
+      .expect(201);
+    const users = await request(app.getHttpServer())
+      .get('/api/admin/users')
+      .set('Authorization', `Bearer ${login.body.access_token}`)
+      .expect(200);
+    expect(users.body).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'root-admin',
+          role: 'superuser',
+          managed: true,
+        }),
+      ]),
+    );
+    const root = users.body.find(
+      (user: { id: string }) => user.id === 'root-admin',
+    );
+    await request(app.getHttpServer())
+      .patch('/api/auth/profile')
+      .set('Authorization', `Bearer ${login.body.access_token}`)
+      .send({ name: 'Changed Root' })
+      .expect(403);
+    await request(app.getHttpServer())
+      .post('/api/auth/password')
+      .set('Authorization', `Bearer ${login.body.access_token}`)
+      .send({
+        current_password: 'test-superuser-password',
+        new_password: 'replacement-root-password',
+      })
+      .expect(403);
+    await request(app.getHttpServer())
+      .patch(`/api/admin/users/${root.uuid}`)
+      .set('Authorization', `Bearer ${login.body.access_token}`)
+      .send({ role: 'admin' })
+      .expect(403);
+    await request(app.getHttpServer())
+      .delete(`/api/admin/users/${root.uuid}`)
+      .set('Authorization', `Bearer ${login.body.access_token}`)
+      .expect(403);
+  });
+
+  it('enforces the admin role and user deletion permission matrix', async () => {
+    const rootLogin = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ id: 'root-admin', password: 'test-superuser-password' })
+      .expect(201);
+    const register = async (id: string, name: string) =>
+      request(app.getHttpServer())
+        .post('/api/auth/register')
+        .send({ id, password: 'role-test-password', name })
+        .expect(201);
+    const admin = await register('role-admin', 'Role Admin');
+    const user = await register('deletable-user', 'Deletable User');
+    const secondAdmin = await register('second-admin', 'Second Admin');
+
+    await request(app.getHttpServer())
+      .get('/api/admin/users')
+      .set('Authorization', `Bearer ${user.body.access_token}`)
+      .expect(403);
+    await request(app.getHttpServer())
+      .patch(`/api/admin/users/${admin.body.user.uuid}`)
+      .set('Authorization', `Bearer ${rootLogin.body.access_token}`)
+      .send({ role: 'admin' })
+      .expect(200)
+      .expect(({ body }) => expect(body.role).toBe('admin'));
+
+    const adminLogin = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ id: 'role-admin', password: 'role-test-password' })
+      .expect(201);
+    await request(app.getHttpServer())
+      .get('/api/admin/packs')
+      .set('Authorization', `Bearer ${adminLogin.body.access_token}`)
+      .expect(200);
+    await request(app.getHttpServer())
+      .patch(`/api/admin/users/${secondAdmin.body.user.uuid}`)
+      .set('Authorization', `Bearer ${adminLogin.body.access_token}`)
+      .send({ role: 'admin' })
+      .expect(200)
+      .expect(({ body }) => expect(body.role).toBe('admin'));
+    await request(app.getHttpServer())
+      .patch(`/api/admin/users/${secondAdmin.body.user.uuid}`)
+      .set('Authorization', `Bearer ${adminLogin.body.access_token}`)
+      .send({ role: 'user' })
+      .expect(403);
+    await request(app.getHttpServer())
+      .delete(`/api/admin/users/${secondAdmin.body.user.uuid}`)
+      .set('Authorization', `Bearer ${adminLogin.body.access_token}`)
+      .expect(403);
+    await request(app.getHttpServer())
+      .delete(`/api/admin/users/${user.body.user.uuid}`)
+      .set('Authorization', `Bearer ${adminLogin.body.access_token}`)
+      .expect(200);
+    await request(app.getHttpServer())
+      .get('/api/auth/me')
+      .set('Authorization', `Bearer ${user.body.access_token}`)
+      .expect(401);
+    await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ id: 'deletable-user', password: 'role-test-password' })
+      .expect(401);
+    await request(app.getHttpServer())
+      .delete(`/api/admin/users/${secondAdmin.body.user.uuid}`)
+      .set('Authorization', `Bearer ${rootLogin.body.access_token}`)
+      .expect(200);
+  });
+
+  it('reviews a release and enforces restricted pack visibility', async () => {
+    const authorLogin = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ id: 'pack-author', password: 'a-secure-password' })
+      .expect(201);
+    const adminLogin = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ id: 'role-admin', password: 'role-test-password' })
+      .expect(201);
+    const zip = new AdmZip();
+    zip.addFile(
+      'authored-pack/pack.json',
+      Buffer.from(
+        JSON.stringify({
+          id: 'authored-pack',
+          name: 'Authored Pack',
+          description: 'Review workflow fixture',
+          version: '1.0.0',
+        }),
+      ),
+    );
+    zip.addFile('authored-pack/README.md', Buffer.from('# Reviewed knowledge'));
+    const submission = await request(app.getHttpServer())
+      .post('/api/publish-requests')
+      .set('Authorization', `Bearer ${authorLogin.body.access_token}`)
+      .attach('file', zip.toBuffer(), 'authored-pack.zip')
+      .expect(201);
+    expect(submission.body.status).toBe('pending');
+    const submittedMessages = await request(app.getHttpServer())
+      .get('/api/messages')
+      .set('Authorization', `Bearer ${authorLogin.body.access_token}`)
+      .expect(200);
+    expect(submittedMessages.body.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'publish_submitted',
+          publish_request_id: submission.body.id,
+          read_at: null,
+        }),
+      ]),
+    );
+    await request(app.getHttpServer())
+      .post(`/api/admin/publish-requests/${submission.body.id}/approve`)
+      .set('Authorization', `Bearer ${adminLogin.body.access_token}`)
+      .expect(201);
+    const reviewedMessages = await request(app.getHttpServer())
+      .get('/api/messages?filter=unread')
+      .set('Authorization', `Bearer ${authorLogin.body.access_token}`)
+      .expect(200);
+    expect(reviewedMessages.body.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'publish_submitted' }),
+        expect.objectContaining({ kind: 'publish_approved' }),
+      ]),
+    );
+    const approvedMessage = reviewedMessages.body.items.find(
+      (item: { kind: string }) => item.kind === 'publish_approved',
+    );
+    await request(app.getHttpServer())
+      .patch(`/api/messages/${approvedMessage.id}/read`)
+      .set('Authorization', `Bearer ${authorLogin.body.access_token}`)
+      .expect(200);
+    await request(app.getHttpServer())
+      .delete('/api/messages/read')
+      .set('Authorization', `Bearer ${authorLogin.body.access_token}`)
+      .expect(200)
+      .expect(({ body }) => expect(body.deleted).toBe(1));
+    await request(app.getHttpServer()).get('/packs/authored-pack').expect(200);
+    await request(app.getHttpServer())
+      .patch('/api/admin/packs/authored-pack')
+      .set('Authorization', `Bearer ${adminLogin.body.access_token}`)
+      .send({ visibility: 'restricted' })
+      .expect(200);
+    await request(app.getHttpServer()).get('/packs/authored-pack').expect(404);
+    await request(app.getHttpServer())
+      .get('/packs/authored-pack')
+      .set('Authorization', `Bearer ${authorLogin.body.access_token}`)
+      .expect(200);
+  });
+
+  it('notifies an author when a publish request is rejected', async () => {
+    const authorLogin = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ id: 'pack-author', password: 'a-secure-password' })
+      .expect(201);
+    const adminLogin = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ id: 'root-admin', password: 'test-superuser-password' })
+      .expect(201);
+    const zip = new AdmZip();
+    zip.addFile(
+      'rejected-pack/pack.json',
+      Buffer.from(
+        JSON.stringify({
+          id: 'rejected-pack',
+          name: 'Rejected Pack',
+          description: 'Rejection notification fixture',
+          version: '1.0.0',
+        }),
+      ),
+    );
+    zip.addFile('rejected-pack/README.md', Buffer.from('# Needs work'));
+    const submission = await request(app.getHttpServer())
+      .post('/api/publish-requests')
+      .set('Authorization', `Bearer ${authorLogin.body.access_token}`)
+      .attach('file', zip.toBuffer(), 'rejected-pack.zip')
+      .expect(201);
+    await request(app.getHttpServer())
+      .post(`/api/admin/publish-requests/${submission.body.id}/reject`)
+      .set('Authorization', `Bearer ${adminLogin.body.access_token}`)
+      .send({ note: 'Add usage examples before publishing.' })
+      .expect(201);
+    const messages = await request(app.getHttpServer())
+      .get('/api/messages')
+      .set('Authorization', `Bearer ${authorLogin.body.access_token}`)
+      .expect(200);
+    expect(messages.body.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'publish_rejected',
+          publish_request_id: submission.body.id,
+          body: expect.stringContaining('Add usage examples'),
+        }),
+      ]),
+    );
+  });
+
+  it('permanently deletes a pack while retaining reviewed and audit history', async () => {
+    const adminLogin = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ id: 'role-admin', password: 'role-test-password' })
+      .expect(201);
+    const zip = new AdmZip();
+    zip.addFile(
+      'disposable-pack/pack.json',
+      Buffer.from(
+        JSON.stringify({
+          id: 'disposable-pack',
+          name: 'Disposable Pack',
+          description: 'Permanent deletion fixture',
+          version: '1.0.0',
+        }),
+      ),
+    );
+    zip.addFile('disposable-pack/README.md', Buffer.from('# Disposable'));
+    const publication = await request(app.getHttpServer())
+      .post('/api/admin/packs/upload')
+      .set('Authorization', `Bearer ${adminLogin.body.access_token}`)
+      .attach('file', zip.toBuffer(), 'disposable-pack.zip')
+      .expect(201);
+    expect(publication.body.status).toBe('approved');
+    const nextVersion = new AdmZip();
+    nextVersion.addFile(
+      'disposable-pack/pack.json',
+      Buffer.from(
+        JSON.stringify({
+          id: 'disposable-pack',
+          name: 'Disposable Pack',
+          description: 'Pending deletion fixture',
+          version: '1.1.0',
+        }),
+      ),
+    );
+    nextVersion.addFile(
+      'disposable-pack/README.md',
+      Buffer.from('# Pending disposable release'),
+    );
+    const pending = await request(app.getHttpServer())
+      .post('/api/publish-requests')
+      .set('Authorization', `Bearer ${adminLogin.body.access_token}`)
+      .attach('file', nextVersion.toBuffer(), 'disposable-pack-1.1.0.zip')
+      .expect(201);
+    expect(pending.body.status).toBe('pending');
+    const database = app.get(DatabaseService).db;
+    const staged = database
+      .prepare('SELECT staging_path FROM publish_requests WHERE id = ?')
+      .get(pending.body.id) as { staging_path: string };
+    const projectPath = path.join(registryPath, 'disposable-pack');
+    await expect(fs.stat(projectPath)).resolves.toBeDefined();
+
+    await request(app.getHttpServer())
+      .delete('/api/admin/packs/disposable-pack')
+      .set('Authorization', `Bearer ${adminLogin.body.access_token}`)
+      .expect(200);
+    await request(app.getHttpServer())
+      .get('/packs/disposable-pack')
+      .expect(404);
+    await expect(fs.stat(projectPath)).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+    const history = await request(app.getHttpServer())
+      .get('/api/publish-requests/mine')
+      .set('Authorization', `Bearer ${adminLogin.body.access_token}`)
+      .expect(200);
+    expect(history.body).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: publication.body.id,
+          pack_id: 'disposable-pack',
+          status: 'approved',
+        }),
+      ]),
+    );
+    expect(history.body).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: pending.body.id }),
+      ]),
+    );
+    await expect(fs.stat(staged.staging_path)).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+    expect(
+      database
+        .prepare('SELECT 1 FROM messages WHERE publish_request_id = ?')
+        .get(pending.body.id),
+    ).toBeUndefined();
+    expect(
+      database
+        .prepare(
+          "SELECT 1 FROM audit_log WHERE action = 'pack.delete' AND target_id = ?",
+        )
+        .get('disposable-pack'),
+    ).toBeDefined();
+  });
+
+  it('keeps the managed superuser locked after bootstrap variables are removed', async () => {
+    await app.close();
+    const id = process.env.SUPERUSER_ID;
+    const password = process.env.SUPERUSER_PASSWORD;
+    const name = process.env.SUPERUSER_NAME;
+    delete process.env.SUPERUSER_ID;
+    delete process.env.SUPERUSER_PASSWORD;
+    delete process.env.SUPERUSER_NAME;
+    try {
+      const moduleFixture = await Test.createTestingModule({
+        imports: [AppModule],
+      }).compile();
+      app = moduleFixture.createNestApplication();
+      await app.init();
+      const login = await request(app.getHttpServer())
+        .post('/api/auth/login')
+        .send({ id: 'root-admin', password: 'test-superuser-password' })
+        .expect(201);
+      expect(login.body.user).toMatchObject({
+        id: 'root-admin',
+        name: 'Root Admin',
+        role: 'superuser',
+        managed: true,
+      });
+    } finally {
+      if (id) process.env.SUPERUSER_ID = id;
+      if (password) process.env.SUPERUSER_PASSWORD = password;
+      if (name) process.env.SUPERUSER_NAME = name;
+    }
   });
 });
