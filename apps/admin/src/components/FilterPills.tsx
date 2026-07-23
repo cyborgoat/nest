@@ -19,8 +19,8 @@ export function FilterPills<T extends string>({
           className={cn(
             "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition",
             value === opt.value
-              ? "border-emerald-800 bg-emerald-800 text-white"
-              : "border-stone-200 bg-white text-stone-600 hover:bg-stone-50",
+              ? "border-primary bg-primary text-primary-foreground"
+              : "border-border bg-card text-muted-foreground hover:bg-muted",
           )}
         >
           {opt.label}
@@ -28,7 +28,9 @@ export function FilterPills<T extends string>({
             <span
               className={cn(
                 "tabular-nums",
-                value === opt.value ? "text-emerald-100" : "text-stone-400",
+                value === opt.value
+                  ? "text-primary-foreground/70"
+                  : "text-muted-foreground",
               )}
             >
               {opt.count}

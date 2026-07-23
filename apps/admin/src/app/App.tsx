@@ -29,7 +29,7 @@ export function App() {
   }, [api]);
   if (checkingAuth) {
     return (
-      <div className="grid min-h-screen place-items-center bg-stone-50 text-sm text-stone-500">
+      <div className="grid min-h-screen place-items-center bg-background text-sm text-muted-foreground">
         Checking administrator session…
       </div>
     );

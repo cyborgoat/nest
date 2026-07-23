@@ -19,10 +19,10 @@ export function Metric({
         className={cn(
           "grid size-11 place-items-center rounded-xl",
           tone === "amber"
-            ? "bg-amber-100 text-amber-700"
+            ? "bg-amber-100 text-amber-800"
             : tone === "stone"
-              ? "bg-stone-200 text-stone-700"
-              : "bg-emerald-100 text-emerald-700",
+              ? "bg-muted text-muted-foreground"
+              : "bg-primary/10 text-primary",
         )}
       >
         {React.cloneElement(
@@ -32,7 +32,7 @@ export function Metric({
       </div>
       <div>
         <p className="text-2xl font-semibold tabular-nums">{value}</p>
-        <p className="text-xs text-stone-500">{label}</p>
+        <p className="text-xs text-muted-foreground">{label}</p>
       </div>
     </Card>
   );

@@ -12,10 +12,10 @@ export function Progress({
     <div>
       <div className="mb-1 flex justify-between text-xs">
         <span>{label}</span>
-        <span className="text-stone-500">{value}</span>
+        <span className="text-muted-foreground">{value}</span>
       </div>
-      <div className="h-2 overflow-hidden rounded-full bg-stone-100">
-        <div className="h-full rounded-full bg-emerald-600" style={{ width }} />
+      <div className="h-2 overflow-hidden rounded-full bg-muted">
+        <div className="h-full rounded-full bg-primary" style={{ width }} />
       </div>
     </div>
   );

@@ -14,23 +14,14 @@ import {
   Upload,
 } from "lucide-react";
 import type { AdminPack as Pack } from "@nest/shared";
-import { EditPackDialog, type PackEditPayload } from "../components/EditPackDialog";
 import { FilterPills } from "../components/FilterPills";
 import { Metric } from "../components/Metric";
 import { PackActionsMenu } from "../components/PackActionsMenu";
-import {
-  Badge,
-  Button,
-  buttonClass,
-  Card,
-  DataTable,
-  Dialog,
-  ErrorBox,
-} from "../components/ui";
+import { UploadPackDialog } from "../components/UploadPackDialog";
+import { Badge, Button, Card, DataTable, Dialog, ErrorBox } from "../components/ui";
 import { useApi } from "../app/contexts";
 import { adminQueryKeys } from "../lib/api";
 import { useAdminData } from "../lib/hooks";
-import { cn } from "../lib/cn";
 import { PageHeader } from "../layout/PageHeader";
 
 type StatusFilter = "all" | "active" | "archived" | "restricted";
@@ -41,8 +32,8 @@ export function PacksPage() {
   const { packs } = useAdminData();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [editTarget, setEditTarget] = useState<Pack | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Pack | null>(null);
+  const [uploadOpen, setUploadOpen] = useState(false);
   const upload = useMutation({
     mutationFn: (file: File) => {
       const body = new FormData();
@@ -50,19 +41,9 @@ export function PacksPage() {
       return api("/api/admin/packs/upload", { method: "POST", body });
     },
     onSuccess: () => {
+      setUploadOpen(false);
       void qc.invalidateQueries({ queryKey: adminQueryKeys.packs });
       void qc.invalidateQueries({ queryKey: adminQueryKeys.reviews });
-    },
-  });
-  const update = useMutation({
-    mutationFn: ({ pack, body }: { pack: Pack; body: PackEditPayload }) =>
-      api(`/api/admin/packs/${pack.id}`, {
-        method: "PATCH",
-        body: JSON.stringify(body),
-      }),
-    onSuccess: () => {
-      setEditTarget(null);
-      void qc.invalidateQueries({ queryKey: adminQueryKeys.packs });
     },
   });
   const remove = useMutation({
@@ -110,17 +91,17 @@ export function PacksPage() {
             <Link
               to="/packs/$packId"
               params={{ packId: row.original.id }}
-              className="font-medium text-emerald-800 hover:underline"
+              className="font-medium text-primary hover:underline"
             >
               {row.original.name}
             </Link>
-            <p className="text-xs text-stone-500">{row.original.id}</p>
+            <p className="text-xs text-muted-foreground">{row.original.id}</p>
           </div>
         ),
       },
       {
         accessorKey: "owner_id",
-        header: "Owner",
+        header: "Maintainer",
         cell: ({ getValue }) => (
           <span className="text-sm">{String(getValue() || "Unassigned")}</span>
         ),
@@ -150,7 +131,7 @@ export function PacksPage() {
         cell: ({ row }) => (
           <span
             className={
-              row.original.archived ? "text-stone-400" : "text-emerald-700"
+              row.original.archived ? "text-muted-foreground" : "text-primary"
             }
           >
             {row.original.archived ? "Archived" : "Active"}
@@ -163,7 +144,6 @@ export function PacksPage() {
         cell: ({ row }) => (
           <PackActionsMenu
             pack={row.original}
-            onEdit={setEditTarget}
             onDeleteRequest={setDeleteTarget}
           />
         ),
@@ -176,30 +156,15 @@ export function PacksPage() {
       <PageHeader
         eyebrow="Catalog"
         title="Knowledge packs"
-        description="Edit metadata, visibility, user access, and every published version."
+        description="Browse published packs and their versions. Open a pack to manage its maintainer, visibility, and access."
         actions={
-          <label
-            className={cn(
-              buttonClass(),
-              upload.isPending && "pointer-events-none opacity-50",
-            )}
-          >
+          <Button onClick={() => setUploadOpen(true)}>
             <Upload className="size-4" />
-            {upload.isPending ? "Uploading…" : "Add pack version"}
-            <input
-              type="file"
-              accept=".zip"
-              className="sr-only"
-              onChange={(e) =>
-                e.target.files?.[0] && upload.mutate(e.target.files[0])
-              }
-            />
-          </label>
+            Upload pack
+          </Button>
         }
       />
-      {(upload.error || update.error || remove.error) && (
-        <ErrorBox error={upload.error || update.error || remove.error} />
-      )}
+      {remove.error && <ErrorBox error={remove.error} />}
       <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Metric label="Total packs" value={counts.all} icon={<Package />} />
         <Metric label="Active" value={counts.active} icon={<Check />} />
@@ -233,8 +198,8 @@ export function PacksPage() {
         />
       </div>
       <Card className="p-0">
-        <div className="flex items-center border-b border-stone-200 p-4">
-          <Search className="mr-2 size-4 text-stone-400" />
+        <div className="flex items-center border-b border-border p-4">
+          <Search className="mr-2 size-4 text-muted-foreground" />
           <input
             className="w-full bg-transparent text-sm outline-none"
             placeholder="Search packs…"
@@ -244,22 +209,20 @@ export function PacksPage() {
         </div>
         <DataTable data={shown} columns={columns} />
       </Card>
-      {editTarget && (
-        <EditPackDialog
-          pack={editTarget}
-          open
-          onOpenChange={(open) => !open && setEditTarget(null)}
-          busy={update.isPending}
-          onSave={(body) => update.mutate({ pack: editTarget, body })}
-        />
-      )}
+      <UploadPackDialog
+        open={uploadOpen}
+        onOpenChange={setUploadOpen}
+        busy={upload.isPending}
+        error={upload.error}
+        onUpload={(file) => upload.mutate(file)}
+      />
       <Dialog
         open={Boolean(deleteTarget)}
         onOpenChange={(open) => !open && setDeleteTarget(null)}
         title="Delete knowledge pack"
         description={`Permanently delete ${deleteTarget?.name ?? "this pack"} and all published releases.`}
       >
-        <p className="text-sm leading-6 text-stone-600">
+        <p className="text-sm leading-6 text-muted-foreground">
           This removes the registry files, {deleteTarget?.releases.length ?? 0}{" "}
           published release
           {(deleteTarget?.releases.length ?? 0) === 1 ? "" : "s"}, access

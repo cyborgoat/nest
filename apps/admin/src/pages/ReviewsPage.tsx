@@ -72,19 +72,19 @@ export function ReviewsPage() {
                 <span className="text-sm font-semibold">v{item.version}</span>
               </div>
               <h2 className="mt-3 font-serif text-2xl">{item.name}</h2>
-              <p className="mt-1 max-w-2xl text-sm text-stone-500">
+              <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
                 {item.description || "No description provided."}
               </p>
-              <p className="mt-4 text-xs text-stone-500">
+              <p className="mt-4 text-xs text-muted-foreground">
                 Submitted by{" "}
-                <strong className="text-stone-700">
+                <strong className="text-foreground">
                   {item.submitter_name}
                 </strong>{" "}
                 · @{item.submitter_id} · {formatDate(item.created_at)}
               </p>
             </div>
             <div className="flex shrink-0 flex-col items-end justify-between gap-5">
-              <code className="rounded bg-stone-100 px-2 py-1 text-[11px] text-stone-500">
+              <code className="rounded bg-muted px-2 py-1 text-[11px] text-muted-foreground">
                 sha256 {item.checksum.slice(0, 14)}…
               </code>
               <div className="flex gap-2">

@@ -10,17 +10,17 @@ export function Breadcrumbs({
   return (
     <nav
       aria-label="Breadcrumb"
-      className="mb-3 flex items-center gap-1.5 text-xs text-stone-500"
+      className="mb-3 flex items-center gap-1.5 text-xs text-muted-foreground"
     >
       {items.map((item, i) => (
         <Fragment key={i}>
-          {i > 0 && <ChevronRight className="size-3 text-stone-300" />}
+          {i > 0 && <ChevronRight className="size-3 text-border" />}
           {item.to ? (
-            <Link to={item.to} className="hover:text-emerald-700 hover:underline">
+            <Link to={item.to} className="hover:text-primary hover:underline">
               {item.label}
             </Link>
           ) : (
-            <span className="text-stone-700">{item.label}</span>
+            <span className="text-foreground">{item.label}</span>
           )}
         </Fragment>
       ))}

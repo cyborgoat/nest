@@ -3,16 +3,18 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { Archive, Check, Eye, EyeOff, Trash2 } from "lucide-react";
+import type { PackVisibility } from "@nest/shared";
 import { Breadcrumbs } from "../components/Breadcrumbs";
-import { EditPackDialog, type PackEditPayload } from "../components/EditPackDialog";
 import { PackActionsMenu } from "../components/PackActionsMenu";
+import { UserMultiPicker } from "../components/UserMultiPicker";
 import {
   Badge,
   Button,
   Card,
   Dialog,
   ErrorBox,
-  InfoRow,
+  Field,
+  Select,
   formatDate,
 } from "../components/ui";
 import { useApi } from "../app/contexts";
@@ -27,7 +29,6 @@ export function PackDetailPage() {
   const qc = useQueryClient();
   const { packs, users } = useAdminData();
   const pack = packs.data?.find((item) => item.id === packId);
-  const [editOpen, setEditOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<
     NonNullable<typeof pack> | null
   >(null);
@@ -39,15 +40,12 @@ export function PackDetailPage() {
     onSuccess: () => void qc.invalidateQueries({ queryKey: adminQueryKeys.packs }),
   });
   const update = useMutation({
-    mutationFn: (body: PackEditPayload) =>
+    mutationFn: (body: { visibility?: PackVisibility; owner_id?: string | null }) =>
       api(`/api/admin/packs/${packId}`, {
         method: "PATCH",
         body: JSON.stringify(body),
       }),
-    onSuccess: () => {
-      setEditOpen(false);
-      void qc.invalidateQueries({ queryKey: adminQueryKeys.packs });
-    },
+    onSuccess: () => void qc.invalidateQueries({ queryKey: adminQueryKeys.packs }),
   });
   const remove = useMutation({
     mutationFn: (id: string) =>
@@ -89,7 +87,6 @@ export function PackDetailPage() {
           <PackActionsMenu
             pack={pack}
             hideViewDetails
-            onEdit={() => setEditOpen(true)}
             onDeleteRequest={setDeleteTarget}
             triggerLabel="Pack actions"
           />
@@ -100,13 +97,13 @@ export function PackDetailPage() {
           error={releaseAndAccess.error || update.error || remove.error}
         />
       )}
-      <div className="grid gap-5 xl:grid-cols-[1fr_360px]">
+      <div className="grid gap-5 xl:grid-cols-[1fr_420px]">
         <div className="space-y-5">
           <Card>
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <h2 className="font-serif text-xl">Published versions</h2>
-                <p className="text-sm text-stone-500">
+                <p className="text-sm text-muted-foreground">
                   Yank a release to remove it from discovery without deleting
                   its history.
                 </p>
@@ -116,7 +113,7 @@ export function PackDetailPage() {
                 {pack.archived ? "Archived" : "Active"}
               </Badge>
             </div>
-            <div className="mt-5 divide-y divide-stone-100">
+            <div className="mt-5 divide-y divide-border">
               {pack.releases.map((release) => (
                 <div
                   key={release.version}
@@ -126,7 +123,7 @@ export function PackDetailPage() {
                     <p className="font-mono text-sm font-medium">
                       v{release.version}
                     </p>
-                    <p className="text-xs text-stone-500">
+                    <p className="text-xs text-muted-foreground">
                       Published {formatDate(release.published_at)}
                     </p>
                   </div>
@@ -150,110 +147,108 @@ export function PackDetailPage() {
           </Card>
           <Card>
             <h2 className="font-serif text-xl">Description</h2>
-            <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-stone-600">
+            <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
               {pack.description || "No description provided."}
             </p>
           </Card>
         </div>
         <div className="space-y-5">
           <Card>
-            <h2 className="font-serif text-xl">Access</h2>
-            <div className="mt-4 space-y-3 text-sm">
-              <InfoRow label="Visibility">
-                <Badge
-                  tone={pack.visibility === "restricted" ? "amber" : "green"}
-                >
-                  {pack.visibility}
-                </Badge>
-              </InfoRow>
-              <InfoRow label="Owner">
-                <span>
-                  {pack.owner_id ? `@${pack.owner_id}` : "Unassigned"}
-                </span>
-              </InfoRow>
+            <h2 className="font-serif text-xl">Access &amp; permissions</h2>
+            <div className="mt-4 space-y-4">
+              <Field label="Visibility">
+                <Select
+                  value={pack.visibility}
+                  onValueChange={(value) =>
+                    update.mutate({ visibility: value as PackVisibility })
+                  }
+                  options={[
+                    { value: "public", label: "Public — visible to everyone" },
+                    {
+                      value: "restricted",
+                      label: "Restricted — selected users only",
+                    },
+                  ]}
+                />
+              </Field>
+              <Field label="Maintainer">
+                <UserMultiPicker
+                  users={users.data ?? []}
+                  selectedUuids={pack.owner_uuid ? [pack.owner_uuid] : []}
+                  onChange={(uuids) => {
+                    const loginId = uuids[0]
+                      ? (users.data ?? []).find((u) => u.uuid === uuids[0])?.id ??
+                        null
+                      : null;
+                    update.mutate({ owner_id: loginId });
+                  }}
+                  max={1}
+                  placeholder="Search users to assign a maintainer…"
+                />
+              </Field>
             </div>
           </Card>
           <Card>
             <h2 className="font-serif text-xl">Allowed users</h2>
-            <p className="mt-1 text-xs text-stone-500">
+            <p className="mt-1 text-xs text-muted-foreground">
               Only selected users and administrators can access a restricted
               pack.
             </p>
             {pack.visibility === "public" ? (
-              <div className="mt-4 rounded-lg border border-dashed border-stone-300 bg-stone-50 p-4 text-sm text-stone-500">
+              <div className="mt-4 rounded-lg border border-dashed border-border bg-muted p-4 text-sm text-muted-foreground">
                 This pack is{" "}
-                <strong className="text-stone-700">public</strong> — every
+                <strong className="text-foreground">public</strong> — every
                 signed-in user can already access it, so individual grants
-                don't apply. Switch visibility to{" "}
-                <button
-                  type="button"
-                  className="font-medium text-emerald-700 hover:underline"
-                  onClick={() => setEditOpen(true)}
-                >
-                  Restricted in Edit pack
-                </button>{" "}
-                to manage per-user access.
+                don't apply. Set Visibility above to{" "}
+                <strong className="text-foreground">Restricted</strong> to
+                manage per-user access.
               </div>
             ) : grantableUsers.length === 0 ? (
-              <div className="mt-4 rounded-lg border border-dashed border-stone-300 bg-stone-50 p-4 text-sm text-stone-500">
+              <div className="mt-4 rounded-lg border border-dashed border-border bg-muted p-4 text-sm text-muted-foreground">
                 No regular user accounts exist yet — grants only apply to
                 accounts with the "User" role (see{" "}
                 <Link
                   to="/users"
-                  className="font-medium text-emerald-700 hover:underline"
+                  className="font-medium text-primary hover:underline"
                 >
                   User access
                 </Link>
                 ). Admins and superusers already have access to every pack.
               </div>
             ) : (
-              <div className="mt-4 max-h-80 space-y-2 overflow-auto">
-                {grantableUsers.map((user) => (
-                  <label
-                    key={user.uuid}
-                    className="flex cursor-pointer items-center gap-3 rounded-lg border border-stone-200 p-3 hover:bg-stone-50"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={granted.has(user.uuid)}
-                      disabled={releaseAndAccess.isPending}
-                      onChange={(e) =>
+              <div className="mt-4">
+                <UserMultiPicker
+                  users={grantableUsers}
+                  selectedUuids={[...granted]}
+                  onChange={(nextUuids) => {
+                    const next = new Set(nextUuids);
+                    for (const uuid of next)
+                      if (!granted.has(uuid))
                         releaseAndAccess.mutate({
-                          url: `/api/admin/packs/${pack.id}/access/${user.uuid}`,
-                          body: { allowed: e.target.checked },
-                        })
-                      }
-                      className="accent-emerald-700"
-                    />
-                    <span className="min-w-0">
-                      <span className="block truncate text-sm font-medium">
-                        {user.name}
-                      </span>
-                      <span className="block truncate text-xs text-stone-500">
-                        @{user.id}
-                      </span>
-                    </span>
-                  </label>
-                ))}
+                          url: `/api/admin/packs/${pack.id}/access/${uuid}`,
+                          body: { allowed: true },
+                        });
+                    for (const uuid of granted)
+                      if (!next.has(uuid))
+                        releaseAndAccess.mutate({
+                          url: `/api/admin/packs/${pack.id}/access/${uuid}`,
+                          body: { allowed: false },
+                        });
+                  }}
+                  placeholder="Search users to grant access…"
+                />
               </div>
             )}
           </Card>
         </div>
       </div>
-      <EditPackDialog
-        pack={pack}
-        open={editOpen}
-        onOpenChange={setEditOpen}
-        busy={update.isPending}
-        onSave={(body) => update.mutate(body)}
-      />
       <Dialog
         open={Boolean(deleteTarget)}
         onOpenChange={(open) => !open && setDeleteTarget(null)}
         title="Delete knowledge pack"
         description={`Permanently delete ${deleteTarget?.name ?? "this pack"} and all published releases.`}
       >
-        <p className="text-sm leading-6 text-stone-600">
+        <p className="text-sm leading-6 text-muted-foreground">
           This removes the registry files, {deleteTarget?.releases.length ?? 0}{" "}
           published release
           {(deleteTarget?.releases.length ?? 0) === 1 ? "" : "s"}, access

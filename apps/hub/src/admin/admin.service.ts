@@ -25,8 +25,6 @@ import { HubRuntimeConfig } from '../hub.config';
 
 const now = () => new Date().toISOString();
 export type PackPatch = {
-  name?: string;
-  description?: string;
   visibility?: PackVisibility;
   archived?: boolean;
   owner_id?: string | null;
@@ -184,13 +182,11 @@ export class AdminService {
     }
     this.database.db
       .prepare(
-        `UPDATE packs SET name = COALESCE(?, name), description = COALESCE(?, description),
+        `UPDATE packs SET
       visibility = COALESCE(?, visibility), archived = COALESCE(?, archived),
       owner_uuid = CASE WHEN ? = 1 THEN ? ELSE owner_uuid END, updated_at = ? WHERE id = ?`,
       )
       .run(
-        patch.name?.trim() || null,
-        patch.description ?? null,
         patch.visibility ?? null,
         patch.archived === undefined ? null : Number(patch.archived),
         Number(ownerUuid !== undefined),

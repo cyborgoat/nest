@@ -44,13 +44,13 @@ export function DashboardPage() {
           <div className="flex items-center justify-between">
             <div>
               <h2 className="font-serif text-xl">Review queue</h2>
-              <p className="text-sm text-stone-500">
+              <p className="text-sm text-muted-foreground">
                 Pending community submissions.
               </p>
             </div>
             <Link
               to="/reviews"
-              className="text-sm font-medium text-emerald-700 hover:underline"
+              className="text-sm font-medium text-primary hover:underline"
             >
               View queue
             </Link>
@@ -59,11 +59,11 @@ export function DashboardPage() {
             {reviews.data?.slice(0, 5).map((item) => (
               <div
                 key={item.id}
-                className="flex items-center justify-between rounded-lg border border-stone-200 p-3"
+                className="flex items-center justify-between rounded-lg border border-border p-3"
               >
                 <div>
                   <p className="text-sm font-medium">{item.name}</p>
-                  <p className="text-xs text-stone-500">
+                  <p className="text-xs text-muted-foreground">
                     {item.pack_id}@{item.version} · @{item.submitter_id}
                   </p>
                 </div>
@@ -81,7 +81,7 @@ export function DashboardPage() {
         </Card>
         <Card>
           <h2 className="font-serif text-xl">Access posture</h2>
-          <p className="mt-1 text-sm text-stone-500">
+          <p className="mt-1 text-sm text-muted-foreground">
             {users.data?.length ?? 0} registered users
           </p>
           <div className="mt-5 space-y-4">

@@ -35,14 +35,14 @@ export function buttonClass(
       : size === "icon"
         ? "size-9 justify-center"
         : "px-3.5 py-2",
-    variant === "primary" && "bg-emerald-800 text-white hover:bg-emerald-900",
+    variant === "primary" && "bg-primary text-primary-foreground hover:bg-primary/90",
     variant === "outline" &&
-      "border border-stone-200 bg-white text-stone-700 shadow-sm hover:bg-stone-50",
+      "border border-border bg-card text-foreground shadow-sm hover:bg-muted",
     variant === "danger" &&
-      "border border-red-200 bg-red-50 text-red-700 hover:bg-red-100",
-    variant === "ghost" && "text-stone-600 hover:bg-stone-100",
+      "border border-destructive/30 bg-destructive/10 text-destructive hover:bg-destructive/20",
+    variant === "ghost" && "text-muted-foreground hover:bg-muted",
     variant === "sidebar" &&
-      "text-emerald-100/70 hover:bg-white/5 hover:text-white",
+      "text-sidebar-muted hover:bg-sidebar-active hover:text-sidebar-foreground",
   );
 }
 
@@ -56,7 +56,7 @@ export function Card({
   return (
     <section
       className={cn(
-        "rounded-xl border border-stone-200 bg-white p-5 shadow-[0_8px_30px_rgba(28,45,37,.04)]",
+        "rounded-xl border border-border bg-card p-5 shadow-[0_8px_30px_rgba(0,0,0,.04)]",
         className,
       )}
     >
@@ -76,9 +76,9 @@ export function Badge({
     <span
       className={cn(
         "inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-semibold capitalize [&>svg]:size-3",
-        tone === "green" && "bg-emerald-50 text-emerald-700",
-        tone === "amber" && "bg-amber-50 text-amber-700",
-        tone === "stone" && "bg-stone-100 text-stone-600",
+        tone === "green" && "bg-primary/10 text-primary",
+        tone === "amber" && "bg-amber-50 text-amber-800",
+        tone === "stone" && "bg-muted text-muted-foreground",
       )}
     >
       {children}
@@ -101,21 +101,21 @@ export function Empty({
         "text-center",
         compact
           ? "py-8"
-          : "rounded-xl border border-dashed border-stone-300 bg-white py-20",
+          : "rounded-xl border border-dashed border-border bg-card py-20",
       )}
     >
-      <div className="mx-auto grid size-10 place-items-center rounded-full bg-emerald-50 text-emerald-700">
+      <div className="mx-auto grid size-10 place-items-center rounded-full bg-primary/10 text-primary">
         <Check className="size-5" />
       </div>
       <h3 className="mt-3 font-serif text-xl">{title}</h3>
-      <p className="mt-1 text-sm text-stone-500">{body}</p>
+      <p className="mt-1 text-sm text-muted-foreground">{body}</p>
     </div>
   );
 }
 
 export function ErrorBox({ error }: { error: unknown }) {
   return (
-    <div className="mb-5 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+    <div className="mb-5 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
       {error instanceof Error ? error.message : String(error)}
     </div>
   );
@@ -164,7 +164,7 @@ export function InfoRow({
 }) {
   return (
     <div className="flex items-center justify-between gap-4">
-      <span className="text-stone-500">{label}</span>
+      <span className="text-muted-foreground">{label}</span>
       {children}
     </div>
   );
@@ -193,16 +193,16 @@ export function Dialog({
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-emerald-950/30 backdrop-blur-sm" />
-        <DialogPrimitive.Content className="fixed left-1/2 top-1/2 z-50 max-h-[85vh] w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 overflow-auto rounded-xl border border-stone-200 bg-white p-6 shadow-2xl">
+        <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-overlay backdrop-blur-sm" />
+        <DialogPrimitive.Content className="fixed left-1/2 top-1/2 z-50 max-h-[85vh] w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 overflow-auto rounded-xl border border-border bg-card p-6 shadow-2xl">
           <DialogPrimitive.Title className="font-serif text-2xl">
             {title}
           </DialogPrimitive.Title>
-          <DialogPrimitive.Description className="mb-5 mt-1 text-sm text-stone-500">
+          <DialogPrimitive.Description className="mb-5 mt-1 text-sm text-muted-foreground">
             {description}
           </DialogPrimitive.Description>
           {children}
-          <DialogPrimitive.Close className="absolute right-4 top-4 rounded p-1 text-stone-400 hover:bg-stone-100">
+          <DialogPrimitive.Close className="absolute right-4 top-4 rounded p-1 text-muted-foreground hover:bg-muted">
             <X className="size-4" />
           </DialogPrimitive.Close>
         </DialogPrimitive.Content>
@@ -222,23 +222,23 @@ export function Select({
 }) {
   return (
     <SelectPrimitive.Root value={value} onValueChange={onValueChange}>
-      <SelectPrimitive.Trigger className="flex min-w-36 items-center justify-between gap-3 rounded-lg border border-stone-200 bg-white px-3 py-2 text-left text-sm shadow-sm">
+      <SelectPrimitive.Trigger className="flex min-w-36 items-center justify-between gap-3 rounded-lg border border-border bg-card px-3 py-2 text-left text-sm shadow-sm">
         <SelectPrimitive.Value />
         <SelectPrimitive.Icon>
-          <ChevronDown className="size-4 text-stone-400" />
+          <ChevronDown className="size-4 text-muted-foreground" />
         </SelectPrimitive.Icon>
       </SelectPrimitive.Trigger>
       <SelectPrimitive.Portal>
         <SelectPrimitive.Content
           position="popper"
-          className="z-50 min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-lg border border-stone-200 bg-white p-1 shadow-xl"
+          className="z-50 min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-lg border border-border bg-card p-1 shadow-xl"
         >
           <SelectPrimitive.Viewport>
             {options.map((option) => (
               <SelectPrimitive.Item
                 key={option.value}
                 value={option.value}
-                className="relative cursor-default rounded-md px-3 py-2 text-sm outline-none data-[highlighted]:bg-emerald-50 data-[highlighted]:text-emerald-900"
+                className="relative cursor-default rounded-md px-3 py-2 text-sm outline-none data-[highlighted]:bg-primary/10 data-[highlighted]:text-primary"
               >
                 <SelectPrimitive.ItemText>
                   {option.label}
@@ -267,7 +267,7 @@ export function DataTable<T>({
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[680px] text-left">
-        <thead className="bg-stone-50 text-[11px] uppercase tracking-wider text-stone-500">
+        <thead className="bg-muted text-[11px] uppercase tracking-wider text-muted-foreground">
           {table.getHeaderGroups().map((group) => (
             <tr key={group.id}>
               {group.headers.map((header) => (
@@ -283,9 +283,9 @@ export function DataTable<T>({
             </tr>
           ))}
         </thead>
-        <tbody className="divide-y divide-stone-100">
+        <tbody className="divide-y divide-border">
           {table.getRowModel().rows.map((row) => (
-            <tr key={row.id} className="hover:bg-stone-50/70">
+            <tr key={row.id} className="hover:bg-muted/60">
               {row.getVisibleCells().map((cell) => (
                 <td key={cell.id} className="px-5 py-3.5 text-sm">
                   {flexRender(cell.column.columnDef.cell, cell.getContext())}
@@ -296,7 +296,7 @@ export function DataTable<T>({
         </tbody>
       </table>
       {data.length === 0 && (
-        <div className="p-12 text-center text-sm text-stone-500">
+        <div className="p-12 text-center text-sm text-muted-foreground">
           No matching records.
         </div>
       )}

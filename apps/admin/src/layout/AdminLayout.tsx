@@ -10,16 +10,19 @@ export function AdminLayout() {
   const { auth, signOut } = useContext(AuthContext);
   const { reviews, packs, users } = useAdminData();
   return (
-    <div className="min-h-screen bg-stone-50 text-stone-900 lg:grid lg:grid-cols-[260px_1fr]">
-      <aside className="border-b border-emerald-950/10 bg-emerald-950 text-emerald-50 lg:sticky lg:top-0 lg:h-screen lg:border-b-0 lg:border-r">
+    <div className="min-h-screen bg-background text-foreground lg:grid lg:grid-cols-[260px_1fr]">
+      <aside className="border-b border-sidebar-border bg-sidebar text-sidebar-foreground lg:sticky lg:top-0 lg:h-screen lg:border-b-0 lg:border-r">
         <div className="flex h-full flex-col p-4">
           <div className="flex items-center gap-3 px-2 py-3">
-            <div className="grid size-10 place-items-center rounded-xl bg-lime-200 font-serif text-2xl text-emerald-950">
-              N
-            </div>
+            <img
+              src={`${import.meta.env.BASE_URL}nest-logo-transparent.png`}
+              alt=""
+              className="size-10 object-contain"
+              draggable={false}
+            />
             <div>
               <p className="font-serif text-lg leading-none">Nest Hub</p>
-              <p className="mt-1 text-xs text-emerald-200/60">
+              <p className="mt-1 text-xs text-sidebar-muted">
                 Operations console
               </p>
             </div>
@@ -45,9 +48,9 @@ export function AdminLayout() {
               badge={users.data?.length}
             />
           </nav>
-          <div className="mt-auto hidden border-t border-white/10 px-2 pt-4 lg:block">
+          <div className="mt-auto hidden border-t border-sidebar-border px-2 pt-4 lg:block">
             <p className="text-sm font-medium">{auth.user.name}</p>
-            <p className="text-xs text-emerald-200/60">
+            <p className="text-xs text-sidebar-muted">
               @{auth.user.id} · {auth.user.role}
             </p>
             <Button

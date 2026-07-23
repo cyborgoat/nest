@@ -81,7 +81,7 @@ export function UsersPage() {
         cell: ({ row }) => (
           <div>
             <p className="font-medium">{row.original.name}</p>
-            <p className="text-xs text-stone-500">@{row.original.id}</p>
+            <p className="text-xs text-muted-foreground">@{row.original.id}</p>
           </div>
         ),
       },
@@ -89,7 +89,7 @@ export function UsersPage() {
         accessorKey: "created_at",
         header: "Joined",
         cell: ({ getValue }) => (
-          <span className="text-sm text-stone-500">
+          <span className="text-sm text-muted-foreground">
             {getValue() ? formatDate(String(getValue())) : "—"}
           </span>
         ),
@@ -177,8 +177,8 @@ export function UsersPage() {
         />
       </div>
       <Card className="p-0">
-        <div className="flex items-center border-b border-stone-200 p-4">
-          <Search className="mr-2 size-4 text-stone-400" />
+        <div className="flex items-center border-b border-border p-4">
+          <Search className="mr-2 size-4 text-muted-foreground" />
           <input
             className="w-full bg-transparent text-sm outline-none"
             placeholder="Search people…"
@@ -194,7 +194,7 @@ export function UsersPage() {
         title="Delete user account"
         description={`Permanently delete @${deleteTarget?.id ?? "this user"} and revoke their access.`}
       >
-        <p className="text-sm leading-6 text-stone-600">
+        <p className="text-sm leading-6 text-muted-foreground">
           Sessions, messages, access grants, and pending submissions will be
           removed. Published packs and reviewed publishing history will remain.
         </p>

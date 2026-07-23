@@ -48,21 +48,24 @@ export function Login({ onAuth }: { onAuth: (auth: Auth) => void }) {
     }
   };
   return (
-    <div className="grid min-h-screen bg-stone-50 lg:grid-cols-[1.08fr_.92fr]">
-      <section className="relative hidden overflow-hidden bg-emerald-950 p-16 text-white lg:flex lg:flex-col lg:justify-center">
-        <div className="absolute -right-28 -top-28 size-96 rounded-full border border-lime-200/10" />
-        <div className="absolute -bottom-48 left-20 size-[34rem] rounded-full border border-lime-200/10" />
+    <div className="grid min-h-screen bg-background lg:grid-cols-[1.08fr_.92fr]">
+      <section className="relative hidden overflow-hidden bg-sidebar p-16 text-sidebar-foreground lg:flex lg:flex-col lg:justify-center">
+        <div className="absolute -right-28 -top-28 size-96 rounded-full border border-white/10" />
+        <div className="absolute -bottom-48 left-20 size-[34rem] rounded-full border border-white/10" />
         <div className="relative max-w-xl">
-          <div className="grid size-14 place-items-center rounded-2xl bg-lime-200 font-serif text-3xl text-emerald-950">
-            N
-          </div>
-          <p className="mt-12 text-xs font-bold uppercase tracking-[.2em] text-lime-200">
+          <img
+            src={`${import.meta.env.BASE_URL}nest-logo-transparent.png`}
+            alt=""
+            className="size-14 object-contain"
+            draggable={false}
+          />
+          <p className="mt-12 text-xs font-bold uppercase tracking-[.2em] text-sidebar-muted">
             Nest Hub operations
           </p>
           <h1 className="mt-4 font-serif text-6xl leading-[1.03] tracking-tight">
             Guard the quality of shared knowledge.
           </h1>
-          <p className="mt-6 max-w-lg text-lg leading-8 text-emerald-100/65">
+          <p className="mt-6 max-w-lg text-lg leading-8 text-sidebar-muted">
             Review releases, manage access, and keep every published version
             trustworthy.
           </p>
@@ -70,11 +73,11 @@ export function Login({ onAuth }: { onAuth: (auth: Auth) => void }) {
       </section>
       <section className="flex items-center justify-center p-6">
         <form onSubmit={submit} className="w-full max-w-sm">
-          <p className="text-xs font-bold uppercase tracking-[.18em] text-emerald-700">
+          <p className="text-xs font-bold uppercase tracking-[.18em] text-primary">
             Secure administration
           </p>
           <h2 className="mt-3 font-serif text-4xl">Administrator sign in</h2>
-          <p className="mt-2 text-sm text-stone-500">
+          <p className="mt-2 text-sm text-muted-foreground">
             Use your Nest Hub administrator credentials.
           </p>
           <div className="mt-8 space-y-4">
@@ -98,7 +101,7 @@ export function Login({ onAuth }: { onAuth: (auth: Auth) => void }) {
             </Field>
           </div>
           {error && (
-            <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            <div className="mt-4 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
               {error}
             </div>
           )}

@@ -1,8 +1,67 @@
 @import "tailwindcss";
 
-@theme {
-  --font-sans: "DM Sans", ui-sans-serif, system-ui, sans-serif;
-  --font-serif: "Newsreader", Georgia, serif;
+/*
+  Design tokens — ported from the desktop app's cool silver-and-white
+  palette (apps/desktop/src/index.css) so the admin console and desktop
+  app read as one product. The sidebar/nav-rail tokens are admin-only
+  (the desktop app has no persistent dark surface).
+*/
+:root {
+  --background: #f7f7f8;
+  --card: #ffffff;
+  --panel: #fafafa;
+  --muted: #ebebed;
+  --foreground: #27272a;
+  --muted-foreground: #71717a;
+  --border: #dedee3;
+  --primary: #52525b;
+  --primary-foreground: #ffffff;
+  --accent: #73737c;
+  --accent-foreground: #ffffff;
+  --accent-text: #52525b;
+  --destructive: #b42318;
+  --destructive-foreground: #ffffff;
+  --ring: var(--primary);
+  --overlay: rgb(39 39 42 / 0.38);
+  --radius: 0.5rem;
+
+  --sidebar: #1b1b1e;
+  --sidebar-foreground: #f4f4f5;
+  --sidebar-muted: rgb(244 244 245 / 0.6);
+  --sidebar-border: rgb(255 255 255 / 0.08);
+  --sidebar-active: rgb(255 255 255 / 0.08);
+}
+
+@theme inline {
+  --font-sans: "Source Sans 3", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Source Serif 4", "Georgia", serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-card: var(--card);
+  --color-panel: var(--panel);
+  --color-border: var(--border);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent-text: var(--accent-text);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-ring: var(--ring);
+  --color-overlay: var(--overlay);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-muted: var(--sidebar-muted);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-active: var(--sidebar-active);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
 }
 
 @layer base {
@@ -11,7 +70,7 @@
   }
   html {
     min-width: 320px;
-    background: #fafaf9;
+    background: var(--background);
   }
   body {
     margin: 0;
@@ -34,17 +93,17 @@
   .input {
     width: 100%;
     border-radius: 0.5rem;
-    border: 1px solid #d6d3d1;
-    background: white;
+    border: 1px solid var(--border);
+    background: var(--color-card);
     padding: 0.625rem 0.75rem;
-    color: #1c1917;
+    color: var(--foreground);
     outline: none;
     transition:
       border-color 0.15s,
       box-shadow 0.15s;
   }
   .input:focus {
-    border-color: #047857;
-    box-shadow: 0 0 0 3px rgb(16 185 129 / 0.12);
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgb(82 82 91 / 0.15);
   }
 }

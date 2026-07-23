@@ -1,14 +1,7 @@
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import {
-  Archive,
-  Download,
-  Eye,
-  MoreHorizontal,
-  Pencil,
-  Trash2,
-} from "lucide-react";
+import { Archive, Download, Eye, MoreHorizontal, Trash2 } from "lucide-react";
 import type { AdminPack as Pack } from "@nest/shared";
 import { useApi } from "../app/contexts";
 import { adminQueryKeys } from "../lib/api";
@@ -17,15 +10,12 @@ import { Button } from "./ui";
 export function PackActionsMenu({
   pack,
   hideViewDetails = false,
-  onEdit,
   onDeleteRequest,
   triggerLabel,
 }: {
   pack: Pack;
   /** Omit "View details" when this menu already lives on that pack's detail page. */
   hideViewDetails?: boolean;
-  /** Parent owns the edit-dialog open state (one dialog instance per page). */
-  onEdit: (pack: Pack) => void;
   /** Parent owns the delete-confirmation dialog's target state. */
   onDeleteRequest: (pack: Pack) => void;
   triggerLabel?: string;
@@ -55,14 +45,14 @@ export function PackActionsMenu({
       <DropdownMenuPrimitive.Portal>
         <DropdownMenuPrimitive.Content
           align="end"
-          className="z-50 min-w-40 rounded-lg border border-stone-200 bg-white p-1 shadow-xl"
+          className="z-50 min-w-40 rounded-lg border border-border bg-card p-1 shadow-xl"
         >
           {!hideViewDetails && (
             <DropdownMenuPrimitive.Item asChild>
               <Link
                 to="/packs/$packId"
                 params={{ packId: pack.id }}
-                className="flex cursor-default items-center gap-2 rounded-md px-3 py-2 text-sm outline-none hover:bg-stone-50 focus:bg-stone-50"
+                className="flex cursor-default items-center gap-2 rounded-md px-3 py-2 text-sm outline-none hover:bg-muted focus:bg-muted"
               >
                 <Eye className="size-4" /> View details
               </Link>
@@ -72,28 +62,22 @@ export function PackActionsMenu({
             <a
               href={`/packs/${pack.id}/download`}
               download
-              className="flex cursor-default items-center gap-2 rounded-md px-3 py-2 text-sm outline-none hover:bg-stone-50 focus:bg-stone-50"
+              className="flex cursor-default items-center gap-2 rounded-md px-3 py-2 text-sm outline-none hover:bg-muted focus:bg-muted"
             >
               <Download className="size-4" /> Download .zip
             </a>
           </DropdownMenuPrimitive.Item>
           <DropdownMenuPrimitive.Item
-            className="flex cursor-default items-center gap-2 rounded-md px-3 py-2 text-sm outline-none data-[highlighted]:bg-stone-50"
-            onSelect={() => onEdit(pack)}
-          >
-            <Pencil className="size-4" /> Edit
-          </DropdownMenuPrimitive.Item>
-          <DropdownMenuPrimitive.Item
             disabled={archiveToggle.isPending}
-            className="flex cursor-default items-center gap-2 rounded-md px-3 py-2 text-sm outline-none data-[disabled]:opacity-50 data-[highlighted]:bg-stone-50"
+            className="flex cursor-default items-center gap-2 rounded-md px-3 py-2 text-sm outline-none data-[disabled]:opacity-50 data-[highlighted]:bg-muted"
             onSelect={() => archiveToggle.mutate()}
           >
             <Archive className="size-4" />
             {pack.archived ? "Restore" : "Archive"}
           </DropdownMenuPrimitive.Item>
-          <DropdownMenuPrimitive.Separator className="my-1 h-px bg-stone-100" />
+          <DropdownMenuPrimitive.Separator className="my-1 h-px bg-border" />
           <DropdownMenuPrimitive.Item
-            className="flex cursor-default items-center gap-2 rounded-md px-3 py-2 text-sm text-red-700 outline-none data-[highlighted]:bg-red-50"
+            className="flex cursor-default items-center gap-2 rounded-md px-3 py-2 text-sm text-destructive outline-none data-[highlighted]:bg-destructive/10"
             onSelect={() => onDeleteRequest(pack)}
           >
             <Trash2 className="size-4" /> Delete permanently
