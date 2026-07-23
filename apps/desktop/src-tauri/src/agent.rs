@@ -3,7 +3,10 @@
 use crate::db::{self, AppSettings, Citation};
 use crate::error::{AppError, AppResult};
 use crate::llm::ChatStreamEvent;
-use crate::retrieval::{self, agent_preamble, format_citations_for_prompt, DEFAULT_TOP_K};
+use crate::retrieval::{
+    self, agent_preamble, format_active_packs_for_prompt, format_citations_for_prompt,
+    DEFAULT_TOP_K,
+};
 use crate::state::SharedState;
 use crate::vault;
 use futures::StreamExt;
@@ -81,10 +84,18 @@ pub async fn run_agent_chat(request: AgentChatRequest) -> AppResult<AgentChatRes
 
     let mut cancel_rx = state.begin_chat_cancel();
 
-    // Active packs form the retrieval scope; @ focus narrows further.
-    let retrieval_prefixes = {
+    // Active packs form the retrieval scope; @ focus narrows further. Also
+    // fetch the full active-pack list (name + path) in the same lock so the
+    // preamble can always tell the model what's installed, not just this
+    // turn's retrieval scope.
+    let (retrieval_prefixes, active_packs) = {
         let conn = state.db.lock();
-        db::resolve_retrieval_prefixes(&conn, &focus_paths)?
+        let prefixes = db::resolve_retrieval_prefixes(&conn, &focus_paths)?;
+        let packs = db::list_sync_state(&conn)?
+            .into_iter()
+            .filter(|p| p.active)
+            .collect::<Vec<_>>();
+        (prefixes, packs)
     };
 
     // `resolve_retrieval_prefixes` rejects focus outside active packs. Reuse
@@ -139,7 +150,7 @@ pub async fn run_agent_chat(request: AgentChatRequest) -> AppResult<AgentChatRes
     crate::nest_debug!("agent", "eager_retrieval hits={}", eager.len());
     let focus_count = focus_context.citations.len();
     let citations = merge_citations(focus_context.citations, eager);
-    let preamble = agent_preamble_with_retrieval(&citations, focus_count > 0);
+    let preamble = agent_preamble_with_retrieval(&citations, focus_count > 0, &active_packs);
     let reading_paths = citations
         .iter()
         .map(|citation| citation.file_path.clone())
@@ -297,29 +308,34 @@ pub async fn run_agent_chat(request: AgentChatRequest) -> AppResult<AgentChatRes
     })
 }
 
-fn agent_preamble_with_retrieval(citations: &[Citation], has_focus_content: bool) -> String {
-    if citations.is_empty() && !has_focus_content {
-        return format!(
-            "{}\n\nNo relevant passages were retrieved for this request. Only answer if the prior conversation already contains the necessary vault evidence; otherwise say that the local library has no matching knowledge and suggest finding a relevant pack in Hub.",
+fn agent_preamble_with_retrieval(
+    citations: &[Citation],
+    has_focus_content: bool,
+    active_packs: &[db::InstalledPack],
+) -> String {
+    let body = if citations.is_empty() && !has_focus_content {
+        format!(
+            "{}\n\nNo relevant passages were retrieved for this request. Only answer if the prior conversation already contains the necessary vault evidence; otherwise say plainly that nothing indexed matches this request. You may point the user to one of the active packs listed below if it looks relevant, or suggest finding a different pack in Hub.",
             agent_preamble()
-        );
-    }
-    if citations.is_empty() {
-        return format!(
+        )
+    } else if citations.is_empty() {
+        format!(
             "{}\n\nThe user explicitly selected vault files. Their contents are included in the request under 'Explicitly selected vault content'. Treat that content as authoritative local evidence and answer from it; do not claim that the local library has no matching knowledge merely because indexed retrieval returned no passages.",
             agent_preamble()
-        );
-    }
-    let focus_instruction = if has_focus_content {
-        " The request also contains full explicitly selected vault files corresponding to the initial references; treat them as authoritative local evidence and use both sources."
+        )
     } else {
-        ""
+        let focus_instruction = if has_focus_content {
+            " The request also contains full explicitly selected vault files corresponding to the initial references; treat them as authoritative local evidence and use both sources."
+        } else {
+            ""
+        };
+        format!(
+            "{}\n\nThe following passages were retrieved locally for this request. Use them as factual evidence for the answer.{focus_instruction}\n\n{}",
+            agent_preamble(),
+            format_citations_for_prompt(citations),
+        )
     };
-    format!(
-        "{}\n\nThe following passages were retrieved locally for this request. Use them as factual evidence for the answer.{focus_instruction}\n\n{}",
-        agent_preamble(),
-        format_citations_for_prompt(citations),
-    )
+    format!("{body}\n\n{}", format_active_packs_for_prompt(active_packs))
 }
 
 fn build_focus_context(state: &SharedState, focus_paths: &[String]) -> AppResult<FocusContext> {
@@ -429,7 +445,7 @@ mod tests {
     use super::{
         agent_preamble_with_retrieval, collect_markdown_files, merge_citations, truncate_chars,
     };
-    use crate::db::Citation;
+    use crate::db::{Citation, InstalledPack};
     use crate::vault::{TreeNode, TreeNodeKind};
 
     #[test]
@@ -482,9 +498,25 @@ mod tests {
             snippet: "Cubicles documentation".into(),
             score: 1.0,
         };
-        let preamble = agent_preamble_with_retrieval(&[focused], true);
+        let preamble = agent_preamble_with_retrieval(&[focused], true, &[]);
         assert!(preamble.contains("authoritative local evidence"));
         assert!(!preamble.contains("No relevant passages were retrieved"));
+    }
+
+    #[test]
+    fn active_packs_are_listed_even_without_citations() {
+        let pack = InstalledPack {
+            pack_id: "cooking".into(),
+            name: "Cooking Basics".into(),
+            local_path: "cooking-pack".into(),
+            version: "1.0.0".into(),
+            last_synced: None,
+            active: true,
+            origin: "hub".into(),
+        };
+        let preamble = agent_preamble_with_retrieval(&[], false, &[pack]);
+        assert!(preamble.contains("Cooking Basics"));
+        assert!(preamble.contains("cooking-pack"));
     }
 
     #[test]

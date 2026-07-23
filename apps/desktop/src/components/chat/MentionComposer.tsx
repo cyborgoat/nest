@@ -7,6 +7,7 @@ import {
   type KeyboardEvent,
 } from "react";
 import { Button } from "@/components/ui/button";
+import { renderWithMentions } from "@/components/chat/mention-pill";
 import { cn } from "@/lib/utils";
 
 export type MentionRef = {
@@ -39,6 +40,16 @@ export function MentionComposer({
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [highlight, setHighlight] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const mirrorRef = useRef<HTMLDivElement>(null);
+
+  // Only mentions the user actually accepted from the dropdown render as live
+  // pills — mirrors trySend's own matching semantics below, so a coincidental
+  // "@word" that happens to match an unrelated vault filename never renders
+  // as a pill while still typing.
+  const mentionMap = useMemo(
+    () => new Map(refs.map((r) => [r.name, r])),
+    [refs],
+  );
 
   const filtered = useMemo(() => {
     if (mentionQuery == null) return [];
@@ -157,13 +168,20 @@ export function MentionComposer({
           "relative min-h-[72px] rounded-md border border-border bg-card px-2 pt-2 pb-9",
         )}
       >
+        <div
+          ref={mirrorRef}
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words px-2 pt-2 pb-9 pr-8 text-sm"
+        >
+          {renderWithMentions(text, mentionMap)}
+        </div>
         <textarea
           ref={textareaRef}
           value={text}
           disabled={isGenerating}
           placeholder={placeholder}
           rows={2}
-          className="w-full resize-none bg-transparent pr-8 text-sm outline-none placeholder:text-muted-foreground"
+          className="relative w-full resize-none bg-transparent pr-8 text-sm text-transparent caret-foreground outline-none placeholder:text-muted-foreground"
           onChange={(e) => {
             const value = e.target.value;
             setText(value);
@@ -183,6 +201,12 @@ export function MentionComposer({
             );
           }}
           onKeyDown={onKeyDown}
+          onScroll={(e) => {
+            if (mirrorRef.current) {
+              mirrorRef.current.scrollTop = e.currentTarget.scrollTop;
+              mirrorRef.current.scrollLeft = e.currentTarget.scrollLeft;
+            }
+          }}
         />
         {isGenerating ? (
           <Button

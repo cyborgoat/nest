@@ -495,7 +495,7 @@ pub fn fts_search(
     query: &str,
     limit: u32,
     retrieval_prefixes: &[String],
-) -> AppResult<Vec<Citation>> {
+) -> AppResult<Vec<(Citation, String)>> {
     if retrieval_prefixes.is_empty() {
         return Ok(Vec::new());
     }
@@ -537,13 +537,16 @@ pub fn fts_search(
     let rows = stmt.query_map(params_refs.as_slice(), |row| {
         let content: String = row.get(3)?;
         let bm: f64 = row.get(4)?;
-        Ok(Citation {
-            chunk_id: row.get(0)?,
-            file_path: row.get(1)?,
-            title: row.get(2)?,
-            snippet: snippet(&content),
-            score: (-bm as f32).max(0.01),
-        })
+        Ok((
+            Citation {
+                chunk_id: row.get(0)?,
+                file_path: row.get(1)?,
+                title: row.get(2)?,
+                snippet: snippet(&content),
+                score: (-bm as f32).max(0.01),
+            },
+            content,
+        ))
     });
 
     match rows {
@@ -558,7 +561,7 @@ pub fn lexical_search(
     query: &str,
     limit: u32,
     retrieval_prefixes: &[String],
-) -> AppResult<Vec<Citation>> {
+) -> AppResult<Vec<(Citation, String)>> {
     let terms = tokenize(query);
     if terms.is_empty() {
         return Ok(Vec::new());
@@ -574,7 +577,7 @@ pub fn lexical_search(
         ))
     })?;
 
-    let mut scored: Vec<Citation> = Vec::new();
+    let mut scored: Vec<(Citation, String)> = Vec::new();
     for row in rows.flatten() {
         let (id, path, title, content) = row;
         if !path_in_prefixes(&path, retrieval_prefixes) {
@@ -590,17 +593,20 @@ pub fn lexical_search(
             }
         }
         if score > 0.0 {
-            scored.push(Citation {
-                chunk_id: id,
-                file_path: path,
-                title,
-                snippet: snippet(&content),
-                score,
-            });
+            scored.push((
+                Citation {
+                    chunk_id: id,
+                    file_path: path,
+                    title,
+                    snippet: snippet(&content),
+                    score,
+                },
+                content,
+            ));
         }
     }
 
-    scored.sort_by(|a, b| {
+    scored.sort_by(|(a, _), (b, _)| {
         b.score
             .partial_cmp(&a.score)
             .unwrap_or(std::cmp::Ordering::Equal)

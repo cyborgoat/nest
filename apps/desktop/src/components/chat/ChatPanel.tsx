@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ChatMessage, ChatSession, Citation } from "@nest/shared";
-import { AlertCircle, ChevronDown, FileText, Folder, Lightbulb, X } from "lucide-react";
+import { AlertCircle, ChevronDown, Lightbulb, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   AgentStatusIndicator,
@@ -8,6 +8,7 @@ import {
 } from "@/components/chat/AgentStatusIndicator";
 import { ChatSessionBar } from "@/components/chat/ChatSessionBar";
 import { MentionComposer, type MentionRef } from "@/components/chat/MentionComposer";
+import { renderWithMentions } from "@/components/chat/mention-pill";
 import { collectMentionCandidates } from "@/components/library/LibraryTree";
 import { MarkdownBody } from "@/components/markdown/MarkdownBody";
 import {
@@ -438,27 +439,6 @@ function UserBubble({
       </div>
     </div>
   );
-}
-
-function renderWithMentions(content: string, mentions: Map<string, MentionRef>) {
-  return content.split(/(@[^\s]+)/g).map((part, i) => {
-    const ref = part.startsWith("@") ? mentions.get(part.slice(1)) : undefined;
-    if (!ref) return part;
-    return (
-      <span
-        key={i}
-        className="mx-0.5 inline-flex max-w-[10rem] items-center gap-1 rounded-full bg-primary-foreground/15 px-1.5 py-0.5 align-middle text-[11px] font-medium"
-        title={ref.path}
-      >
-        {ref.kind === "folder" ? (
-          <Folder className="size-2.5 shrink-0" />
-        ) : (
-          <FileText className="size-2.5 shrink-0" />
-        )}
-        <span className="truncate">{ref.name}</span>
-      </span>
-    );
-  });
 }
 
 function AssistantBubble({ children }: { children: ReactNode }) {

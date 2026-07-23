@@ -7,7 +7,7 @@ use uuid::Uuid;
 use walkdir::WalkDir;
 
 const TARGET_CHUNK_CHARS: usize = 1200;
-const OVERLAP_CHARS: usize = 150;
+pub(crate) const OVERLAP_CHARS: usize = 150;
 
 #[derive(Debug, Clone)]
 pub struct TextChunk {
