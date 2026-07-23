@@ -254,7 +254,7 @@ export default function App() {
               onClick={openMessagesTab}
               icon={<Bell className="size-4" />}
               label="Messages"
-              badge={messageCountQuery.data?.count ?? 0}
+              dot={(messageCountQuery.data?.count ?? 0) > 0}
             />
             <NavButton
               active={activeMainTabId === SETTINGS_TAB_ID}
@@ -395,14 +395,14 @@ function NavButton({
   icon,
   label,
   title,
-  badge,
+  dot,
 }: {
   active: boolean;
   onClick: () => void;
   icon: ReactNode;
   label: string;
   title?: string;
-  badge?: number;
+  dot?: boolean;
 }) {
   return (
     <Button
@@ -411,13 +411,13 @@ function NavButton({
       onClick={onClick}
       title={title}
     >
-      {icon}
+      <span className="relative inline-flex">
+        {icon}
+        {dot ? (
+          <span className="absolute -right-1 -top-1 block size-2.5 rounded-full bg-destructive ring-2 ring-background" />
+        ) : null}
+      </span>
       {label}
-      {badge ? (
-        <span className="ml-0.5 min-w-5 rounded-full bg-primary px-1.5 py-0.5 text-center text-[10px] font-semibold leading-none text-primary-foreground">
-          {badge > 99 ? "99+" : badge}
-        </span>
-      ) : null}
     </Button>
   );
 }

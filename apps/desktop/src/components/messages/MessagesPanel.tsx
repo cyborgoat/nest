@@ -4,7 +4,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import type { HubMessage } from "@nest/shared";
+import type { HubMessage, HubMessageKind } from "@nest/shared";
 import {
   Bell,
   Check,
@@ -13,9 +13,10 @@ import {
   Inbox,
   Send,
   Trash2,
+  type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
-import { Badge } from "@/components/ui/badge";
+import { Badge, POSITIVE_TONE_CLASSES } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PanelHeader } from "@/components/ui/panel-header";
@@ -26,6 +27,27 @@ import { appErrorMessage } from "@/lib/errors";
 import { queryKeys } from "@/lib/query-keys";
 import { useUiStore } from "@/stores/ui";
 import { useState } from "react";
+
+const MESSAGE_KIND_STYLES: Record<
+  HubMessageKind,
+  { Icon: LucideIcon; tone: string; stripe: string }
+> = {
+  publish_submitted: {
+    Icon: Send,
+    tone: "text-accent-foreground bg-accent/15",
+    stripe: "border-l-accent",
+  },
+  publish_approved: {
+    Icon: Check,
+    tone: POSITIVE_TONE_CLASSES,
+    stripe: "border-l-[#23663a]",
+  },
+  publish_rejected: {
+    Icon: CircleAlert,
+    tone: "text-destructive bg-destructive/10",
+    stripe: "border-l-destructive",
+  },
+};
 
 export function MessagesPanel() {
   const [filter, setFilter] = useState<"all" | "unread">("all");
@@ -192,21 +214,10 @@ function MessageRow({
   onDelete: () => void;
 }) {
   const unread = !message.read_at;
-  const Icon =
-    message.kind === "publish_submitted"
-      ? Send
-      : message.kind === "publish_approved"
-        ? Check
-        : CircleAlert;
-  const tone =
-    message.kind === "publish_rejected"
-      ? "text-destructive bg-destructive/10"
-      : message.kind === "publish_approved"
-        ? "text-primary bg-primary/10"
-        : "text-accent-foreground bg-accent/15";
+  const { Icon, tone, stripe } = MESSAGE_KIND_STYLES[message.kind];
   return (
     <article
-      className={`rounded-lg border bg-card p-4 transition-colors ${unread ? "border-primary/30 shadow-sm" : "border-border"}`}
+      className={`rounded-lg border border-l-4 bg-card p-4 transition-colors ${stripe} ${unread ? "border-primary/30 shadow-sm" : "border-border"}`}
     >
       <div className="flex items-start gap-3">
         <div

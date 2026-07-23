@@ -7,12 +7,13 @@ import {
   Patch,
   Post,
   Req,
+  Res,
   UploadedFile,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 import { RegistryAdminGuard } from '../auth/auth.guard';
 import type { UserRole } from '../auth/auth.types';
 import {
@@ -59,6 +60,15 @@ export class AdminController {
     @Body() body: { note: string },
   ) {
     return this.publishing.reject(id, req.authUser!, body.note ?? '');
+  }
+  @Get('publish-requests/:id/download') async download(
+    @Param('id') id: string,
+    @Res() res: Response,
+  ) {
+    const { buffer, filename } = await this.publishing.getStagingZip(id);
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(buffer);
   }
   @Get('packs') packs() {
     return this.admin.listPacks();

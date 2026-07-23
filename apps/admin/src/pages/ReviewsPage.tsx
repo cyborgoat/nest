@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
-import { Check, X } from "lucide-react";
+import { Check, Download, X } from "lucide-react";
 import type { PendingPublishRequest as RequestItem } from "@nest/shared";
 import {
   Badge,
   Button,
+  buttonClass,
   Card,
   Dialog,
   Empty,
@@ -87,6 +88,14 @@ export function ReviewsPage() {
                 sha256 {item.checksum.slice(0, 14)}…
               </code>
               <div className="flex gap-2">
+                <a
+                  className={buttonClass("outline")}
+                  href={`/api/admin/publish-requests/${item.id}/download`}
+                  download
+                >
+                  <Download />
+                  Download
+                </a>
                 <Button
                   variant="danger"
                   disabled={review.isPending}

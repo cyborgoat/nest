@@ -1,7 +1,14 @@
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { Archive, Eye, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import {
+  Archive,
+  Download,
+  Eye,
+  MoreHorizontal,
+  Pencil,
+  Trash2,
+} from "lucide-react";
 import type { AdminPack as Pack } from "@nest/shared";
 import { useApi } from "../app/contexts";
 import { adminQueryKeys } from "../lib/api";
@@ -61,6 +68,15 @@ export function PackActionsMenu({
               </Link>
             </DropdownMenuPrimitive.Item>
           )}
+          <DropdownMenuPrimitive.Item asChild>
+            <a
+              href={`/packs/${pack.id}/download`}
+              download
+              className="flex cursor-default items-center gap-2 rounded-md px-3 py-2 text-sm outline-none hover:bg-stone-50 focus:bg-stone-50"
+            >
+              <Download className="size-4" /> Download .zip
+            </a>
+          </DropdownMenuPrimitive.Item>
           <DropdownMenuPrimitive.Item
             className="flex cursor-default items-center gap-2 rounded-md px-3 py-2 text-sm outline-none data-[highlighted]:bg-stone-50"
             onSelect={() => onEdit(pack)}
