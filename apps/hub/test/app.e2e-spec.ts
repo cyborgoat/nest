@@ -455,6 +455,75 @@ describe('Hub (e2e)', () => {
     );
   });
 
+  it('still logs a receipt when the reviewer is the same account as the submitter', async () => {
+    const adminLogin = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ id: 'role-admin', password: 'role-test-password' })
+      .expect(201);
+    const packZip = (id: string, version: string) => {
+      const zip = new AdmZip();
+      zip.addFile(
+        `${id}/pack.json`,
+        Buffer.from(
+          JSON.stringify({
+            id,
+            name: 'Self Review Pack',
+            description: 'Self-review receipt fixture',
+            version,
+          }),
+        ),
+      );
+      zip.addFile(`${id}/README.md`, Buffer.from(`# v${version}`));
+      return zip;
+    };
+
+    const approved = await request(app.getHttpServer())
+      .post('/api/publish-requests')
+      .set('Authorization', `Bearer ${adminLogin.body.access_token}`)
+      .attach(
+        'file',
+        packZip('self-review-approved', '1.0.0').toBuffer(),
+        'self-review-approved.zip',
+      )
+      .expect(201);
+    await request(app.getHttpServer())
+      .post(`/api/admin/publish-requests/${approved.body.id}/approve`)
+      .set('Authorization', `Bearer ${adminLogin.body.access_token}`)
+      .expect(201);
+
+    const rejected = await request(app.getHttpServer())
+      .post('/api/publish-requests')
+      .set('Authorization', `Bearer ${adminLogin.body.access_token}`)
+      .attach(
+        'file',
+        packZip('self-review-rejected', '1.0.0').toBuffer(),
+        'self-review-rejected.zip',
+      )
+      .expect(201);
+    await request(app.getHttpServer())
+      .post(`/api/admin/publish-requests/${rejected.body.id}/reject`)
+      .set('Authorization', `Bearer ${adminLogin.body.access_token}`)
+      .send({ note: 'Not good enough, even from myself.' })
+      .expect(201);
+
+    const messages = await request(app.getHttpServer())
+      .get('/api/messages')
+      .set('Authorization', `Bearer ${adminLogin.body.access_token}`)
+      .expect(200);
+    expect(messages.body.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'publish_approved',
+          publish_request_id: approved.body.id,
+        }),
+        expect.objectContaining({
+          kind: 'publish_rejected',
+          publish_request_id: rejected.body.id,
+        }),
+      ]),
+    );
+  });
+
   it('locks a pack against further submissions while any version is pending review, for anyone', async () => {
     const authorLogin = await request(app.getHttpServer())
       .post('/api/auth/login')

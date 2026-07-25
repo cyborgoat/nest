@@ -239,10 +239,10 @@ export class PublishingService {
             version: validated.version,
           },
         );
-        if (
-          request.submitter_uuid &&
-          request.submitter_uuid !== reviewer.uuid
-        ) {
+        if (request.submitter_uuid) {
+          // Always log a receipt, even when the reviewer is the submitter
+          // (e.g. an admin approving their own upload) — it's a confirmation
+          // of what happened, not just a notification to someone else.
           this.messages.create({
             userUuid: request.submitter_uuid,
             kind: 'publish_approved',
@@ -289,7 +289,8 @@ export class PublishingService {
           note: note.trim(),
         },
       );
-      if (request.submitter_uuid && request.submitter_uuid !== reviewer.uuid) {
+      if (request.submitter_uuid) {
+        // Always log a receipt, even when the reviewer is the submitter.
         this.messages.create({
           userUuid: request.submitter_uuid,
           kind: 'publish_rejected',
