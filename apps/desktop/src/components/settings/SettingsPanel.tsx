@@ -8,6 +8,8 @@ import {
   LoaderCircle,
   Network,
   Palette,
+  Settings2,
+  UserRound,
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -233,8 +235,14 @@ export function SettingsPanel() {
             className="space-y-5"
           >
             <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="general">General</TabsTrigger>
-              <TabsTrigger value="account">Account</TabsTrigger>
+              <TabsTrigger value="general">
+                <Settings2 className="size-4" />
+                General
+              </TabsTrigger>
+              <TabsTrigger value="account">
+                <UserRound className="size-4" />
+                Account
+              </TabsTrigger>
             </TabsList>
             <TabsContent value="account">
               <HubAccountSettings />

@@ -30,11 +30,6 @@ export function HubAccountSettings() {
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [profileName, setProfileName] = useState("");
   const auth = useQuery({ queryKey: queryKeys.hubAuth, queryFn: api.hubAuthState });
-  const requests = useQuery({
-    queryKey: queryKeys.publishRequests,
-    queryFn: api.hubListPublishRequests,
-    enabled: auth.data?.authenticated === true,
-  });
   useEffect(() => {
     if (auth.data?.user) setProfileName(auth.data.user.name);
   }, [auth.data?.user]);
@@ -44,7 +39,6 @@ export function HubAccountSettings() {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: queryKeys.hubAuth }),
       queryClient.invalidateQueries({ queryKey: queryKeys.catalog }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.publishRequests }),
       queryClient.invalidateQueries({ queryKey: queryKeys.messages }),
       queryClient.invalidateQueries({ queryKey: queryKeys.messageCount }),
     ]);
@@ -149,32 +143,6 @@ export function HubAccountSettings() {
                   Change password
                 </Button>
               </div>
-            </div>
-            <div>
-              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Recent publishing requests
-              </p>
-              {requests.data?.length ? (
-                <div className="space-y-2">
-                  {requests.data.slice(0, 4).map((request) => (
-                    <div
-                      key={request.id}
-                      className="flex items-center justify-between rounded-md bg-muted/60 px-3 py-2 text-xs"
-                    >
-                      <span>
-                        {request.pack_id}@{request.version}
-                      </span>
-                      <Badge variant="outline" className="capitalize">
-                        {request.status}
-                      </Badge>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  No submissions yet.
-                </p>
-              )}
             </div>
           </>
         ) : (

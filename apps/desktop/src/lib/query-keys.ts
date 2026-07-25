@@ -6,7 +6,6 @@ export const queryKeys = {
   catalog: ["packs"] as const,
   hubStatus: ["hub-status"] as const,
   hubAuth: ["hub-auth"] as const,
-  publishRequests: ["publish-requests"] as const,
   publishReconcile: ["publish-reconcile"] as const,
   messages: ["hub-messages"] as const,
   messagesFor: (filter: "all" | "unread") =>

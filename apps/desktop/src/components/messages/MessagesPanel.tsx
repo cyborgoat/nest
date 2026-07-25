@@ -12,11 +12,19 @@ import {
   CircleAlert,
   Inbox,
   CloudUpload,
+  Eye,
   Trash2,
   type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PanelHeader } from "@/components/ui/panel-header";
 import { RefreshButton } from "@/components/ui/refresh-button";
@@ -66,6 +74,9 @@ function formatMessageTime(iso: string) {
 
 export function MessagesPanel() {
   const [filter, setFilter] = useState<"all" | "unread">("all");
+  const [selectedMessage, setSelectedMessage] = useState<HubMessage | null>(
+    null,
+  );
   const queryClient = useQueryClient();
   const openAccountSettingsTab = useUiStore(
     (state) => state.openAccountSettingsTab,
@@ -202,6 +213,7 @@ export function MessagesPanel() {
                       onDelete={() =>
                         action.mutate({ type: "delete", id: message.id })
                       }
+                      onView={() => setSelectedMessage(message)}
                     />
                   ))}
                 </div>
@@ -221,6 +233,12 @@ export function MessagesPanel() {
           </ScrollArea>
         </>
       )}
+      <MessageDetailsDialog
+        message={selectedMessage}
+        onOpenChange={(open) => {
+          if (!open) setSelectedMessage(null);
+        }}
+      />
     </div>
   );
 }
@@ -230,11 +248,13 @@ function MessageRow({
   busy,
   onRead,
   onDelete,
+  onView,
 }: {
   message: HubMessage;
   busy: boolean;
   onRead: () => void;
   onDelete: () => void;
+  onView: () => void;
 }) {
   const unread = !message.read_at;
   const { Icon, iconClass } =
@@ -242,11 +262,11 @@ function MessageRow({
   return (
     <article
       className={cn(
-        "group flex items-start gap-3 px-4 py-2.5 transition-colors hover:bg-muted/50",
+        "group flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-muted/50",
         unread && "bg-primary/[0.03]",
       )}
     >
-      <Icon className={cn("mt-0.5 size-4 shrink-0", iconClass)} />
+      <Icon className={cn("size-4 shrink-0", iconClass)} />
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline gap-2">
           {unread && (
@@ -270,11 +290,21 @@ function MessageRow({
             {formatMessageTime(message.created_at)}
           </time>
         </div>
-        <p className="mt-0.5 line-clamp-2 text-xs leading-5 text-muted-foreground">
-          {message.body}
-        </p>
       </div>
       <div className="flex shrink-0 gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              aria-label="View message details"
+              onClick={onView}
+            >
+              <Eye className="size-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">View details</TooltipContent>
+        </Tooltip>
         {unread && (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -307,5 +337,53 @@ function MessageRow({
         </Tooltip>
       </div>
     </article>
+  );
+}
+
+function MessageDetailsDialog({
+  message,
+  onOpenChange,
+}: {
+  message: HubMessage | null;
+  onOpenChange: (open: boolean) => void;
+}) {
+  return (
+    <Dialog open={message != null} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{message?.title ?? "Message details"}</DialogTitle>
+          <DialogDescription>
+            {message
+              ? new Date(message.created_at).toLocaleString()
+              : "Nest Hub message"}
+          </DialogDescription>
+        </DialogHeader>
+        {message && (
+          <div className="space-y-4">
+            <p className="whitespace-pre-wrap text-sm leading-6">
+              {message.body}
+            </p>
+            {(message.pack_id || message.publish_request_id) && (
+              <dl className="grid gap-2 rounded-md bg-muted/50 p-3 text-xs">
+                {message.pack_id && (
+                  <div className="grid grid-cols-[7rem_1fr] gap-2">
+                    <dt className="text-muted-foreground">Knowledge pack</dt>
+                    <dd className="break-all font-medium">{message.pack_id}</dd>
+                  </div>
+                )}
+                {message.publish_request_id && (
+                  <div className="grid grid-cols-[7rem_1fr] gap-2">
+                    <dt className="text-muted-foreground">Request ID</dt>
+                    <dd className="break-all font-mono">
+                      {message.publish_request_id}
+                    </dd>
+                  </div>
+                )}
+              </dl>
+            )}
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }

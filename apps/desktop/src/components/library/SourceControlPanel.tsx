@@ -93,9 +93,6 @@ function PackChanges({
     onSuccess: () => {
       toast.success("Pack submitted for administrator review");
       void queryClient.invalidateQueries({
-        queryKey: queryKeys.publishRequests,
-      });
-      void queryClient.invalidateQueries({
         queryKey: queryKeys.installedPacks,
       });
       void queryClient.invalidateQueries({

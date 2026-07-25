@@ -314,7 +314,6 @@ export function HubPanel() {
         id: publishToastRef.current,
       });
       publishToastRef.current = undefined;
-      queryClient.invalidateQueries({ queryKey: queryKeys.publishRequests });
       // Refresh the install list to pick up the new pending marker — the
       // version/diff baseline itself doesn't move until the request is
       // approved (see hub_reconcile_publish_requests).

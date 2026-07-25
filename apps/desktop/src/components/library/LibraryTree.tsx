@@ -1098,7 +1098,6 @@ export function LibraryTree({
     },
     onSuccess: (_data, vars) => {
       toast.success("Pack submitted for administrator review");
-      void queryClient.invalidateQueries({ queryKey: queryKeys.publishRequests });
       void queryClient.invalidateQueries({ queryKey: queryKeys.installedPacks });
       void queryClient.invalidateQueries({
         queryKey: queryKeys.packStatus(vars.packId),
