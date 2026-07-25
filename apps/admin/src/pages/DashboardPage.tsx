@@ -1,6 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { BellRing, EyeOff, Package, Upload } from "lucide-react";
+import { BellRing, Package, Upload, Users } from "lucide-react";
 import { Metric } from "../components/Metric";
 import { Progress } from "../components/Progress";
 import { Badge, Card, Empty, ErrorBox, RefreshButton } from "../components/ui";
@@ -55,11 +55,11 @@ export function DashboardPage() {
           loading={packs.isLoading}
         />
         <Metric
-          label="Restricted packs"
-          value={restricted}
-          icon={<EyeOff />}
+          label="Registered users"
+          value={users.data?.length}
+          icon={<Users />}
           tone="stone"
-          loading={packs.isLoading}
+          loading={users.isLoading}
         />
       </div>
       <div className="mt-7 grid gap-5 lg:grid-cols-[1.4fr_.8fr]">

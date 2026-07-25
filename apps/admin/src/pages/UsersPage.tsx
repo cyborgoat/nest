@@ -1,17 +1,15 @@
 import { useContext, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import * as DialogPrimitive from "@radix-ui/react-dialog";
 import type { ColumnDef } from "@tanstack/react-table";
 import { Search, ShieldCheck, Trash2, Users as UsersIcon } from "lucide-react";
 import type { AdminUser as User } from "@nest/shared";
-import { FilterPills } from "../components/FilterPills";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Metric } from "../components/Metric";
 import {
   Badge,
   Button,
   Card,
   DataTable,
-  Dialog,
   ErrorBox,
   RefreshButton,
   Select,
@@ -170,12 +168,16 @@ export function UsersPage() {
           value={counts.total}
           icon={<UsersIcon />}
           loading={users.isLoading}
+          onClick={() => setRoleFilter("all")}
+          active={roleFilter === "all"}
         />
         <Metric
           label="Admins"
           value={counts.admin}
           icon={<ShieldCheck />}
           loading={users.isLoading}
+          onClick={() => setRoleFilter("admin")}
+          active={roleFilter === "admin"}
         />
         <Metric
           label="Regular users"
@@ -183,17 +185,8 @@ export function UsersPage() {
           icon={<UsersIcon />}
           tone="stone"
           loading={users.isLoading}
-        />
-      </div>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <FilterPills
-          value={roleFilter}
-          onChange={setRoleFilter}
-          options={[
-            { value: "all", label: "All", count: counts.total },
-            { value: "admin", label: "Admin", count: counts.admin },
-            { value: "user", label: "User", count: counts.user },
-          ]}
+          onClick={() => setRoleFilter("user")}
+          active={roleFilter === "user"}
         />
       </div>
       <Card className="p-0">
@@ -208,30 +201,23 @@ export function UsersPage() {
         </div>
         <DataTable data={data} columns={columns} loading={users.isLoading} />
       </Card>
-      <Dialog
+      <ConfirmDialog
         open={Boolean(deleteTarget)}
         onOpenChange={(open) => !open && setDeleteTarget(null)}
         title="Delete user account"
         description={`Permanently delete @${deleteTarget?.id ?? "this user"} and revoke their access.`}
+        confirmLabel="Delete account"
+        busyLabel="Deleting…"
+        icon={<Trash2 />}
+        busy={remove.isPending}
+        disabled={!deleteTarget}
+        onConfirm={() => deleteTarget && remove.mutate(deleteTarget)}
       >
         <p className="text-sm leading-6 text-muted-foreground">
           Sessions, messages, access grants, and pending submissions will be
           removed. Published packs and reviewed publishing history will remain.
         </p>
-        <div className="mt-5 flex justify-end gap-2">
-          <DialogPrimitive.Close asChild>
-            <Button variant="outline">Cancel</Button>
-          </DialogPrimitive.Close>
-          <Button
-            variant="danger"
-            disabled={!deleteTarget || remove.isPending}
-            onClick={() => deleteTarget && remove.mutate(deleteTarget)}
-          >
-            <Trash2 />
-            {remove.isPending ? "Deleting…" : "Delete account"}
-          </Button>
-        </div>
-      </Dialog>
+      </ConfirmDialog>
     </>
   );
 }

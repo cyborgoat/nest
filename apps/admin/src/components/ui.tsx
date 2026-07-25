@@ -46,6 +46,9 @@ export function buttonClass(
   );
 }
 
+export const CARD_CLASSES =
+  "rounded-xl border border-border bg-card p-5 shadow-[0_8px_30px_rgba(0,0,0,.04)]";
+
 export function Card({
   className,
   children,
@@ -53,16 +56,7 @@ export function Card({
   className?: string;
   children: ReactNode;
 }) {
-  return (
-    <section
-      className={cn(
-        "rounded-xl border border-border bg-card p-5 shadow-[0_8px_30px_rgba(0,0,0,.04)]",
-        className,
-      )}
-    >
-      {children}
-    </section>
-  );
+  return <section className={cn(CARD_CLASSES, className)}>{children}</section>;
 }
 
 export function Badge({

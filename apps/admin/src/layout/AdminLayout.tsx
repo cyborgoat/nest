@@ -48,14 +48,16 @@ export function AdminLayout() {
               badge={users.data?.length}
             />
           </nav>
-          <div className="mt-auto hidden border-t border-sidebar-border px-2 pt-4 lg:block">
-            <p className="text-sm font-medium">{auth.user.name}</p>
-            <p className="text-xs text-sidebar-muted">
-              @{auth.user.id} · {auth.user.role}
-            </p>
+          <div className="mt-4 flex items-center justify-between gap-3 border-t border-sidebar-border px-2 pt-4 lg:mt-auto lg:block">
+            <div>
+              <p className="text-sm font-medium">{auth.user.name}</p>
+              <p className="text-xs text-sidebar-muted">
+                @{auth.user.id} · {auth.user.role}
+              </p>
+            </div>
             <Button
               variant="sidebar"
-              className="mt-3 w-full justify-start"
+              className="justify-start lg:mt-3 lg:w-full"
               onClick={signOut}
             >
               <LogOut />

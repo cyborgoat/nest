@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { Check, Download, X } from "lucide-react";
 import type { PendingPublishRequest as RequestItem } from "@nest/shared";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import {
   Badge,
   Button,
@@ -25,6 +26,7 @@ export function ReviewsPage() {
   const qc = useQueryClient();
   const { reviews } = useAdminData();
   const [reject, setReject] = useState<RequestItem | null>(null);
+  const [approveTarget, setApproveTarget] = useState<RequestItem | null>(null);
   const [note, setNote] = useState("");
   const review = useMutation({
     mutationFn: ({
@@ -40,6 +42,7 @@ export function ReviewsPage() {
       }),
     onSuccess: () => {
       setReject(null);
+      setApproveTarget(null);
       setNote("");
       void qc.invalidateQueries({ queryKey: adminQueryKeys.reviews });
       void qc.invalidateQueries({ queryKey: adminQueryKeys.packs });
@@ -64,68 +67,75 @@ export function ReviewsPage() {
         <ErrorBox error={reviews.error || review.error} />
       )}
       <div className="space-y-4">
-        {reviews.isLoading &&
-          Array.from({ length: 2 }, (_, i) => (
-            <Card key={i} className="space-y-3">
-              <Skeleton className="h-5 w-40" />
-              <Skeleton className="h-7 w-64" />
-              <Skeleton className="h-4 w-full max-w-xl" />
-            </Card>
-          ))}
-        {reviews.data?.map((item) => (
-          <Card
-            key={item.id}
-            className="flex flex-col justify-between gap-6 md:flex-row"
-          >
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge>{item.pack_id}</Badge>
-                <span className="text-sm font-semibold">v{item.version}</span>
-              </div>
-              <h2 className="mt-3 font-serif text-2xl">{item.name}</h2>
-              <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-                {item.description || "No description provided."}
-              </p>
-              <p className="mt-4 text-xs text-muted-foreground">
-                Submitted by{" "}
-                <strong className="text-foreground">
-                  {item.submitter_name}
-                </strong>{" "}
-                · @{item.submitter_id} · {formatDate(item.created_at)}
-              </p>
-            </div>
-            <div className="flex shrink-0 flex-col items-end justify-between gap-5">
-              <code className="rounded bg-muted px-2 py-1 text-[11px] text-muted-foreground">
-                sha256 {item.checksum.slice(0, 14)}…
-              </code>
-              <div className="flex gap-2">
-                <a
-                  className={buttonClass("outline")}
-                  href={`/api/admin/publish-requests/${item.id}/download`}
-                  download
+        {reviews.isLoading && (
+          <Card className="space-y-3">
+            <Skeleton className="h-5 w-40" />
+            <Skeleton className="h-5 w-64" />
+            <Skeleton className="h-4 w-full max-w-xl" />
+          </Card>
+        )}
+        {reviews.data && reviews.data.length > 0 && (
+          <Card className="p-0">
+            <div className="divide-y divide-border">
+              {reviews.data.map((item) => (
+                <div
+                  key={item.id}
+                  className="flex flex-col gap-3 px-5 py-4 lg:flex-row lg:items-center lg:justify-between"
                 >
-                  <Download />
-                  Download
-                </a>
-                <Button
-                  variant="danger"
-                  disabled={review.isPending}
-                  onClick={() => setReject(item)}
-                >
-                  <X />
-                  Reject
-                </Button>
-                <Button
-                  disabled={review.isPending}
-                  onClick={() => review.mutate({ item, action: "approve" })}
-                >
-                  <Check />
-                  Approve & release
-                </Button>
-              </div>
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-medium">{item.name}</span>
+                      <Badge>{item.pack_id}</Badge>
+                      <span className="text-sm text-muted-foreground">
+                        v{item.version}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Submitted by{" "}
+                      <strong className="text-foreground">
+                        {item.submitter_name}
+                      </strong>{" "}
+                      · @{item.submitter_id} · {formatDate(item.created_at)} ·{" "}
+                      <code className="rounded bg-muted px-1.5 py-0.5 text-[11px]">
+                        sha256 {item.checksum.slice(0, 14)}…
+                      </code>
+                    </p>
+                    <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
+                      {item.description || "No description provided."}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 flex-wrap gap-2">
+                    <a
+                      className={buttonClass("outline", "sm")}
+                      href={`/api/admin/publish-requests/${item.id}/download`}
+                      download
+                    >
+                      <Download />
+                      Download
+                    </a>
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      disabled={review.isPending}
+                      onClick={() => setReject(item)}
+                    >
+                      <X />
+                      Reject
+                    </Button>
+                    <Button
+                      size="sm"
+                      disabled={review.isPending}
+                      onClick={() => setApproveTarget(item)}
+                    >
+                      <Check />
+                      Approve & release
+                    </Button>
+                  </div>
+                </div>
+              ))}
             </div>
           </Card>
-        ))}
+        )}
         {reviews.data?.length === 0 && (
           <Empty
             title="The queue is clear"
@@ -133,6 +143,22 @@ export function ReviewsPage() {
           />
         )}
       </div>
+      <ConfirmDialog
+        open={Boolean(approveTarget)}
+        onOpenChange={(open) => !open && setApproveTarget(null)}
+        title="Approve and release"
+        description={`Release ${approveTarget?.pack_id ?? "this pack"}@${approveTarget?.version ?? ""} to every Hub user.`}
+        confirmLabel="Approve & release"
+        busyLabel="Releasing…"
+        tone="primary"
+        icon={<Check />}
+        busy={review.isPending}
+        disabled={!approveTarget}
+        onConfirm={() =>
+          approveTarget &&
+          review.mutate({ item: approveTarget, action: "approve" })
+        }
+      />
       <Dialog
         open={Boolean(reject)}
         onOpenChange={(open) => !open && setReject(null)}

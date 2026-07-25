@@ -1,17 +1,16 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { Archive, Check, Eye, EyeOff, Trash2 } from "lucide-react";
+import { Archive, Check, Eye, EyeOff } from "lucide-react";
 import type { PackVisibility } from "@nest/shared";
 import { Breadcrumbs } from "../components/Breadcrumbs";
+import { DeletePackDialog } from "../components/DeletePackDialog";
 import { PackActionsMenu } from "../components/PackActionsMenu";
 import { UserMultiPicker } from "../components/UserMultiPicker";
 import {
   Badge,
   Button,
   Card,
-  Dialog,
   Empty,
   ErrorBox,
   Field,
@@ -24,6 +23,9 @@ import { useApi } from "../app/contexts";
 import { adminQueryKeys } from "../lib/api";
 import { useAdminData } from "../lib/hooks";
 import { PageHeader } from "../layout/PageHeader";
+
+// Radix Select forbids empty-string item values, so "no maintainer" needs a sentinel.
+const UNASSIGNED_MAINTAINER = "__unassigned__";
 
 export function PackDetailPage() {
   const { packId } = useParams({ from: "/packs/$packId" });
@@ -197,18 +199,23 @@ export function PackDetailPage() {
                 />
               </Field>
               <Field label="Maintainer">
-                <UserMultiPicker
-                  users={users.data ?? []}
-                  selectedUuids={pack.owner_uuid ? [pack.owner_uuid] : []}
-                  onChange={(uuids) => {
-                    const loginId = uuids[0]
-                      ? (users.data ?? []).find((u) => u.uuid === uuids[0])?.id ??
-                        null
-                      : null;
+                <Select
+                  value={pack.owner_uuid ?? UNASSIGNED_MAINTAINER}
+                  onValueChange={(value) => {
+                    const loginId =
+                      value === UNASSIGNED_MAINTAINER
+                        ? null
+                        : (users.data ?? []).find((u) => u.uuid === value)
+                            ?.id ?? null;
                     update.mutate({ owner_id: loginId });
                   }}
-                  max={1}
-                  placeholder="Search users to assign a maintainer…"
+                  options={[
+                    { value: UNASSIGNED_MAINTAINER, label: "Unassigned" },
+                    ...(users.data ?? []).map((user) => ({
+                      value: user.uuid,
+                      label: `${user.name} (@${user.id})`,
+                    })),
+                  ]}
                 />
               </Field>
             </div>
@@ -267,32 +274,12 @@ export function PackDetailPage() {
           </Card>
         </div>
       </div>
-      <Dialog
-        open={Boolean(deleteTarget)}
+      <DeletePackDialog
+        pack={deleteTarget}
         onOpenChange={(open) => !open && setDeleteTarget(null)}
-        title="Delete knowledge pack"
-        description={`Permanently delete ${deleteTarget?.name ?? "this pack"} and all published releases.`}
-      >
-        <p className="text-sm leading-6 text-muted-foreground">
-          This removes the registry files, {deleteTarget?.releases.length ?? 0}{" "}
-          published release
-          {(deleteTarget?.releases.length ?? 0) === 1 ? "" : "s"}, access
-          grants, and pending submissions. This action cannot be undone.
-        </p>
-        <div className="mt-5 flex justify-end gap-2">
-          <DialogPrimitive.Close asChild>
-            <Button variant="outline">Cancel</Button>
-          </DialogPrimitive.Close>
-          <Button
-            variant="danger"
-            disabled={!deleteTarget || remove.isPending}
-            onClick={() => deleteTarget && remove.mutate(deleteTarget.id)}
-          >
-            <Trash2 />
-            {remove.isPending ? "Deleting…" : "Delete permanently"}
-          </Button>
-        </div>
-      </Dialog>
+        busy={remove.isPending}
+        onConfirm={() => deleteTarget && remove.mutate(deleteTarget.id)}
+      />
     </>
   );
 }

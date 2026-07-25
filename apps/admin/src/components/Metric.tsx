@@ -1,6 +1,6 @@
 import React, { type ReactNode } from "react";
 import { cn } from "../lib/cn";
-import { Card, Skeleton } from "./ui";
+import { Card, CARD_CLASSES, Skeleton } from "./ui";
 
 export function Metric({
   label,
@@ -8,18 +8,22 @@ export function Metric({
   icon,
   tone = "green",
   loading = false,
+  onClick,
+  active = false,
 }: {
   label: string;
   value?: number;
   icon: ReactNode;
   tone?: "green" | "amber" | "stone";
   loading?: boolean;
+  onClick?: () => void;
+  active?: boolean;
 }) {
-  return (
-    <Card className="flex items-center gap-4">
+  const content = (
+    <>
       <div
         className={cn(
-          "grid size-11 place-items-center rounded-xl",
+          "grid size-11 shrink-0 place-items-center rounded-xl",
           tone === "amber"
             ? "bg-amber-100 text-amber-800"
             : tone === "stone"
@@ -40,6 +44,25 @@ export function Metric({
         )}
         <p className="text-xs text-muted-foreground">{label}</p>
       </div>
-    </Card>
+    </>
   );
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        aria-pressed={active}
+        className={cn(
+          CARD_CLASSES,
+          "flex w-full items-center gap-4 text-left transition",
+          active
+            ? "border-primary/40 ring-2 ring-primary"
+            : "hover:border-primary/30",
+        )}
+      >
+        {content}
+      </button>
+    );
+  }
+  return <Card className="flex items-center gap-4">{content}</Card>;
 }

@@ -1,6 +1,5 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { Link } from "@tanstack/react-router";
 import type { ColumnDef } from "@tanstack/react-table";
 import {
@@ -10,11 +9,10 @@ import {
   EyeOff,
   Package,
   Search,
-  Trash2,
   Upload,
 } from "lucide-react";
 import type { AdminPack as Pack } from "@nest/shared";
-import { FilterPills } from "../components/FilterPills";
+import { DeletePackDialog } from "../components/DeletePackDialog";
 import { Metric } from "../components/Metric";
 import { PackActionsMenu } from "../components/PackActionsMenu";
 import { UploadPackDialog } from "../components/UploadPackDialog";
@@ -23,7 +21,6 @@ import {
   Button,
   Card,
   DataTable,
-  Dialog,
   ErrorBox,
   RefreshButton,
 } from "../components/ui";
@@ -188,12 +185,16 @@ export function PacksPage() {
           value={counts.all}
           icon={<Package />}
           loading={packs.isLoading}
+          onClick={() => setStatusFilter("all")}
+          active={statusFilter === "all"}
         />
         <Metric
           label="Active"
           value={counts.active}
           icon={<Check />}
           loading={packs.isLoading}
+          onClick={() => setStatusFilter("active")}
+          active={statusFilter === "active"}
         />
         <Metric
           label="Restricted"
@@ -201,6 +202,8 @@ export function PacksPage() {
           icon={<EyeOff />}
           tone="amber"
           loading={packs.isLoading}
+          onClick={() => setStatusFilter("restricted")}
+          active={statusFilter === "restricted"}
         />
         <Metric
           label="Archived"
@@ -208,22 +211,8 @@ export function PacksPage() {
           icon={<Archive />}
           tone="stone"
           loading={packs.isLoading}
-        />
-      </div>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <FilterPills
-          value={statusFilter}
-          onChange={setStatusFilter}
-          options={[
-            { value: "all", label: "All", count: counts.all },
-            { value: "active", label: "Active", count: counts.active },
-            { value: "archived", label: "Archived", count: counts.archived },
-            {
-              value: "restricted",
-              label: "Restricted",
-              count: counts.restricted,
-            },
-          ]}
+          onClick={() => setStatusFilter("archived")}
+          active={statusFilter === "archived"}
         />
       </div>
       <Card className="p-0">
@@ -245,32 +234,12 @@ export function PacksPage() {
         error={upload.error}
         onUpload={(file) => upload.mutate(file)}
       />
-      <Dialog
-        open={Boolean(deleteTarget)}
+      <DeletePackDialog
+        pack={deleteTarget}
         onOpenChange={(open) => !open && setDeleteTarget(null)}
-        title="Delete knowledge pack"
-        description={`Permanently delete ${deleteTarget?.name ?? "this pack"} and all published releases.`}
-      >
-        <p className="text-sm leading-6 text-muted-foreground">
-          This removes the registry files, {deleteTarget?.releases.length ?? 0}{" "}
-          published release
-          {(deleteTarget?.releases.length ?? 0) === 1 ? "" : "s"}, access
-          grants, and pending submissions. This action cannot be undone.
-        </p>
-        <div className="mt-5 flex justify-end gap-2">
-          <DialogPrimitive.Close asChild>
-            <Button variant="outline">Cancel</Button>
-          </DialogPrimitive.Close>
-          <Button
-            variant="danger"
-            disabled={!deleteTarget || remove.isPending}
-            onClick={() => deleteTarget && remove.mutate(deleteTarget)}
-          >
-            <Trash2 />
-            {remove.isPending ? "Deleting…" : "Delete permanently"}
-          </Button>
-        </div>
-      </Dialog>
+        busy={remove.isPending}
+        onConfirm={() => deleteTarget && remove.mutate(deleteTarget)}
+      />
     </>
   );
 }
