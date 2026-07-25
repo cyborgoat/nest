@@ -895,6 +895,12 @@ pub async fn hub_publish_pack(
         Some(v) if !v.trim().is_empty() => v.trim().to_string(),
         _ => installed.version.clone(),
     };
+    let vault = state.vault_path();
+    if version != installed.version {
+        // export_pack re-reads pack.json from disk, so the new version has
+        // to land there before we zip up the pack for upload.
+        hub::update_pack_version(&vault.join(&installed.local_path), &version)?;
+    }
     let pack = PackMeta {
         id: installed.pack_id,
         name: installed.name,
@@ -902,7 +908,6 @@ pub async fn hub_publish_pack(
         version,
         path: installed.local_path,
     };
-    let vault = state.vault_path();
     let published = hub::publish_pack_remote(
         &settings.hub_base_url,
         settings.effective_proxy_url(),

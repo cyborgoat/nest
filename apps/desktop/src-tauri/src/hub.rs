@@ -1102,6 +1102,19 @@ pub fn update_pack_description(pack_root: &Path, description: &str) -> AppResult
     Ok(meta)
 }
 
+/// Update a pack's version on disk. Used to persist the version typed into
+/// the Publish dialog before export — otherwise `export_pack` re-reads
+/// `pack.json` from disk and zips up the stale version, and the Hub
+/// (correctly) rejects the upload as a duplicate of the *old* release.
+/// Safe for any origin the user can edit: like the description, version
+/// isn't part of the pack's identity/folder.
+pub fn update_pack_version(pack_root: &Path, version: &str) -> AppResult<PackMeta> {
+    let mut meta = read_required_pack_meta(pack_root)?;
+    meta.version = version.trim().to_string();
+    write_pack_meta(pack_root, &meta)?;
+    Ok(meta)
+}
+
 /// Renames a local pack: the vault's invariant is that a pack's folder name
 /// *is* its id and its display name, so renaming moves the on-disk folder
 /// (to `vault_root/{new_name}`) and updates `pack.json`'s id/name/path to
@@ -1337,6 +1350,46 @@ mod local_pack_tests {
         assert_eq!(updated.name, "Original Name", "name must never change here");
         assert_eq!(updated.id, "Original Name", "id must never change here");
         assert_eq!(updated.version, "0.1.0", "version must never change");
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn update_pack_version_preserves_everything_else_and_export_picks_it_up() {
+        let root = test_root("update-version");
+        let vault = root.join("vault");
+        let metadata = PackMeta {
+            id: String::new(),
+            name: "Original Name".into(),
+            description: "Keep me".into(),
+            version: "1.0.0".into(),
+            path: String::new(),
+        };
+        let pack = create_empty_pack(metadata, &vault).unwrap();
+        let pack_dir = vault.join(&pack.path);
+
+        let updated = update_pack_version(&pack_dir, "1.1.0").unwrap();
+        assert_eq!(updated.version, "1.1.0");
+        assert_eq!(updated.name, "Original Name", "name must never change here");
+        assert_eq!(updated.description, "Keep me", "description must never change here");
+
+        // The bug this guards against: export_pack re-reads pack.json from
+        // disk, so a version bump that never lands there gets silently
+        // dropped and the Hub is asked to publish the *old* version again.
+        let zip_path = root.join("export.zip");
+        export_pack(&updated, &vault, &zip_path).unwrap();
+        let file = fs::File::open(&zip_path).unwrap();
+        let mut archive = ZipArchive::new(file).unwrap();
+        let mut contents = String::new();
+        archive
+            .by_name(&format!("{}/pack.json", updated.path))
+            .unwrap()
+            .read_to_string(&mut contents)
+            .unwrap();
+        assert!(
+            contents.contains("\"1.1.0\""),
+            "exported pack.json should contain the bumped version, got: {contents}"
+        );
 
         let _ = fs::remove_dir_all(root);
     }
