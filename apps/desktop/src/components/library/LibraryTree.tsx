@@ -1,17 +1,26 @@
-import type { InstalledPack, TreeNode } from "@nest/shared";
+import type {
+  FileChangeStatus,
+  HubUser,
+  InstalledPack,
+  TreeNode,
+} from "@nest/shared";
 import {
   ChevronDown,
   ChevronRight,
+  FilePlus2,
   FileText,
   Folder,
+  FolderPlus,
   Minus,
   Package,
+  Pencil,
   Plus,
   Search,
+  Trash2,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useMemo, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   Accordion,
@@ -19,7 +28,25 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
-import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
+import { Button, buttonVariants } from "@/components/ui/button";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import { Input } from "@/components/ui/input";
 import { SectionLabel } from "@/components/ui/section-label";
 import {
@@ -28,8 +55,16 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
-import { queryKeys } from "@/lib/query-keys";
+import {
+  STATUS_BADGE_VARIANT,
+  STATUS_LETTER,
+  STATUS_TEXT_CLASSES,
+} from "@/lib/file-status-ui";
+import { mergeDeletedIntoTree } from "@/lib/merge-deleted-tree";
+import { canEditPack } from "@/lib/pack-permissions";
+import { fileMutationInvalidations, queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
+import { useEditorStore } from "@/stores/editor";
 import { useUiStore } from "@/stores/ui";
 
 function filterTree(nodes: TreeNode[], query: string): TreeNode[] {
@@ -55,11 +90,74 @@ function filterTree(nodes: TreeNode[], query: string): TreeNode[] {
   return nodes.map(walk).filter((n): n is TreeNode => n != null);
 }
 
+function parentDir(path: string): string {
+  const idx = path.lastIndexOf("/");
+  return idx === -1 ? "" : path.slice(0, idx);
+}
+
+function joinPath(dir: string, name: string): string {
+  return dir ? `${dir}/${name}` : name;
+}
+
+function ensureMdExtension(name: string): string {
+  return name.toLowerCase().endsWith(".md") ? name : `${name}.md`;
+}
+
+/** Inline text input for creating a new child file/folder under a tree node. */
+function InlineCreateRow({
+  depth,
+  kind,
+  onCancel,
+  onSubmit,
+}: {
+  depth: number;
+  kind: "file" | "folder";
+  onCancel: () => void;
+  onSubmit: (name: string) => void;
+}) {
+  const [value, setValue] = useState("");
+  return (
+    <div
+      className="flex items-center gap-1.5 py-1"
+      style={{ paddingLeft: 8 + depth * 12 + 18 }}
+    >
+      {kind === "file" ? (
+        <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+      ) : (
+        <Folder className="size-3.5 shrink-0 text-muted-foreground" />
+      )}
+      <Input
+        autoFocus
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        placeholder={kind === "file" ? "filename.md" : "folder name"}
+        className="h-6 flex-1 px-1.5 text-xs"
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            const trimmed = value.trim();
+            if (trimmed) onSubmit(trimmed);
+            else onCancel();
+          } else if (e.key === "Escape") {
+            e.preventDefault();
+            onCancel();
+          }
+        }}
+        onBlur={onCancel}
+      />
+    </div>
+  );
+}
+
 function TreeItem({
   node,
   depth = 0,
   forceOpen,
   packActive,
+  canEdit,
+  packId,
+  origin,
+  statusMap,
   onSetActive,
   setActivePending,
 }: {
@@ -67,39 +165,161 @@ function TreeItem({
   depth?: number;
   forceOpen?: boolean;
   packActive: boolean;
+  canEdit: boolean;
+  packId: string;
+  origin?: InstalledPack["origin"];
+  statusMap: Map<string, FileChangeStatus>;
   onSetActive?: (active: boolean) => void;
   setActivePending?: boolean;
 }) {
   const [open, setOpen] = useState(!!forceOpen);
+  const [renaming, setRenaming] = useState(false);
+  const [creatingChild, setCreatingChild] = useState<"file" | "folder" | null>(
+    null,
+  );
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   useEffect(() => {
     if (forceOpen) setOpen(true);
   }, [forceOpen]);
 
   const activeMainTabId = useUiStore((s) => s.activeMainTabId);
   const openFileTab = useUiStore((s) => s.openFileTab);
+  const clearPathsUnder = useUiStore((s) => s.clearPathsUnder);
+  const setEditing = useEditorStore((s) => s.setEditing);
+  const setDirty = useEditorStore((s) => s.setDirty);
+  const queryClient = useQueryClient();
   const isFolder = node.kind === "folder";
   const isRoot = depth === 0 && isFolder;
   const isSelected = activeMainTabId === node.path;
+  const status = statusMap.get(node.path);
+  const isDeleted = status === "deleted";
+  const editableHere = canEdit && !isDeleted;
+  // Packs downloaded from the hub get a distinct stroke color in the tree.
+  const rootIconClass = origin === "registry" ? "text-sky-500" : undefined;
 
-  return (
-    <div>
-      <div
-        className={cn(
-          "group flex items-center gap-1 rounded-md pr-1 text-sm transition-colors",
-          isSelected ? "bg-primary/10 text-foreground" : "hover:bg-muted/80",
-          !packActive && "text-muted-foreground",
-        )}
-        style={{ paddingLeft: 8 + depth * 12 }}
-      >
+  const invalidateAfterEdit = () => {
+    for (const key of fileMutationInvalidations(packId)) {
+      void queryClient.invalidateQueries({ queryKey: key });
+    }
+  };
+
+  const createChild = useMutation({
+    mutationFn: ({ kind, name }: { kind: "file" | "folder"; name: string }) =>
+      kind === "file"
+        ? api.vaultCreateFile(joinPath(node.path, ensureMdExtension(name)))
+        : api.vaultCreateFolder(joinPath(node.path, name)),
+    onSuccess: (_void, vars) => {
+      invalidateAfterEdit();
+      if (vars.kind === "file") {
+        openFileTab(joinPath(node.path, ensureMdExtension(vars.name)), {
+          preview: false,
+        });
+      } else {
+        // Empty folders are hidden from the tree until they contain a file,
+        // so the new folder won't be visible yet — tell the user why.
+        toast.success("Folder created", {
+          description: "It appears in the tree once it has a file in it.",
+        });
+      }
+    },
+    onError: (e: Error) =>
+      toast.error("Could not create item", { description: e.message }),
+  });
+
+  const rename = useMutation({
+    mutationFn: (to: string) => api.vaultRenameEntry(node.path, to),
+    onSuccess: () => {
+      // The old path no longer exists; close any tabs pointing at it rather
+      // than leave them showing a "no longer in your library" error.
+      clearPathsUnder(node.path);
+      setEditing(node.path, false);
+      setDirty(node.path, false);
+      invalidateAfterEdit();
+    },
+    onError: (e: Error) =>
+      toast.error("Could not rename", { description: e.message }),
+  });
+
+  const remove = useMutation({
+    mutationFn: () =>
+      isFolder ? api.vaultDeleteFolder(node.path) : api.vaultDeleteFile(node.path),
+    onSuccess: () => {
+      clearPathsUnder(node.path);
+      setEditing(node.path, false);
+      setDirty(node.path, false);
+      invalidateAfterEdit();
+    },
+    onError: (e: Error) =>
+      toast.error("Could not delete", { description: e.message }),
+  });
+
+  const startRename = () => setRenaming(true);
+  const startCreate = (kind: "file" | "folder") => {
+    setOpen(true);
+    setCreatingChild(kind);
+  };
+  const submitRename = (rawName: string) => {
+    setRenaming(false);
+    const name = isFolder ? rawName : ensureMdExtension(rawName);
+    const to = joinPath(parentDir(node.path), name);
+    if (to !== node.path) rename.mutate(to);
+  };
+  const submitCreate = (kind: "file" | "folder", name: string) => {
+    setCreatingChild(null);
+    createChild.mutate({ kind, name });
+  };
+
+  const row = (
+    <div
+      className={cn(
+        "group flex items-center gap-1 rounded-md pr-1 text-sm transition-colors",
+        isSelected ? "bg-primary/10 text-foreground" : "hover:bg-muted/80",
+        !packActive && "text-muted-foreground",
+      )}
+      style={{ paddingLeft: 8 + depth * 12 }}
+    >
+      {renaming ? (
+        <div className="flex min-w-0 flex-1 items-center gap-1.5 py-1">
+          <span className="inline-block w-3.5" />
+          {isRoot ? (
+            <Package
+              className={cn("size-3.5 shrink-0", rootIconClass ?? "text-primary")}
+            />
+          ) : isFolder ? (
+            <Folder className="size-3.5 shrink-0 text-muted-foreground" />
+          ) : (
+            <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+          )}
+          <Input
+            autoFocus
+            defaultValue={node.name}
+            className="h-6 flex-1 px-1.5 text-xs"
+            onFocus={(e) => {
+              const dot = node.name.lastIndexOf(".");
+              e.currentTarget.setSelectionRange(0, dot > 0 ? dot : node.name.length);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                submitRename(e.currentTarget.value.trim() || node.name);
+              } else if (e.key === "Escape") {
+                e.preventDefault();
+                setRenaming(false);
+              }
+            }}
+            onBlur={(e) => submitRename(e.currentTarget.value.trim() || node.name)}
+          />
+        </div>
+      ) : (
         <button
           type="button"
           className="flex min-w-0 flex-1 items-center gap-1.5 py-1.5 text-left"
           onClick={() => {
             if (isFolder) setOpen((v) => !v);
-            else openFileTab(node.path);
+            else if (!isDeleted) openFileTab(node.path);
           }}
           onDoubleClick={() => {
-            if (!isFolder) openFileTab(node.path, { preview: false });
+            if (!isFolder && !isDeleted) openFileTab(node.path, { preview: false });
           }}
         >
           {isFolder ? (
@@ -115,7 +335,8 @@ function TreeItem({
             <Package
               className={cn(
                 "size-3.5 shrink-0",
-                packActive ? "text-primary" : "text-muted-foreground",
+                rootIconClass ??
+                  (packActive ? "text-primary" : "text-muted-foreground"),
               )}
             />
           ) : isFolder ? (
@@ -133,47 +354,129 @@ function TreeItem({
               )}
             />
           )}
-          <span className={cn("truncate", !packActive && "opacity-80")}>
+          <span
+            className={cn(
+              "truncate",
+              !packActive && "opacity-80",
+              status && STATUS_TEXT_CLASSES[status],
+            )}
+          >
             {node.name}
           </span>
+          {status && (
+            <Badge
+              variant={STATUS_BADGE_VARIANT[status]}
+              className="ml-auto shrink-0 px-1 py-0 text-[10px] leading-4"
+            >
+              {STATUS_LETTER[status]}
+            </Badge>
+          )}
         </button>
+      )}
 
-        {isRoot && onSetActive && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                type="button"
-                size="icon-xs"
-                variant="ghost"
-                className="shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-                disabled={setActivePending}
-                aria-label={
-                  packActive
-                    ? "Deactivate knowledge pack"
-                    : "Activate knowledge pack"
-                }
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onSetActive(!packActive);
+      {isRoot && onSetActive && !renaming && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              size="icon-xs"
+              variant="ghost"
+              className="shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+              disabled={setActivePending}
+              aria-label={
+                packActive
+                  ? "Deactivate knowledge pack"
+                  : "Activate knowledge pack"
+              }
+              onClick={(e) => {
+                e.stopPropagation();
+                onSetActive(!packActive);
+              }}
+            >
+              {packActive ? (
+                <Minus className="size-3.5" />
+              ) : (
+                <Plus className="size-3.5" />
+              )}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="right">
+            {packActive
+              ? "Deactivate — exclude from chat knowledge"
+              : "Activate — include in chat knowledge"}
+          </TooltipContent>
+        </Tooltip>
+      )}
+    </div>
+  );
+
+  const wrapped = editableHere ? (
+    <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+      <ContextMenu>
+        <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
+        <ContextMenuContent>
+          {isFolder && (
+            <>
+              <ContextMenuItem onSelect={() => startCreate("file")}>
+                <FilePlus2 className="size-3.5" />
+                New File
+              </ContextMenuItem>
+              <ContextMenuItem onSelect={() => startCreate("folder")}>
+                <FolderPlus className="size-3.5" />
+                New Folder
+              </ContextMenuItem>
+            </>
+          )}
+          {!isRoot && (
+            <>
+              {isFolder && <ContextMenuSeparator />}
+              <ContextMenuItem onSelect={startRename}>
+                <Pencil className="size-3.5" />
+                Rename
+              </ContextMenuItem>
+              <ContextMenuItem
+                className="text-destructive focus:text-destructive"
+                onSelect={() => {
+                  window.setTimeout(() => setDeleteDialogOpen(true), 0);
                 }}
               >
-                {packActive ? (
-                  <Minus className="size-3.5" />
-                ) : (
-                  <Plus className="size-3.5" />
-                )}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="right">
-              {packActive
-                ? "Deactivate — exclude from chat knowledge"
-                : "Activate — include in chat knowledge"}
-            </TooltipContent>
-          </Tooltip>
-        )}
-      </div>
+                <Trash2 className="size-3.5" />
+                Delete
+              </ContextMenuItem>
+            </>
+          )}
+        </ContextMenuContent>
+      </ContextMenu>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete {node.name}?</AlertDialogTitle>
+          <AlertDialogDescription>
+            {isFolder
+              ? "This deletes the folder and everything inside it. This can't be undone."
+              : "This can't be undone."}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            className={cn(buttonVariants({ variant: "destructive" }))}
+            disabled={remove.isPending}
+            onClick={() => remove.mutate()}
+          >
+            Delete
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  ) : (
+    row
+  );
+
+  return (
+    <div>
+      {wrapped}
       <AnimatePresence initial={false}>
-        {isFolder && open && node.children && (
+        {isFolder && open && (node.children || creatingChild) && (
           <motion.div
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
@@ -181,19 +484,87 @@ function TreeItem({
             transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
             className="overflow-hidden"
           >
-            {node.children.map((child) => (
+            {creatingChild && (
+              <InlineCreateRow
+                depth={depth + 1}
+                kind={creatingChild}
+                onCancel={() => setCreatingChild(null)}
+                onSubmit={(name) => submitCreate(creatingChild, name)}
+              />
+            )}
+            {node.children?.map((child) => (
               <TreeItem
                 key={child.path}
                 node={child}
                 depth={depth + 1}
                 forceOpen={forceOpen}
                 packActive={packActive}
+                canEdit={canEdit}
+                packId={packId}
+                statusMap={statusMap}
               />
             ))}
           </motion.div>
         )}
       </AnimatePresence>
     </div>
+  );
+}
+
+/** Fetches a pack's change status once per root and merges deleted files into
+ * the tree, so `TreeItem`'s recursion never needs N queries for N files. */
+function PackRootTreeItem({
+  node,
+  canEdit,
+  packId,
+  origin,
+  forceOpen,
+  packActive,
+  setActivePending,
+  onSetActive,
+}: {
+  node: TreeNode;
+  canEdit: boolean;
+  packId: string;
+  origin?: InstalledPack["origin"];
+  forceOpen: boolean;
+  packActive: boolean;
+  setActivePending: boolean;
+  onSetActive: (active: boolean) => void;
+}) {
+  const statusQuery = useQuery({
+    queryKey: queryKeys.packStatus(packId),
+    queryFn: () => api.hubPackChangeStatus(packId),
+    enabled: canEdit,
+  });
+
+  const statusMap = useMemo(() => {
+    const map = new Map<string, FileChangeStatus>();
+    for (const s of statusQuery.data ?? []) map.set(s.path, s.status);
+    return map;
+  }, [statusQuery.data]);
+
+  const deletedPaths = useMemo(
+    () => (statusQuery.data ?? []).filter((s) => s.status === "deleted").map((s) => s.path),
+    [statusQuery.data],
+  );
+  const mergedNode = useMemo(
+    () => mergeDeletedIntoTree(node, deletedPaths),
+    [node, deletedPaths],
+  );
+
+  return (
+    <TreeItem
+      node={mergedNode}
+      forceOpen={forceOpen}
+      packActive={packActive}
+      canEdit={canEdit}
+      packId={packId}
+      origin={origin}
+      statusMap={statusMap}
+      setActivePending={setActivePending}
+      onSetActive={onSetActive}
+    />
   );
 }
 
@@ -205,6 +576,8 @@ function PackSection({
   forceOpen,
   onSetActive,
   setActivePending,
+  byPath,
+  hubUser,
   collapsible = false,
   accordionValue,
   onAccordionChange,
@@ -217,6 +590,8 @@ function PackSection({
   forceOpen: boolean;
   onSetActive: (packPath: string, active: boolean) => void;
   setActivePending: boolean;
+  byPath: Map<string, InstalledPack>;
+  hubUser: HubUser | null;
   /** When true, section body expands/collapses via accordion. */
   collapsible?: boolean;
   accordionValue?: string;
@@ -229,16 +604,26 @@ function PackSection({
 
   const body = (
     <div className={cn("pb-2", !packActive && "opacity-90")}>
-      {filtered.map((node) => (
-        <TreeItem
-          key={`${node.path}:${resetKey}`}
-          node={node}
-          forceOpen={forceOpen}
-          packActive={packActive}
-          setActivePending={setActivePending}
-          onSetActive={(active) => onSetActive(node.path, active)}
-        />
-      ))}
+      {filtered.map((node) => {
+        const installedPack = byPath.get(node.path);
+        const canEdit = installedPack
+          ? canEditPack(installedPack, hubUser)
+          : false;
+        const packId = installedPack?.pack_id ?? node.path;
+        return (
+          <PackRootTreeItem
+            key={`${node.path}:${resetKey}`}
+            node={node}
+            forceOpen={forceOpen}
+            packActive={packActive}
+            canEdit={canEdit}
+            packId={packId}
+            origin={installedPack?.origin}
+            setActivePending={setActivePending}
+            onSetActive={(active) => onSetActive(node.path, active)}
+          />
+        );
+      })}
     </div>
   );
 
@@ -289,6 +674,12 @@ export function LibraryTree({
   const [inactiveResetKey, setInactiveResetKey] = useState(0);
   const queryClient = useQueryClient();
   const clearPathsUnder = useUiStore((s) => s.clearPathsUnder);
+
+  const hubAuthQuery = useQuery({
+    queryKey: queryKeys.hubAuth,
+    queryFn: api.hubAuthState,
+  });
+  const hubUser = hubAuthQuery.data?.user ?? null;
 
   const byPath = useMemo(() => {
     const map = new Map<string, InstalledPack>();
@@ -372,6 +763,8 @@ export function LibraryTree({
           packActive
           search={search}
           forceOpen={forceOpen}
+          byPath={byPath}
+          hubUser={hubUser}
           setActivePending={setActive.isPending}
           onSetActive={(packPath, active) => {
             const packId = byPath.get(packPath)?.pack_id ?? packPath;
@@ -384,6 +777,8 @@ export function LibraryTree({
           packActive={false}
           search={search}
           forceOpen={forceOpen}
+          byPath={byPath}
+          hubUser={hubUser}
           collapsible
           accordionValue={inactiveOpen}
           onAccordionChange={(value) => {

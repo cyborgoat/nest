@@ -4,7 +4,7 @@ import { Bell, Cloud, MessageSquare, PanelLeft, Settings2 } from "lucide-react";
 import { useEffect, useRef, type ReactNode } from "react";
 import { usePanelRef } from "react-resizable-panels";
 import { ChatPanel } from "@/components/chat/ChatPanel";
-import { LibraryTree } from "@/components/library/LibraryTree";
+import { LibrarySidebar } from "@/components/library/LibrarySidebar";
 import { MainTabArea } from "@/components/main/MainTabArea";
 import { Button } from "@/components/ui/button";
 import {
@@ -105,7 +105,6 @@ export default function App() {
     chat: "Chat",
     collapseChat: "Collapse chat",
     expandChat: "Expand chat",
-    loading: "Loading…",
     indexing: " · indexing…",
     ready: "Ready",
     index: "Index",
@@ -295,24 +294,12 @@ export default function App() {
                 if (open !== sidebarOpen) setSidebarOpen(open);
               }}
             >
-              <aside className="flex h-full min-h-0 flex-col border-r border-border">
-                <div className="min-h-0 flex-1">
-                  {treeQuery.isLoading ? (
-                    <p className="p-4 text-sm text-muted-foreground">
-                      {shell.loading}
-                    </p>
-                  ) : treeQuery.error ? (
-                    <p className="p-4 text-sm text-destructive">
-                      {(treeQuery.error as Error).message}
-                    </p>
-                  ) : (
-                    <LibraryTree
-                      tree={treeQuery.data ?? []}
-                      installed={installedQuery.data ?? []}
-                    />
-                  )}
-                </div>
-              </aside>
+              <LibrarySidebar
+                tree={treeQuery.data ?? []}
+                installed={installedQuery.data ?? []}
+                loading={treeQuery.isLoading}
+                error={treeQuery.error as Error | null}
+              />
             </ResizablePanel>
 
             {/* Keep handle mounted so layout does not snap when collapsing. */}

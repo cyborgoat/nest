@@ -16,6 +16,8 @@ export const badgeVariants = cva(
         muted: "bg-muted text-muted-foreground",
         outline: "border border-border text-muted-foreground",
         update: POSITIVE_TONE_CLASSES,
+        modified: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
+        new: POSITIVE_TONE_CLASSES,
       },
     },
     defaultVariants: {

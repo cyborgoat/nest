@@ -4,6 +4,8 @@ import type {
   AppSettings,
   ChatMessage,
   ChatSession,
+  DiffPair,
+  FileStatus,
   HubConnectionStatus,
   HubAuthState,
   HubMessagePage,
@@ -22,6 +24,27 @@ export const api = {
   vaultReadFile: (path: string) => invoke<string>("vault_read_file", { path }),
   vaultReadImage: (path: string) =>
     invoke<string>("vault_read_image", { path }),
+  vaultWriteFile: (path: string, content: string) =>
+    invoke<void>("vault_write_file", { path, content }),
+  vaultCreateFile: (path: string, initialContent?: string) =>
+    invoke<void>("vault_create_file", {
+      path,
+      initialContent: initialContent ?? null,
+    }),
+  vaultCreateFolder: (path: string) =>
+    invoke<void>("vault_create_folder", { path }),
+  vaultDeleteFile: (path: string) => invoke<void>("vault_delete_file", { path }),
+  vaultDeleteFolder: (path: string) =>
+    invoke<void>("vault_delete_folder", { path }),
+  vaultRenameEntry: (from: string, to: string) =>
+    invoke<void>("vault_rename_entry", { from, to }),
+
+  hubPackChangeStatus: (packId: string) =>
+    invoke<FileStatus[]>("hub_pack_change_status", { packId }),
+  hubPackFileDiff: (packId: string, path: string) =>
+    invoke<DiffPair>("hub_pack_file_diff", { packId, path }),
+  hubPackDiscardFile: (packId: string, path: string) =>
+    invoke<void>("hub_pack_discard_file", { packId, path }),
 
   settingsGet: () => invoke<AppSettings>("settings_get"),
   settingsSet: (settings: AppSettings) =>
@@ -66,10 +89,11 @@ export const api = {
     invoke<void>("hub_set_pack_active", { packId, active }),
   hubRemovePack: (packId: string) =>
     invoke<void>("hub_remove_pack", { packId }),
-  hubDownloadPack: (packId: string, version?: string) =>
+  hubDownloadPack: (packId: string, version?: string, ownerId?: string | null) =>
     invoke<InstalledPack>("hub_download_pack", {
       packId,
       version: version ?? null,
+      ownerId: ownerId ?? null,
     }),
   hubInspectLocalPack: (sourcePath: string) =>
     invoke<KnowledgePackMeta>("hub_inspect_local_pack", { sourcePath }),
@@ -89,6 +113,8 @@ export const api = {
       metadata,
       overwrite,
     }),
+  hubCreateEmptyPack: (metadata: KnowledgePackMeta) =>
+    invoke<InstalledPack>("hub_create_empty_pack", { metadata }),
   hubExportPack: (packId: string, destinationPath: string) =>
     invoke<void>("hub_export_pack", { packId, destinationPath }),
   hubAuthState: () => invoke<HubAuthState>("hub_auth_state"),
@@ -104,8 +130,18 @@ export const api = {
       currentPassword,
       newPassword,
     }),
-  hubPublishPack: (packId: string) =>
-    invoke<PublishRequest>("hub_publish_pack", { packId }),
+  hubPublishPack: (packId: string, version?: string) =>
+    invoke<PublishRequest>("hub_publish_pack", {
+      packId,
+      version: version ?? null,
+    }),
+  hubUpdatePackMetadata: (packId: string, description: string) =>
+    invoke<InstalledPack>("hub_update_pack_metadata", {
+      packId,
+      description,
+    }),
+  hubRenamePack: (packId: string, name: string) =>
+    invoke<InstalledPack>("hub_rename_pack", { packId, name }),
   hubListPublishRequests: () =>
     invoke<PublishRequest[]>("hub_list_publish_requests"),
   hubListMessages: (filter: "all" | "unread", cursor?: string) =>

@@ -10,6 +10,8 @@ export type TabStripItem = {
   icon?: ReactNode;
   /** Preview tabs render italic. */
   italic?: boolean;
+  /** Shows an unsaved-changes dot next to the label. */
+  dirty?: boolean;
 };
 
 export function TabStrip({
@@ -62,6 +64,12 @@ export function TabStrip({
               <span className={cn("truncate", item.italic && "italic")}>
                 {item.label}
               </span>
+              {item.dirty && (
+                <span
+                  className="size-1.5 shrink-0 rounded-full bg-primary"
+                  aria-label="Unsaved changes"
+                />
+              )}
               <span
                 role="button"
                 tabIndex={0}

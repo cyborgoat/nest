@@ -66,7 +66,12 @@ export function BrowseTab({
   busy: boolean;
   downloadPendingId?: string;
   removePendingId?: string;
-  onInstall: (packId: string, version: string, previousVersion?: string) => void;
+  onInstall: (
+    packId: string,
+    version: string,
+    previousVersion?: string,
+    ownerId?: string | null,
+  ) => void;
   onRemove: (packId: string) => void;
   onExport: (packId: string, destinationPath: string) => void;
   onOpenImport: () => void;
@@ -136,7 +141,12 @@ export function BrowseTab({
           removePending={removePendingId === pack.id}
           t={t}
           onInstall={(version) =>
-            onInstall(pack.id, version, installedById.get(pack.id)?.version)
+            onInstall(
+              pack.id,
+              version,
+              installedById.get(pack.id)?.version,
+              pack.owner_id,
+            )
           }
           onRemove={() => onRemove(pack.id)}
           onExport={onExport}
@@ -248,7 +258,7 @@ function PackRow({
         )}
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-2 pr-7">
-            <Package className="size-4 shrink-0 text-primary" />
+            <Package className="size-4 shrink-0 text-sky-500" />
             <h3 className="min-w-0 truncate font-medium">{project.name}</h3>
             <span className="shrink-0 text-[11px] text-muted-foreground">
               {t("hub.version")}

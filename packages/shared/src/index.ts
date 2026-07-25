@@ -116,6 +116,10 @@ export type InstalledPack = {
   last_synced: string | null;
   active: boolean;
   origin: "local" | "registry" | "bundled" | "unknown";
+  /** Hub login id of the pack owner, if known. Null for packs installed before
+   *  this field existed, or when the origin has no hub-side owner. */
+  owner_id: string | null;
+  description: string;
 };
 
 /** Editable metadata used when creating a knowledge pack from a local folder. */
@@ -138,6 +142,20 @@ export type TreeNode = {
   path: string;
   kind: TreeNodeKind;
   children?: TreeNode[];
+};
+
+/** Per-file local-version-control status, relative to a pack's last snapshot. */
+export type FileChangeStatus = "modified" | "new" | "deleted";
+
+export type FileStatus = {
+  path: string;
+  status: FileChangeStatus;
+};
+
+/** Old (snapshot) vs. new (working) content for one file's diff view. */
+export type DiffPair = {
+  old: string | null;
+  new: string | null;
 };
 
 export type AppSettings = {

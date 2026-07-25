@@ -1,10 +1,11 @@
 import type { TreeNode } from "@nest/shared";
 import { useQuery } from "@tanstack/react-query";
-import { FileText, Folder, Lock } from "lucide-react";
+import { FileText, Folder, Lock, Pencil } from "lucide-react";
 import { motion } from "motion/react";
 import { Fragment, useMemo } from "react";
 import { api } from "@/lib/api";
 import { parseFrontmatter } from "@/lib/frontmatter";
+import { canEditPack } from "@/lib/pack-permissions";
 import { queryKeys } from "@/lib/query-keys";
 import { MarkdownBody } from "@/components/markdown/MarkdownBody";
 import { MarkdownFrontmatter } from "@/components/markdown/MarkdownFrontmatter";
@@ -16,6 +17,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
+import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -28,6 +30,7 @@ import {
 import { PanelHeader } from "@/components/ui/panel-header";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
+import { useEditorStore } from "@/stores/editor";
 import { useUiStore } from "@/stores/ui";
 
 function childrenAtPath(nodes: TreeNode[], targetPath: string): TreeNode[] {
@@ -94,9 +97,22 @@ export function MarkdownViewer({ path }: { path: string }) {
     queryFn: api.vaultListTree,
   });
   const openFileTab = useUiStore((s) => s.openFileTab);
+  const setEditing = useEditorStore((s) => s.setEditing);
 
   const segments = path.split("/").filter(Boolean);
   const basePath = segments.slice(0, -1).join("/");
+  const rootPath = segments[0] ?? "";
+
+  const { data: installed } = useQuery({
+    queryKey: queryKeys.installedPacks,
+    queryFn: api.hubListInstalled,
+  });
+  const { data: hubAuth } = useQuery({
+    queryKey: queryKeys.hubAuth,
+    queryFn: api.hubAuthState,
+  });
+  const pack = installed?.find((p) => p.local_path === rootPath);
+  const canEdit = pack ? canEditPack(pack, hubAuth?.user ?? null) : false;
 
   const { frontmatter, body } = useMemo(() => {
     if (data == null) return { frontmatter: null, body: data };
@@ -109,10 +125,17 @@ export function MarkdownViewer({ path }: { path: string }) {
       <PanelHeader
         size="compact"
         actions={
-          <Badge variant="muted">
-            <Lock className="size-3" />
-            Read-only
-          </Badge>
+          canEdit ? (
+            <Button size="sm" variant="outline" onClick={() => setEditing(path, true)}>
+              <Pencil className="size-3.5" />
+              Edit
+            </Button>
+          ) : (
+            <Badge variant="muted">
+              <Lock className="size-3" />
+              Read-only
+            </Badge>
+          )
         }
       >
         <Breadcrumb className="min-w-0">

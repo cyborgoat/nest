@@ -12,6 +12,7 @@ mod indexer;
 mod indexing;
 mod llm;
 mod retrieval;
+mod snapshot;
 mod state;
 mod title;
 mod tray;
@@ -44,6 +45,15 @@ pub fn run() {
             commands::vault_list_tree,
             commands::vault_read_file,
             commands::vault_read_image,
+            commands::vault_write_file,
+            commands::vault_create_file,
+            commands::vault_create_folder,
+            commands::vault_delete_file,
+            commands::vault_delete_folder,
+            commands::vault_rename_entry,
+            commands::hub_pack_change_status,
+            commands::hub_pack_file_diff,
+            commands::hub_pack_discard_file,
             commands::settings_get,
             commands::settings_set,
             commands::index_status,
@@ -65,6 +75,7 @@ pub fn run() {
             commands::hub_inspect_local_pack,
             commands::hub_read_folder_pack_defaults,
             commands::hub_create_pack_from_folder,
+            commands::hub_create_empty_pack,
             commands::hub_export_pack,
             commands::hub_auth_state,
             commands::hub_login,
@@ -73,6 +84,8 @@ pub fn run() {
             commands::hub_update_profile,
             commands::hub_change_password,
             commands::hub_publish_pack,
+            commands::hub_update_pack_metadata,
+            commands::hub_rename_pack,
             commands::hub_list_publish_requests,
             commands::hub_list_messages,
             commands::hub_unread_message_count,

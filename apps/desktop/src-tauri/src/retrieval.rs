@@ -287,6 +287,8 @@ mod tests {
             last_synced: None,
             active: true,
             origin: "hub".into(),
+            owner_id: None,
+            description: String::new(),
         };
         let out = format_active_packs_for_prompt(&[pack]);
         assert!(out.contains("Cooking Basics"));

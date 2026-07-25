@@ -269,6 +269,10 @@ pub struct PackProject {
     pub description: String,
     pub latest_version: String,
     pub versions: Vec<String>,
+    #[serde(default)]
+    pub visibility: Option<String>,
+    #[serde(default)]
+    pub owner_id: Option<String>,
 }
 
 pub async fn list_packs_remote(
@@ -643,14 +647,23 @@ fn extract_zip_to_vault(zip_path: &Path, vault_root: &Path) -> AppResult<PathBuf
     Ok(vault_root.join(top.unwrap_or_default()))
 }
 
-pub fn record_sync(conn: &Connection, pack: &PackMeta, origin: &str) -> AppResult<()> {
+pub fn record_sync(
+    conn: &Connection,
+    pack: &PackMeta,
+    origin: &str,
+    owner_id: Option<&str>,
+) -> AppResult<()> {
     db::upsert_sync_state(
         conn,
-        &pack.id,
-        &pack.name,
-        &pack.version,
-        &pack.path,
-        origin,
+        db::SyncStateUpsert {
+            pack_id: &pack.id,
+            name: &pack.name,
+            version: &pack.version,
+            local_path: &pack.path,
+            origin,
+            owner_id,
+            description: &pack.description,
+        },
     )
 }
 
@@ -713,6 +726,49 @@ pub fn folder_pack_defaults(source: &Path) -> AppResult<FolderPackDefaults> {
             )),
         }),
     }
+}
+
+/// Scaffold a brand-new, empty knowledge pack directly in the vault (no
+/// source folder/zip). Seeds one starter `README.md` — a pack with zero
+/// markdown files would be invisible in `list_tree` (which hides empty
+/// folders) and would fail `pack_has_markdown`'s installed-pack filter, so a
+/// seed file isn't optional here.
+///
+/// A local pack's id/folder is always exactly its display name (the
+/// `submitted.id` field is ignored) — see `rename_pack_folder` for why this
+/// invariant matters and how it's kept in sync on rename.
+pub fn create_empty_pack(submitted: PackMeta, vault_root: &Path) -> AppResult<PackMeta> {
+    // Reuses normalize_pack_meta's validation (non-empty checks, folder-name
+    // safety, SemVer) by feeding it the display name as the id — the same
+    // checks a folder-import would apply, just against `name` instead of a
+    // separately-chosen id.
+    let pack = normalize_pack_meta(PackMeta {
+        id: submitted.name.clone(),
+        name: submitted.name,
+        description: submitted.description,
+        version: submitted.version,
+        path: String::new(),
+    })?;
+    let destination = vault_root.join(&pack.path);
+    if destination.exists() {
+        return Err(AppError::msg(format!(
+            "Knowledge pack '{}' already exists",
+            pack.id
+        )));
+    }
+    let result = (|| {
+        vault::ensure_dir(&destination)?;
+        fs::write(
+            destination.join("README.md"),
+            format!("# {}\n", pack.name),
+        )?;
+        write_pack_meta(&destination, &pack)?;
+        Ok(pack.clone())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_dir_all(&destination);
+    }
+    result
 }
 
 /// Copy a source folder into the vault as a standalone, validated pack.
@@ -1035,6 +1091,61 @@ fn normalize_pack_meta(pack: PackMeta) -> AppResult<PackMeta> {
     })
 }
 
+/// Update a pack's description on disk. Used to save an edit made right
+/// before publishing (works for any origin the user can edit). Renaming a
+/// pack is a distinct, local-only operation — see `rename_pack_folder` —
+/// since it also has to move the pack's folder and identity.
+pub fn update_pack_description(pack_root: &Path, description: &str) -> AppResult<PackMeta> {
+    let mut meta = read_required_pack_meta(pack_root)?;
+    meta.description = description.trim().to_string();
+    write_pack_meta(pack_root, &meta)?;
+    Ok(meta)
+}
+
+/// Renames a local pack: the vault's invariant is that a pack's folder name
+/// *is* its id and its display name, so renaming moves the on-disk folder
+/// (to `vault_root/{new_name}`) and updates `pack.json`'s id/name/path to
+/// match, all in lockstep. Only ever called for `origin == "local"` packs —
+/// downloaded packs keep the identity the hub already tracks, and enforcing
+/// that is the caller's job (this function only handles the mechanics).
+pub fn rename_pack_folder(
+    vault_root: &Path,
+    old_local_path: &str,
+    new_name: &str,
+) -> AppResult<PackMeta> {
+    let new_name = new_name.trim().to_string();
+    if new_name.is_empty() {
+        return Err(AppError::msg("Pack name cannot be empty"));
+    }
+    validate_pack_folder_name(&new_name)?;
+
+    let old_dir = vault_root.join(old_local_path);
+    let new_dir = vault_root.join(&new_name);
+    if new_name != old_local_path {
+        if new_dir.exists() {
+            return Err(AppError::msg(format!(
+                "A pack named '{new_name}' already exists"
+            )));
+        }
+        fs::rename(&old_dir, &new_dir)?;
+    }
+
+    let result = (|| {
+        let mut meta = read_required_pack_meta(&new_dir)?;
+        meta.id = new_name.clone();
+        meta.name = new_name.clone();
+        meta.path = new_name.clone();
+        write_pack_meta(&new_dir, &meta)?;
+        Ok(meta)
+    })();
+    if result.is_err() && new_name != old_local_path {
+        // Best-effort rollback so a pack.json read/write failure doesn't
+        // leave the folder moved but the DB still pointing at the old path.
+        let _ = fs::rename(&new_dir, &old_dir);
+    }
+    result
+}
+
 fn write_pack_meta(pack_root: &Path, pack: &PackMeta) -> AppResult<()> {
     fs::write(
         pack_root.join("pack.json"),
@@ -1165,6 +1276,145 @@ mod local_pack_tests {
         assert_eq!(created.version, "2.0.0");
         assert!(vault.join("sample/new.md").exists());
         assert!(!vault.join("sample/old.md").exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn create_empty_pack_derives_id_and_path_from_name() {
+        let root = test_root("create-empty");
+        let vault = root.join("vault");
+        fs::create_dir_all(&vault).unwrap();
+        let metadata = PackMeta {
+            id: "ignored-submitted-id".into(),
+            name: "My New Pack".into(),
+            description: String::new(),
+            version: "0.1.0".into(),
+            path: String::new(),
+        };
+
+        let created = create_empty_pack(metadata, &vault).unwrap();
+        assert_eq!(created.id, "My New Pack", "id must come from name, not the submitted id");
+        assert_eq!(created.path, "My New Pack");
+        assert!(vault.join("My New Pack/README.md").is_file());
+        assert!(vault.join("My New Pack/pack.json").is_file());
+        assert!(dir_has_markdown(&vault.join("My New Pack")));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn create_empty_pack_rejects_existing_id() {
+        let root = test_root("create-empty-conflict");
+        let vault = root.join("vault");
+        fs::create_dir_all(vault.join("Taken")).unwrap();
+        let metadata = PackMeta {
+            id: String::new(),
+            name: "Taken".into(),
+            description: String::new(),
+            version: "0.1.0".into(),
+            path: String::new(),
+        };
+
+        assert!(create_empty_pack(metadata, &vault).is_err());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn update_pack_description_preserves_everything_else() {
+        let root = test_root("update-description");
+        let vault = root.join("vault");
+        let metadata = PackMeta {
+            id: String::new(),
+            name: "Original Name".into(),
+            description: "Original description".into(),
+            version: "0.1.0".into(),
+            path: String::new(),
+        };
+        let pack = create_empty_pack(metadata, &vault).unwrap();
+        let pack_dir = vault.join(&pack.path);
+
+        let updated = update_pack_description(&pack_dir, "A new description").unwrap();
+        assert_eq!(updated.description, "A new description");
+        assert_eq!(updated.name, "Original Name", "name must never change here");
+        assert_eq!(updated.id, "Original Name", "id must never change here");
+        assert_eq!(updated.version, "0.1.0", "version must never change");
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn rename_pack_folder_moves_the_directory_and_updates_identity() {
+        let root = test_root("rename-pack");
+        let vault = root.join("vault");
+        let metadata = PackMeta {
+            id: String::new(),
+            name: "Original Name".into(),
+            description: "Keep me".into(),
+            version: "0.1.0".into(),
+            path: String::new(),
+        };
+        create_empty_pack(metadata, &vault).unwrap();
+
+        let renamed = rename_pack_folder(&vault, "Original Name", "New Name").unwrap();
+        assert_eq!(renamed.id, "New Name");
+        assert_eq!(renamed.name, "New Name");
+        assert_eq!(renamed.path, "New Name");
+        assert_eq!(renamed.description, "Keep me", "description is untouched by rename");
+        assert!(!vault.join("Original Name").exists());
+        assert!(vault.join("New Name/README.md").is_file());
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn rename_pack_folder_rejects_a_name_already_in_use() {
+        let root = test_root("rename-pack-conflict");
+        let vault = root.join("vault");
+        create_empty_pack(
+            PackMeta {
+                id: String::new(),
+                name: "Pack A".into(),
+                description: String::new(),
+                version: "0.1.0".into(),
+                path: String::new(),
+            },
+            &vault,
+        )
+        .unwrap();
+        create_empty_pack(
+            PackMeta {
+                id: String::new(),
+                name: "Pack B".into(),
+                description: String::new(),
+                version: "0.1.0".into(),
+                path: String::new(),
+            },
+            &vault,
+        )
+        .unwrap();
+
+        assert!(rename_pack_folder(&vault, "Pack A", "Pack B").is_err());
+        assert!(vault.join("Pack A").exists(), "source must survive a rejected rename");
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn rename_pack_folder_rejects_an_empty_name() {
+        let root = test_root("rename-pack-empty-name");
+        let vault = root.join("vault");
+        create_empty_pack(
+            PackMeta {
+                id: String::new(),
+                name: "Original Name".into(),
+                description: String::new(),
+                version: "0.1.0".into(),
+                path: String::new(),
+            },
+            &vault,
+        )
+        .unwrap();
+
+        assert!(rename_pack_folder(&vault, "Original Name", "   ").is_err());
         let _ = fs::remove_dir_all(root);
     }
 }

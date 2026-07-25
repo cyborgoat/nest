@@ -131,11 +131,13 @@ export function HubPanel() {
     mutationFn: ({
       packId,
       version,
+      ownerId,
     }: {
       packId: string;
       version: string;
       previousVersion?: string;
-    }) => api.hubDownloadPack(packId, version),
+      ownerId?: string | null;
+    }) => api.hubDownloadPack(packId, version, ownerId),
     onSuccess: (_status, vars) => {
       invalidateAfterPackChange();
       if (vars.previousVersion && vars.previousVersion !== vars.version) {
@@ -243,18 +245,37 @@ export function HubPanel() {
   });
 
   const publish = useMutation({
-    mutationFn: api.hubPublishPack,
+    mutationFn: async ({
+      packId,
+      version,
+      description,
+    }: {
+      packId: string;
+      version: string;
+      description: string;
+    }) => {
+      // Save the (possibly edited) description before submitting, so the
+      // publish payload reflects it and it's remembered locally too.
+      await api.hubUpdatePackMetadata(packId, description);
+      return api.hubPublishPack(packId, version);
+    },
     onMutate: () => {
       publishToastRef.current = toast.loading(
         "Uploading knowledge pack to Hub…",
       );
     },
-    onSuccess: () => {
+    onSuccess: (_data, vars) => {
       toast.success("Pack submitted for administrator review", {
         id: publishToastRef.current,
       });
       publishToastRef.current = undefined;
       queryClient.invalidateQueries({ queryKey: queryKeys.publishRequests });
+      // Publishing bumps the local install to the submitted version and
+      // resets its version-control baseline — refresh both.
+      queryClient.invalidateQueries({ queryKey: queryKeys.installedPacks });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.packStatus(vars.packId),
+      });
     },
     onError: (error: unknown) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.hubAuth });
@@ -265,13 +286,31 @@ export function HubPanel() {
     },
   });
 
+  const rename = useMutation({
+    mutationFn: ({ packId, name }: { packId: string; name: string }) =>
+      api.hubRenamePack(packId, name),
+    onSuccess: (_data, vars) => {
+      toast.success("Pack renamed");
+      // The old path's files effectively vanished (they now live under the
+      // new folder name) — close any tabs still pointing at them.
+      const oldLocalPath =
+        installedQuery.data?.find((p) => p.pack_id === vars.packId)
+          ?.local_path ?? vars.packId;
+      clearPathsUnder(oldLocalPath);
+      invalidateAfterPackChange();
+    },
+    onError: (error: unknown) =>
+      toast.error(appErrorMessage(error, "Could not rename pack")),
+  });
+
   const busy =
     download.isPending ||
     remove.isPending ||
     createFromFolder.isPending ||
     importLocal.isPending ||
     exportPack.isPending ||
-    publish.isPending;
+    publish.isPending ||
+    rename.isPending;
   const importing =
     importLocal.isPending ||
     createFromFolder.isPending ||
@@ -372,8 +411,8 @@ export function HubPanel() {
                 busy={busy}
                 downloadPendingId={downloadPendingId}
                 removePendingId={removePendingId}
-                onInstall={(packId, version, previousVersion) =>
-                  download.mutate({ packId, version, previousVersion })
+                onInstall={(packId, version, previousVersion, ownerId) =>
+                  download.mutate({ packId, version, previousVersion, ownerId })
                 }
                 onRemove={(packId) => remove.mutate(packId)}
                 onExport={(packId, destinationPath) =>
@@ -395,8 +434,8 @@ export function HubPanel() {
                 busy={busy}
                 downloadPendingId={downloadPendingId}
                 removePendingId={removePendingId}
-                onUpgrade={(packId, version, previousVersion) =>
-                  download.mutate({ packId, version, previousVersion })
+                onUpgrade={(packId, version, previousVersion, ownerId) =>
+                  download.mutate({ packId, version, previousVersion, ownerId })
                 }
                 onRemove={(packId) => remove.mutate(packId)}
                 onOpenImport={() => setImportOpen(true)}
@@ -405,8 +444,14 @@ export function HubPanel() {
                   exportPack.mutate({ packId, destinationPath })
                 }
                 authenticated={authQuery.data?.authenticated === true}
+                hubUser={authQuery.data?.user ?? null}
                 onSignIn={openAccountSettingsTab}
-                onPublish={(packId) => publish.mutate(packId)}
+                onPublish={(packId, version, description) =>
+                  publish.mutate({ packId, version, description })
+                }
+                publishing={publish.isPending}
+                onRename={(packId, name) => rename.mutate({ packId, name })}
+                renaming={rename.isPending}
               />
             </div>
           </ScrollArea>

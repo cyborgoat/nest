@@ -133,6 +133,10 @@ pub struct InstalledPack {
     pub active: bool,
     #[serde(default = "default_origin")]
     pub origin: String,
+    #[serde(default)]
+    pub owner_id: Option<String>,
+    #[serde(default)]
+    pub description: String,
 }
 
 fn default_true() -> bool {
@@ -227,6 +231,25 @@ fn migrate(conn: &Connection) -> AppResult<()> {
     ensure_message_thinking_columns(conn)?;
     ensure_sync_state_active_column(conn)?;
     ensure_sync_state_origin_column(conn)?;
+    ensure_sync_state_owner_id_column(conn)?;
+    ensure_sync_state_description_column(conn)?;
+    Ok(())
+}
+
+fn ensure_sync_state_owner_id_column(conn: &Connection) -> AppResult<()> {
+    if !table_has_column(conn, "sync_state", "owner_id")? {
+        conn.execute("ALTER TABLE sync_state ADD COLUMN owner_id TEXT", [])?;
+    }
+    Ok(())
+}
+
+fn ensure_sync_state_description_column(conn: &Connection) -> AppResult<()> {
+    if !table_has_column(conn, "sync_state", "description")? {
+        conn.execute(
+            "ALTER TABLE sync_state ADD COLUMN description TEXT NOT NULL DEFAULT ''",
+            [],
+        )?;
+    }
     Ok(())
 }
 
@@ -800,26 +823,46 @@ pub fn list_messages(conn: &Connection, session_id: &str) -> AppResult<Vec<ChatM
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
-pub fn upsert_sync_state(
-    conn: &Connection,
-    pack_id: &str,
-    name: &str,
-    version: &str,
-    local_path: &str,
-    origin: &str,
-) -> AppResult<()> {
+/// Parameters for `upsert_sync_state` — grouped into a struct since the
+/// individual-arguments form grew past clippy's arity lint as ownership and
+/// description tracking were added.
+pub struct SyncStateUpsert<'a> {
+    pub pack_id: &'a str,
+    pub name: &'a str,
+    pub version: &'a str,
+    pub local_path: &'a str,
+    pub origin: &'a str,
+    pub owner_id: Option<&'a str>,
+    pub description: &'a str,
+}
+
+pub fn upsert_sync_state(conn: &Connection, values: SyncStateUpsert<'_>) -> AppResult<()> {
     let now = Utc::now().to_rfc3339();
     // Preserve active flag on upgrade; new packs default to active=1.
+    // owner_id is only overwritten when the caller actually knows it — a
+    // re-sync/import that doesn't have owner info shouldn't clobber a
+    // previously-recorded owner with NULL.
     conn.execute(
-        "INSERT INTO sync_state (pack_id, name, version, local_path, last_synced, active, origin)
-         VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6)
+        "INSERT INTO sync_state (pack_id, name, version, local_path, last_synced, active, origin, owner_id, description)
+         VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?7, ?8)
          ON CONFLICT(pack_id) DO UPDATE SET
            name = excluded.name,
            version = excluded.version,
            local_path = excluded.local_path,
            last_synced = excluded.last_synced,
-           origin = excluded.origin",
-        params![pack_id, name, version, local_path, now, origin],
+           origin = excluded.origin,
+           owner_id = COALESCE(excluded.owner_id, sync_state.owner_id),
+           description = excluded.description",
+        params![
+            values.pack_id,
+            values.name,
+            values.version,
+            values.local_path,
+            now,
+            values.origin,
+            values.owner_id,
+            values.description
+        ],
     )?;
     Ok(())
 }
@@ -844,7 +887,7 @@ pub fn list_active_pack_roots(conn: &Connection) -> AppResult<Vec<String>> {
 
 pub fn list_sync_state(conn: &Connection) -> AppResult<Vec<InstalledPack>> {
     let mut stmt = conn.prepare(
-        "SELECT pack_id, name, local_path, version, last_synced, COALESCE(active, 1), COALESCE(origin, 'unknown')
+        "SELECT pack_id, name, local_path, version, last_synced, COALESCE(active, 1), COALESCE(origin, 'unknown'), owner_id, COALESCE(description, '')
          FROM sync_state ORDER BY name",
     )?;
     let rows = stmt.query_map([], |row| {
@@ -856,6 +899,8 @@ pub fn list_sync_state(conn: &Connection) -> AppResult<Vec<InstalledPack>> {
             last_synced: row.get(4)?,
             active: row.get::<_, i64>(5)? != 0,
             origin: row.get(6)?,
+            owner_id: row.get(7)?,
+            description: row.get(8)?,
         })
     })?;
     Ok(rows.filter_map(|r| r.ok()).collect())
@@ -863,7 +908,7 @@ pub fn list_sync_state(conn: &Connection) -> AppResult<Vec<InstalledPack>> {
 
 pub fn get_sync_state(conn: &Connection, pack_id: &str) -> AppResult<Option<InstalledPack>> {
     conn.query_row(
-        "SELECT pack_id, name, local_path, version, last_synced, COALESCE(active, 1), COALESCE(origin, 'unknown')
+        "SELECT pack_id, name, local_path, version, last_synced, COALESCE(active, 1), COALESCE(origin, 'unknown'), owner_id, COALESCE(description, '')
          FROM sync_state WHERE pack_id = ?1",
         params![pack_id],
         |row| {
@@ -875,6 +920,8 @@ pub fn get_sync_state(conn: &Connection, pack_id: &str) -> AppResult<Option<Inst
                 last_synced: row.get(4)?,
                 active: row.get::<_, i64>(5)? != 0,
                 origin: row.get(6)?,
+                owner_id: row.get(7)?,
+                description: row.get(8)?,
             })
         },
     )
@@ -907,8 +954,11 @@ pub fn resolve_retrieval_prefixes(
     }
 }
 
-/// Remove chunks, FTS rows, and sync state for a vault path prefix.
-pub fn purge_path_data(conn: &Connection, path: &str) -> AppResult<()> {
+/// Remove indexed chunks/FTS rows for a vault path prefix, without touching
+/// `sync_state`. Used both as the first half of `purge_path_data` (removal)
+/// and standalone when a pack's files *move* (rename) rather than disappear
+/// — a rename needs its `sync_state` row updated in place, not deleted.
+pub fn purge_chunks_for_path(conn: &Connection, path: &str) -> AppResult<()> {
     let exact = path.to_string();
     let prefix = format!("{path}/%");
 
@@ -929,12 +979,41 @@ pub fn purge_path_data(conn: &Connection, path: &str) -> AppResult<()> {
         params![exact, prefix],
     )?;
 
+    recount_index_meta(conn)?;
+    Ok(())
+}
+
+/// Remove chunks, FTS rows, and sync state for a vault path prefix.
+pub fn purge_path_data(conn: &Connection, path: &str) -> AppResult<()> {
+    purge_chunks_for_path(conn, path)?;
+
+    let exact = path.to_string();
+    let prefix = format!("{path}/%");
     conn.execute(
         "DELETE FROM sync_state WHERE pack_id = ?1 OR local_path = ?1 OR local_path LIKE ?2",
         params![exact, prefix],
     )?;
 
-    recount_index_meta(conn)?;
+    Ok(())
+}
+
+/// Renames a pack's identity in `sync_state` — `pack_id` and `local_path`
+/// always move together (the vault-wide invariant is that a pack's folder
+/// name *is* its id), leaving version/active/origin/owner_id/description
+/// untouched.
+pub fn rename_sync_state_pack(
+    conn: &Connection,
+    old_pack_id: &str,
+    new_pack_id: &str,
+    new_name: &str,
+) -> AppResult<()> {
+    let n = conn.execute(
+        "UPDATE sync_state SET pack_id = ?1, local_path = ?1, name = ?2 WHERE pack_id = ?3",
+        params![new_pack_id, new_name, old_pack_id],
+    )?;
+    if n == 0 {
+        return Err(AppError::msg(format!("Pack not installed: {old_pack_id}")));
+    }
     Ok(())
 }
 
@@ -976,11 +1055,25 @@ mod sync_state_tests {
         let legacy = get_sync_state(&conn, "legacy").unwrap().unwrap();
         assert_eq!(legacy.origin, "unknown");
         assert!(!legacy.active);
+        assert_eq!(legacy.description, "");
 
-        upsert_sync_state(&conn, "legacy", "Legacy", "2.0.0", "legacy", "local").unwrap();
+        upsert_sync_state(
+            &conn,
+            SyncStateUpsert {
+                pack_id: "legacy",
+                name: "Legacy",
+                version: "2.0.0",
+                local_path: "legacy",
+                origin: "local",
+                owner_id: None,
+                description: "An updated description",
+            },
+        )
+        .unwrap();
         let updated = get_sync_state(&conn, "legacy").unwrap().unwrap();
         assert_eq!(updated.origin, "local");
         assert_eq!(updated.version, "2.0.0");
+        assert_eq!(updated.description, "An updated description");
         assert!(!updated.active, "replacement must preserve active state");
     }
 }

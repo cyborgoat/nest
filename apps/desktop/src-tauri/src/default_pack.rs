@@ -94,11 +94,16 @@ fn seed_pack(
 
     db::upsert_sync_state(
         conn,
-        &meta.id,
-        &meta.name,
-        &meta.version,
-        &meta.id,
-        "bundled",
+        db::SyncStateUpsert {
+            pack_id: &meta.id,
+            name: &meta.name,
+            version: &meta.version,
+            local_path: &meta.id,
+            origin: "bundled",
+            owner_id: None,
+            // Bundled packs' embedded pack.json doesn't carry a description field.
+            description: "",
+        },
     )
 }
 

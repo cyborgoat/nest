@@ -5,10 +5,29 @@ export const HUB_TAB_ID = "__hub__";
 export const SETTINGS_TAB_ID = "__settings__";
 export const MESSAGES_TAB_ID = "__messages__";
 export type SettingsSection = "general" | "account";
+export type ActivitySidebarView = "explorer" | "source-control";
+
+const DIFF_TAB_PREFIX = "diff:";
+
+export function diffTabId(packId: string, path: string): string {
+  return `${DIFF_TAB_PREFIX}${packId}:${path}`;
+}
+
+export function parseDiffTabId(
+  id: string,
+): { packId: string; path: string } | null {
+  if (!id.startsWith(DIFF_TAB_PREFIX)) return null;
+  const rest = id.slice(DIFF_TAB_PREFIX.length);
+  const idx = rest.indexOf(":");
+  if (idx < 0) return null;
+  return { packId: rest.slice(0, idx), path: rest.slice(idx + 1) };
+}
 
 type UiState = {
   sidebarOpen: boolean;
   chatOpen: boolean;
+  activitySidebarView: ActivitySidebarView;
+  setActivitySidebarView: (view: ActivitySidebarView) => void;
   statusMessage: string | null;
   /** Active chat session id */
   chatSessionId: string | null;
@@ -31,6 +50,7 @@ type UiState = {
   closeChatTab: (id: string) => void;
   pruneChatTabs: (validIds: Set<string>) => void;
   openFileTab: (path: string, opts?: { preview?: boolean }) => void;
+  openDiffTab: (packId: string, path: string) => void;
   openHubTab: () => void;
   openSettingsTab: () => void;
   openAccountSettingsTab: () => void;
@@ -42,6 +62,13 @@ type UiState = {
 
 function pathMatchesOrUnder(candidate: string, removed: string) {
   return candidate === removed || candidate.startsWith(`${removed}/`);
+}
+
+/** Like `pathMatchesOrUnder`, but resolves a diff-tab id to the file path it
+ * diffs first, so removing/deactivating a path also closes its diff tab. */
+function tabMatchesRemovedPath(id: string, removed: string) {
+  const parsed = parseDiffTabId(id);
+  return pathMatchesOrUnder(parsed ? parsed.path : id, removed);
 }
 
 /** Neighbor-fallback: if `activeId` survived into `nextTabs`, keep it; otherwise
@@ -95,6 +122,8 @@ export const useUiStore = create<UiState>()(
     (set, get) => ({
       sidebarOpen: true,
       chatOpen: true,
+      activitySidebarView: "explorer",
+      setActivitySidebarView: (view) => set({ activitySidebarView: view }),
       statusMessage: null,
       chatSessionId: null,
       openChatTabs: [],
@@ -112,7 +141,7 @@ export const useUiStore = create<UiState>()(
       clearPathsUnder: (path) => {
         const { openMainTabs, activeMainTabId, previewMainTabId } = get();
         const nextTabs = openMainTabs.filter(
-          (id) => !pathMatchesOrUnder(id, path),
+          (id) => !tabMatchesRemovedPath(id, path),
         );
         set({
           openMainTabs: nextTabs,
@@ -175,6 +204,26 @@ export const useUiStore = create<UiState>()(
           openMainTabs: replacePreviewOrAppend(cleaned, previewMainTabId, path),
           activeMainTabId: path,
           previewMainTabId: asPreview ? path : null,
+        });
+      },
+      openDiffTab: (packId, path) => {
+        const id = diffTabId(packId, path);
+        const { openMainTabs, previewMainTabId } = get();
+        const cleaned = closeEphemeralExcept(openMainTabs, id);
+        if (cleaned.includes(id)) {
+          set({
+            openMainTabs: cleaned,
+            activeMainTabId: id,
+            previewMainTabId: previewMainTabId === id ? null : previewMainTabId,
+          });
+          return;
+        }
+        set({
+          // Diff tabs always open as preview — clicking through several
+          // changed files in Source Control shouldn't spam permanent tabs.
+          openMainTabs: replacePreviewOrAppend(cleaned, previewMainTabId, id),
+          activeMainTabId: id,
+          previewMainTabId: id,
         });
       },
       openHubTab: () => {
@@ -240,6 +289,10 @@ export const useUiStore = create<UiState>()(
             id === HUB_TAB_ID ||
             id === SETTINGS_TAB_ID ||
             id === MESSAGES_TAB_ID ||
+            // Diff tabs can legitimately point at paths absent from the tree
+            // (deleted files) — their lifecycle is managed by discard/close,
+            // not this path-existence check.
+            parseDiffTabId(id) != null ||
             validPaths.has(id),
         );
         set({
@@ -270,6 +323,7 @@ export const useUiStore = create<UiState>()(
           openMainTabs,
           activeMainTabId,
           previewMainTabId: state.previewMainTabId,
+          activitySidebarView: state.activitySidebarView,
         };
       },
     },

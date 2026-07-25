@@ -278,6 +278,123 @@ pub fn copy_dir_recursive(src: &Path, dst: &Path) -> AppResult<()> {
     Ok(())
 }
 
+pub fn is_markdown_path(path: impl AsRef<Path>) -> bool {
+    path.as_ref()
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.eq_ignore_ascii_case("md"))
+        .unwrap_or(false)
+}
+
+/// Reject operations targeting a pack root (single path segment) — those go
+/// through `remove_pack`/whole-pack flows, which have different bookkeeping.
+fn reject_pack_root(rel_path: &str) -> AppResult<()> {
+    let cleaned = rel_path.trim_start_matches('/');
+    if !cleaned.contains('/') {
+        return Err(AppError::msg(
+            "Whole knowledge packs must be managed from the pack list, not as a single file or folder",
+        ));
+    }
+    Ok(())
+}
+
+/// Overwrite (or create) a markdown file's content.
+pub fn write_file(root: &Path, rel_path: &str, content: &str) -> AppResult<()> {
+    if !is_markdown_path(rel_path) {
+        return Err(AppError::msg("Only markdown (.md) files can be edited"));
+    }
+    let path = resolve_vault_path(root, rel_path)?;
+    if path.is_dir() {
+        return Err(AppError::msg(format!("{rel_path} is a folder, not a file")));
+    }
+    if let Some(parent) = path.parent() {
+        ensure_dir(parent)?;
+    }
+    fs::write(path, content)?;
+    Ok(())
+}
+
+/// Create a new markdown file. Fails if a file or folder already exists there.
+pub fn create_file(root: &Path, rel_path: &str, initial_content: &str) -> AppResult<()> {
+    if !is_markdown_path(rel_path) {
+        return Err(AppError::msg("Only markdown (.md) files can be created"));
+    }
+    let path = resolve_vault_path(root, rel_path)?;
+    if path.exists() {
+        return Err(AppError::msg(format!("{rel_path} already exists")));
+    }
+    if let Some(parent) = path.parent() {
+        ensure_dir(parent)?;
+    }
+    fs::write(path, initial_content)?;
+    Ok(())
+}
+
+/// Create a new (possibly nested) folder. Note: `list_tree` hides empty
+/// folders, so this won't be visible in the tree until it contains a file.
+pub fn create_folder(root: &Path, rel_path: &str) -> AppResult<()> {
+    let path = resolve_vault_path(root, rel_path)?;
+    if path.is_file() {
+        return Err(AppError::msg(format!(
+            "{rel_path} already exists as a file"
+        )));
+    }
+    ensure_dir(&path)?;
+    Ok(())
+}
+
+/// Delete a single markdown file (not a folder — use `delete_folder`).
+pub fn delete_file(root: &Path, rel_path: &str) -> AppResult<()> {
+    let path = resolve_vault_path(root, rel_path)?;
+    if !path.exists() {
+        return Err(AppError::msg(format!("{rel_path} does not exist")));
+    }
+    if path.is_dir() {
+        return Err(AppError::msg(format!(
+            "{rel_path} is a folder — use delete_folder"
+        )));
+    }
+    fs::remove_file(path)?;
+    Ok(())
+}
+
+/// Delete a folder and everything under it. Pack roots must go through
+/// `remove_pack` instead (different bookkeeping: sync_state purge, etc.).
+pub fn delete_folder(root: &Path, rel_path: &str) -> AppResult<()> {
+    reject_pack_root(rel_path)?;
+    let path = resolve_vault_path(root, rel_path)?;
+    if !path.exists() {
+        return Err(AppError::msg(format!("{rel_path} does not exist")));
+    }
+    if !path.is_dir() {
+        return Err(AppError::msg(format!(
+            "{rel_path} is a file — use delete_file"
+        )));
+    }
+    fs::remove_dir_all(path)?;
+    Ok(())
+}
+
+/// Rename or move a file/folder within the vault. Pack roots must go through
+/// dedicated pack-level flows, not this generic rename.
+pub fn rename_entry(root: &Path, from_rel: &str, to_rel: &str) -> AppResult<()> {
+    reject_pack_root(from_rel)?;
+    reject_pack_root(to_rel)?;
+    let from = resolve_vault_path(root, from_rel)?;
+    if !from.exists() {
+        return Err(AppError::msg(format!("{from_rel} does not exist")));
+    }
+    let to = resolve_vault_path(root, to_rel)?;
+    if to.exists() {
+        return Err(AppError::msg(format!("{to_rel} already exists")));
+    }
+    if let Some(parent) = to.parent() {
+        ensure_dir(parent)?;
+    }
+    fs::rename(from, to)?;
+    Ok(())
+}
+
 /// Delete an entire top-level knowledge pack from the vault.
 /// Only pack roots are allowed (single path segment, directory).
 pub fn remove_pack(root: &Path, rel_path: &str) -> AppResult<()> {
@@ -373,6 +490,83 @@ mod tests {
         assert!(!is_pack_content_file(Path::new("data.csv")));
         assert!(!is_pack_content_file(Path::new("video.mp4")));
         assert!(!is_pack_content_file(Path::new("readme.txt")));
+    }
+
+    #[test]
+    fn write_file_creates_and_overwrites_markdown() {
+        let dir = env::temp_dir().join("nest-vault-write-file");
+        let _ = fs::remove_dir_all(&dir);
+        ensure_dir(&dir).unwrap();
+        write_file(&dir, "pack/notes.md", "# Hello").unwrap();
+        assert_eq!(fs::read_to_string(dir.join("pack/notes.md")).unwrap(), "# Hello");
+        write_file(&dir, "pack/notes.md", "# Updated").unwrap();
+        assert_eq!(fs::read_to_string(dir.join("pack/notes.md")).unwrap(), "# Updated");
+    }
+
+    #[test]
+    fn write_file_rejects_non_markdown() {
+        let dir = env::temp_dir().join("nest-vault-write-non-md");
+        let _ = fs::remove_dir_all(&dir);
+        ensure_dir(&dir).unwrap();
+        assert!(write_file(&dir, "pack/notes.txt", "hi").is_err());
+    }
+
+    #[test]
+    fn create_file_fails_if_exists() {
+        let dir = env::temp_dir().join("nest-vault-create-file-exists");
+        let _ = fs::remove_dir_all(&dir);
+        ensure_dir(&dir.join("pack")).unwrap();
+        fs::write(dir.join("pack/a.md"), "# A").unwrap();
+        assert!(create_file(&dir, "pack/a.md", "# B").is_err());
+        create_file(&dir, "pack/b.md", "# B").unwrap();
+        assert_eq!(fs::read_to_string(dir.join("pack/b.md")).unwrap(), "# B");
+    }
+
+    #[test]
+    fn create_folder_fails_over_existing_file() {
+        let dir = env::temp_dir().join("nest-vault-create-folder-conflict");
+        let _ = fs::remove_dir_all(&dir);
+        ensure_dir(&dir.join("pack")).unwrap();
+        fs::write(dir.join("pack/x"), "not a dir").unwrap();
+        assert!(create_folder(&dir, "pack/x").is_err());
+        create_folder(&dir, "pack/subdir").unwrap();
+        assert!(dir.join("pack/subdir").is_dir());
+    }
+
+    #[test]
+    fn delete_file_rejects_directories() {
+        let dir = env::temp_dir().join("nest-vault-delete-file-rejects-dir");
+        let _ = fs::remove_dir_all(&dir);
+        ensure_dir(&dir.join("pack/sub")).unwrap();
+        assert!(delete_file(&dir, "pack/sub").is_err());
+        fs::write(dir.join("pack/a.md"), "# A").unwrap();
+        delete_file(&dir, "pack/a.md").unwrap();
+        assert!(!dir.join("pack/a.md").exists());
+    }
+
+    #[test]
+    fn delete_folder_rejects_pack_root() {
+        let dir = env::temp_dir().join("nest-vault-delete-folder-pack-root");
+        let _ = fs::remove_dir_all(&dir);
+        ensure_dir(&dir.join("pack")).unwrap();
+        assert!(delete_folder(&dir, "pack").is_err());
+        ensure_dir(&dir.join("pack/sub")).unwrap();
+        delete_folder(&dir, "pack/sub").unwrap();
+        assert!(!dir.join("pack/sub").exists());
+    }
+
+    #[test]
+    fn rename_entry_rejects_pack_root_and_existing_target() {
+        let dir = env::temp_dir().join("nest-vault-rename-entry");
+        let _ = fs::remove_dir_all(&dir);
+        ensure_dir(&dir.join("pack")).unwrap();
+        assert!(rename_entry(&dir, "pack", "other").is_err());
+        fs::write(dir.join("pack/a.md"), "# A").unwrap();
+        fs::write(dir.join("pack/b.md"), "# B").unwrap();
+        assert!(rename_entry(&dir, "pack/a.md", "pack/b.md").is_err());
+        rename_entry(&dir, "pack/a.md", "pack/c.md").unwrap();
+        assert!(!dir.join("pack/a.md").exists());
+        assert_eq!(fs::read_to_string(dir.join("pack/c.md")).unwrap(), "# A");
     }
 
     #[test]

@@ -198,6 +198,19 @@
     "Noto Color Emoji";
 }
 
+/* WKWebView/WebKit draws a default blue focus ring on any contenteditable
+   element — Milkdown's ProseMirror root is one, so editing showed a stray
+   blue outline around the whole document. */
+.ProseMirror {
+  outline: none;
+}
+
+.ProseMirror:focus,
+.ProseMirror:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
 .markdown-body > :first-child {
   margin-top: 0;
 }

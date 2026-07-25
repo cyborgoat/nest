@@ -513,6 +513,8 @@ mod tests {
             last_synced: None,
             active: true,
             origin: "hub".into(),
+            owner_id: None,
+            description: String::new(),
         };
         let preamble = agent_preamble_with_retrieval(&[], false, &[pack]);
         assert!(preamble.contains("Cooking Basics"));

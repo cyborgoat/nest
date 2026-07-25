@@ -18,6 +18,9 @@ export const queryKeys = {
   file: (path: string) => ["file", path] as const,
   allFiles: ["file"] as const,
   vaultImage: (path: string) => ["vault-image", path] as const,
+  packStatus: (packId: string) => ["pack-status", packId] as const,
+  fileDiff: (packId: string, path: string) =>
+    ["file-diff", packId, path] as const,
 };
 
 export const packMutationInvalidations = [
@@ -27,3 +30,18 @@ export const packMutationInvalidations = [
   queryKeys.allFiles,
   queryKeys.allChatMessages,
 ] as const;
+
+/**
+ * Invalidated after any single-file mutation (save/create/delete/rename/
+ * discard). Pass `path` when the mutation touched one specific, still-open
+ * file (e.g. a save or a discard) so only that file's content re-fetches —
+ * otherwise every open file's content query would refetch on every edit
+ * anywhere in the vault.
+ */
+export function fileMutationInvalidations(packId: string, path?: string) {
+  return [
+    queryKeys.tree,
+    queryKeys.packStatus(packId),
+    ...(path ? [queryKeys.file(path)] : []),
+  ] as const;
+}

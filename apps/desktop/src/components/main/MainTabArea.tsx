@@ -6,12 +6,16 @@ import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import { MessagesPanel } from "@/components/messages/MessagesPanel";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
+import { DiffViewer } from "@/components/viewer/DiffViewer";
+import { MarkdownEditor } from "@/components/viewer/MarkdownEditor";
 import { MarkdownViewer } from "@/components/viewer/MarkdownViewer";
 import { api } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
+import { useEditorStore } from "@/stores/editor";
 import {
   HUB_TAB_ID,
   MESSAGES_TAB_ID,
+  parseDiffTabId,
   SETTINGS_TAB_ID,
   useUiStore,
 } from "@/stores/ui";
@@ -19,6 +23,7 @@ import {
 export function MainTabArea() {
   const activeMainTabId = useUiStore((s) => s.activeMainTabId);
   const openHubTab = useUiStore((s) => s.openHubTab);
+  const editingPaths = useEditorStore((s) => s.editingPaths);
 
   const treeQuery = useQuery({
     queryKey: queryKeys.tree,
@@ -28,6 +33,8 @@ export function MainTabArea() {
   const vaultEmpty =
     !treeQuery.isLoading && (treeQuery.data?.length ?? 0) === 0;
 
+  const diffTab = activeMainTabId ? parseDiffTabId(activeMainTabId) : null;
+
   let content;
   if (activeMainTabId === HUB_TAB_ID) {
     content = <HubPanel />;
@@ -35,8 +42,20 @@ export function MainTabArea() {
     content = <SettingsPanel />;
   } else if (activeMainTabId === MESSAGES_TAB_ID) {
     content = <MessagesPanel />;
+  } else if (diffTab) {
+    content = (
+      <DiffViewer
+        key={activeMainTabId}
+        packId={diffTab.packId}
+        path={diffTab.path}
+      />
+    );
   } else if (activeMainTabId) {
-    content = <MarkdownViewer path={activeMainTabId} />;
+    content = editingPaths.has(activeMainTabId) ? (
+      <MarkdownEditor key={activeMainTabId} path={activeMainTabId} />
+    ) : (
+      <MarkdownViewer path={activeMainTabId} />
+    );
   } else if (vaultEmpty) {
     content = (
       <EmptyState

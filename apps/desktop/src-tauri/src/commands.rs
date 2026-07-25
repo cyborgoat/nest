@@ -30,6 +30,148 @@ pub fn vault_read_image(state: State<'_, SharedState>, path: String) -> AppResul
 }
 
 #[tauri::command]
+pub fn vault_write_file(
+    state: State<'_, SharedState>,
+    path: String,
+    content: String,
+) -> AppResult<()> {
+    let vault = state.vault_path();
+    vault::write_file(&vault, &path, &content)?;
+    indexing::schedule(state.inner())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn vault_create_file(
+    state: State<'_, SharedState>,
+    path: String,
+    initial_content: Option<String>,
+) -> AppResult<()> {
+    let vault = state.vault_path();
+    vault::create_file(&vault, &path, initial_content.as_deref().unwrap_or(""))?;
+    indexing::schedule(state.inner())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn vault_create_folder(state: State<'_, SharedState>, path: String) -> AppResult<()> {
+    let vault = state.vault_path();
+    vault::create_folder(&vault, &path)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn vault_delete_file(state: State<'_, SharedState>, path: String) -> AppResult<()> {
+    let vault = state.vault_path();
+    vault::delete_file(&vault, &path)?;
+    indexing::schedule(state.inner())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn vault_delete_folder(state: State<'_, SharedState>, path: String) -> AppResult<()> {
+    let vault = state.vault_path();
+    vault::delete_folder(&vault, &path)?;
+    indexing::schedule(state.inner())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn vault_rename_entry(
+    state: State<'_, SharedState>,
+    from: String,
+    to: String,
+) -> AppResult<()> {
+    let vault = state.vault_path();
+    vault::rename_entry(&vault, &from, &to)?;
+    indexing::schedule(state.inner())?;
+    Ok(())
+}
+
+/// Look up an installed pack by id, or fail with a consistent error message.
+/// Shared by every command that needs "the pack, or a clear error" before
+/// doing anything else.
+fn require_installed_pack(conn: &rusqlite::Connection, pack_id: &str) -> AppResult<InstalledPack> {
+    let pack_id = pack_id.trim();
+    db::get_sync_state(conn, pack_id)?
+        .ok_or_else(|| AppError::msg(format!("Pack not installed: {pack_id}")))
+}
+
+/// Resolve a pack's working directory and its current snapshot directory
+/// (baseline last written at download/sync or successful publish time), plus
+/// the pack's vault-relative prefix (its `local_path`).
+///
+/// `snapshot`'s functions work with paths relative to the pack directory
+/// itself, but every path the frontend deals in (`TreeNode.path`,
+/// `vault_write_file`, etc.) is relative to the vault root and therefore
+/// includes this prefix — these commands translate at the boundary so the
+/// pack-relative/vault-relative distinction never leaks past this file.
+fn pack_dirs(
+    state: &SharedState,
+    pack_id: &str,
+) -> AppResult<(std::path::PathBuf, std::path::PathBuf, String)> {
+    let installed = {
+        let conn = state.db.lock();
+        require_installed_pack(&conn, pack_id)?
+    };
+    let pack_dir = state.vault_path().join(&installed.local_path);
+    let snapshot_dir = crate::snapshot::snapshot_root(
+        &state.app_data_dir,
+        &installed.pack_id,
+        &installed.version,
+    );
+    Ok((pack_dir, snapshot_dir, installed.local_path))
+}
+
+/// Strip a pack's `local_path/` prefix from a vault-relative path. Errors if
+/// the path isn't actually under that prefix (defends against a stale tab
+/// sending a path that belongs to a different pack).
+fn strip_pack_prefix(local_path: &str, vault_relative: &str) -> AppResult<String> {
+    vault_relative
+        .strip_prefix(local_path)
+        .and_then(|rest| rest.strip_prefix('/'))
+        .map(str::to_string)
+        .ok_or_else(|| AppError::msg(format!("Path is not inside this pack: {vault_relative}")))
+}
+
+#[tauri::command]
+pub fn hub_pack_change_status(
+    state: State<'_, SharedState>,
+    pack_id: String,
+) -> AppResult<Vec<crate::snapshot::FileStatus>> {
+    let (pack_dir, snapshot_dir, local_path) = pack_dirs(&state, &pack_id)?;
+    let mut statuses = crate::snapshot::compute_status(&pack_dir, &snapshot_dir)?;
+    for status in &mut statuses {
+        status.path = format!("{local_path}/{}", status.path);
+    }
+    Ok(statuses)
+}
+
+#[tauri::command]
+pub fn hub_pack_file_diff(
+    state: State<'_, SharedState>,
+    pack_id: String,
+    path: String,
+) -> AppResult<crate::snapshot::DiffPair> {
+    let (pack_dir, snapshot_dir, local_path) = pack_dirs(&state, &pack_id)?;
+    let pack_relative = strip_pack_prefix(&local_path, &path)?;
+    crate::snapshot::read_pair(&pack_dir, &snapshot_dir, &pack_relative)
+}
+
+#[tauri::command]
+pub fn hub_pack_discard_file(
+    state: State<'_, SharedState>,
+    pack_id: String,
+    path: String,
+) -> AppResult<()> {
+    let (pack_dir, snapshot_dir, local_path) = pack_dirs(&state, &pack_id)?;
+    let pack_relative = strip_pack_prefix(&local_path, &path)?;
+    crate::snapshot::discard_file(&pack_dir, &snapshot_dir, &pack_relative)?;
+    indexing::schedule(state.inner())?;
+    Ok(())
+}
+
+#[tauri::command]
 pub fn settings_get(state: State<'_, SharedState>) -> AppResult<AppSettings> {
     let mut settings = {
         let conn = state.db.lock();
@@ -407,6 +549,11 @@ pub async fn hub_remove_pack(state: State<'_, SharedState>, pack_id: String) -> 
         }
     }
 
+    // Snapshots are keyed by pack_id and outlive individual versions; a
+    // removed pack has no further use for its version-control baselines.
+    let snapshots_dir = state.app_data_dir.join("snapshots").join(&pack_id);
+    let _ = std::fs::remove_dir_all(&snapshots_dir);
+
     // Rebuild so FastEmbed vectors stay in sync with the vault (purge only clears FTS/SQL).
     indexing::schedule(state.inner())?;
     Ok(())
@@ -416,10 +563,11 @@ fn finish_pack_install(
     state: &SharedState,
     pack: &PackMeta,
     origin: &str,
+    owner_id: Option<&str>,
 ) -> AppResult<InstalledPack> {
     let installed = {
         let conn = state.db.lock();
-        hub::record_sync(&conn, pack, origin)?;
+        hub::record_sync(&conn, pack, origin, owner_id)?;
         db::get_sync_state(&conn, &pack.id)?.ok_or_else(|| {
             AppError::msg(format!("Installed pack record was not saved: {}", pack.id))
         })?
@@ -433,6 +581,7 @@ pub async fn hub_download_pack(
     state: State<'_, SharedState>,
     pack_id: String,
     version: Option<String>,
+    owner_id: Option<String>,
 ) -> AppResult<InstalledPack> {
     let settings = {
         let conn = state.db.lock();
@@ -451,7 +600,16 @@ pub async fn hub_download_pack(
     )
     .await?;
 
-    finish_pack_install(state.inner(), &pack, "registry")
+    // Baseline for local version control: "modified" is computed against
+    // this snapshot until the next re-sync to a newer version.
+    crate::snapshot::write_snapshot(
+        &state.app_data_dir,
+        &pack.id,
+        &pack.version,
+        &vault.join(&pack.path),
+    )?;
+
+    finish_pack_install(state.inner(), &pack, "registry", owner_id.as_deref())
 }
 
 #[tauri::command]
@@ -475,7 +633,15 @@ pub async fn hub_import_local_pack(
         }
     }
     let pack = hub::import_local_pack(&source, &vault, overwrite)?;
-    finish_pack_install(state.inner(), &pack, "local")
+    // Baseline the version-control snapshot at "what was just imported" —
+    // otherwise every pre-existing file in the import would show as New.
+    crate::snapshot::write_snapshot(
+        &state.app_data_dir,
+        &pack.id,
+        &pack.version,
+        &vault.join(&pack.path),
+    )?;
+    finish_pack_install(state.inner(), &pack, "local", None)
 }
 
 #[tauri::command]
@@ -517,7 +683,25 @@ pub async fn hub_create_pack_from_folder(
         &vault,
         overwrite,
     )?;
-    finish_pack_install(state.inner(), &pack, "local")
+    // Same reasoning as hub_import_local_pack: baseline at "what was just
+    // brought in" so pre-existing files don't show as New.
+    crate::snapshot::write_snapshot(
+        &state.app_data_dir,
+        &pack.id,
+        &pack.version,
+        &vault.join(&pack.path),
+    )?;
+    finish_pack_install(state.inner(), &pack, "local", None)
+}
+
+#[tauri::command]
+pub async fn hub_create_empty_pack(
+    state: State<'_, SharedState>,
+    metadata: PackMeta,
+) -> AppResult<InstalledPack> {
+    let vault = state.vault_path();
+    let pack = hub::create_empty_pack(metadata, &vault)?;
+    finish_pack_install(state.inner(), &pack, "local", None)
 }
 
 #[tauri::command]
@@ -528,8 +712,7 @@ pub fn hub_export_pack(
 ) -> AppResult<()> {
     let pack = {
         let conn = state.db.lock();
-        let installed = db::get_sync_state(&conn, pack_id.trim())?
-            .ok_or_else(|| AppError::msg(format!("Pack not installed: {}", pack_id.trim())))?;
+        let installed = require_installed_pack(&conn, &pack_id)?;
         PackMeta {
             id: installed.pack_id,
             name: installed.name,
@@ -694,6 +877,7 @@ pub async fn hub_change_password(
 pub async fn hub_publish_pack(
     state: State<'_, SharedState>,
     pack_id: String,
+    version: Option<String>,
 ) -> AppResult<hub::PublishRequest> {
     let settings = {
         let conn = state.db.lock();
@@ -704,26 +888,30 @@ pub async fn hub_publish_pack(
         .ok_or_else(|| AppError::msg("Sign in to publish a knowledge pack"))?;
     let installed = {
         let conn = state.db.lock();
-        db::get_sync_state(&conn, pack_id.trim())?
-    }
-    .ok_or_else(|| AppError::msg(format!("Pack not installed: {}", pack_id.trim())))?;
+        require_installed_pack(&conn, &pack_id)?
+    };
     ensure_pack_publishable(&installed)?;
+    let version = match version {
+        Some(v) if !v.trim().is_empty() => v.trim().to_string(),
+        _ => installed.version.clone(),
+    };
     let pack = PackMeta {
         id: installed.pack_id,
         name: installed.name,
-        description: String::new(),
-        version: installed.version,
+        description: installed.description,
+        version,
         path: installed.local_path,
     };
+    let vault = state.vault_path();
     let published = hub::publish_pack_remote(
         &settings.hub_base_url,
         settings.effective_proxy_url(),
         &token,
         &pack,
-        &state.vault_path(),
+        &vault,
     )
     .await;
-    match published {
+    let result = match published {
         Err(error) if error.is_unauthorized() => {
             let token = ensure_hub_access(state.inner(), &settings, true)
                 .await?
@@ -733,22 +921,119 @@ pub async fn hub_publish_pack(
                 settings.effective_proxy_url(),
                 &token,
                 &pack,
-                &state.vault_path(),
+                &vault,
             )
             .await
         }
         result => result,
+    };
+    if result.is_ok() {
+        // Refresh the local-version-control baseline to "what was just
+        // submitted" so M/N/D resets after a successful publish.
+        crate::snapshot::write_snapshot(
+            &state.app_data_dir,
+            &pack.id,
+            &pack.version,
+            &vault.join(&pack.path),
+        )?;
+        // The local install is now "at" the version that was just submitted
+        // — without this, sync_state would still point at the old version,
+        // and the next status check would look for a snapshot at the old
+        // version's path (missing) and report every file as New again.
+        let conn = state.db.lock();
+        hub::record_sync(&conn, &pack, &installed.origin, installed.owner_id.as_deref())?;
     }
+    result
 }
 
+/// Local sanity gate only — real ownership is enforced by the hub itself
+/// (`publishing.service.ts`'s `submit()` rejects non-owners/non-admins with
+/// 403), so it's safe to let any locally-created/imported pack *or* any
+/// downloaded pack attempt to publish here. Bundled defaults and
+/// unknown-origin packs are excluded since there's nothing coherent to
+/// submit for those.
 fn ensure_pack_publishable(installed: &db::InstalledPack) -> AppResult<()> {
-    if installed.origin == "local" {
+    if installed.origin == "local" || installed.origin == "registry" {
         Ok(())
     } else {
         Err(AppError::msg(
-            "Only knowledge packs imported or created locally can be published",
+            "Only local or downloaded knowledge packs can be published",
         ))
     }
+}
+
+/// Update a pack's description, both in its on-disk `pack.json` and in
+/// `sync_state`. Used to save an edit made right before publishing so the
+/// submission reflects it — works for any pack the user can edit, since a
+/// description edit never touches the pack's identity/folder.
+#[tauri::command]
+pub fn hub_update_pack_metadata(
+    state: State<'_, SharedState>,
+    pack_id: String,
+    description: String,
+) -> AppResult<InstalledPack> {
+    let installed = {
+        let conn = state.db.lock();
+        require_installed_pack(&conn, &pack_id)?
+    };
+    let pack_dir = state.vault_path().join(&installed.local_path);
+    let updated = hub::update_pack_description(&pack_dir, &description)?;
+    let conn = state.db.lock();
+    db::upsert_sync_state(
+        &conn,
+        db::SyncStateUpsert {
+            pack_id: &installed.pack_id,
+            name: &installed.name,
+            version: &installed.version,
+            local_path: &installed.local_path,
+            origin: &installed.origin,
+            owner_id: installed.owner_id.as_deref(),
+            description: &updated.description,
+        },
+    )?;
+    db::get_sync_state(&conn, &installed.pack_id)?
+        .ok_or_else(|| AppError::msg(format!("Pack not installed: {}", installed.pack_id)))
+}
+
+/// Renames a local pack: its display name, id, and vault folder all change
+/// together (the vault's invariant is folder name == id == display name for
+/// local packs — see `hub::create_empty_pack`/`hub::rename_pack_folder`).
+/// Downloaded (`registry`) packs, and bundled/unknown-origin ones, keep the
+/// identity the hub already tracks — renaming those isn't offered at all.
+#[tauri::command]
+pub fn hub_rename_pack(
+    state: State<'_, SharedState>,
+    pack_id: String,
+    name: String,
+) -> AppResult<InstalledPack> {
+    let installed = {
+        let conn = state.db.lock();
+        require_installed_pack(&conn, &pack_id)?
+    };
+    if installed.origin != "local" {
+        return Err(AppError::msg(
+            "Only locally-created or imported packs can be renamed",
+        ));
+    }
+
+    let vault = state.vault_path();
+    let updated = hub::rename_pack_folder(&vault, &installed.local_path, &name)?;
+    crate::snapshot::rename_snapshot_root(&state.app_data_dir, &installed.pack_id, &updated.id)?;
+
+    {
+        let conn = state.db.lock();
+        // The old path's indexed content is stale the instant the folder
+        // moves; a fresh index run (below) repopulates it under the new
+        // path. This must NOT be `purge_path_data` — that also deletes the
+        // sync_state row we're about to update in place.
+        db::purge_chunks_for_path(&conn, &installed.local_path)?;
+        db::rename_sync_state_pack(&conn, &installed.pack_id, &updated.id, &updated.name)?;
+    }
+    indexing::schedule(state.inner())?;
+
+    let conn = state.db.lock();
+    db::get_sync_state(&conn, &updated.id)?
+        .ok_or_else(|| AppError::msg("Renamed pack record was not saved"))
 }
 
 #[tauri::command]
@@ -942,14 +1227,37 @@ mod publishing_origin_tests {
             last_synced: None,
             active: true,
             origin: origin.into(),
+            owner_id: None,
+            description: String::new(),
         }
     }
 
     #[test]
-    fn only_local_packs_are_publishable() {
+    fn local_and_registry_packs_are_publishable() {
         assert!(ensure_pack_publishable(&installed("local")).is_ok());
-        for origin in ["registry", "bundled", "unknown"] {
+        assert!(ensure_pack_publishable(&installed("registry")).is_ok());
+        for origin in ["bundled", "unknown"] {
             assert!(ensure_pack_publishable(&installed(origin)).is_err());
         }
+    }
+}
+
+#[cfg(test)]
+mod pack_prefix_tests {
+    use super::*;
+
+    #[test]
+    fn strips_matching_local_path_prefix() {
+        assert_eq!(
+            strip_pack_prefix("my-pack", "my-pack/docs/a.md").unwrap(),
+            "docs/a.md"
+        );
+    }
+
+    #[test]
+    fn rejects_paths_outside_the_pack() {
+        assert!(strip_pack_prefix("my-pack", "other-pack/docs/a.md").is_err());
+        assert!(strip_pack_prefix("my-pack", "my-pack-extra/a.md").is_err());
+        assert!(strip_pack_prefix("my-pack", "my-pack").is_err());
     }
 }

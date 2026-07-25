@@ -1,13 +1,18 @@
-import type { InstalledPack, PackProject } from "@nest/shared";
+import type { HubUser, InstalledPack, PackProject } from "@nest/shared";
 import { save } from "@tauri-apps/plugin-dialog";
 import { ArrowUpCircle, FolderInput, Globe, Package } from "lucide-react";
 import { motion } from "motion/react";
+import { useState } from "react";
+import { PublishPackDialog } from "@/components/hub/PublishPackDialog";
 import { RemovePackButton } from "@/components/hub/RemovePackButton";
+import { RenamePackDialog } from "@/components/hub/RenamePackDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Spinner } from "@/components/ui/spinner";
 import { useI18n } from "@/lib/i18n";
+import { canEditPack, canRenamePack } from "@/lib/pack-permissions";
+import { cn } from "@/lib/utils";
 
 export function InstalledTab({
   installed,
@@ -23,8 +28,12 @@ export function InstalledTab({
   onBrowse,
   onExport,
   authenticated,
+  hubUser,
   onSignIn,
   onPublish,
+  publishing,
+  onRename,
+  renaming,
 }: {
   installed: InstalledPack[];
   isLoading: boolean;
@@ -33,14 +42,23 @@ export function InstalledTab({
   busy: boolean;
   downloadPendingId?: string;
   removePendingId?: string;
-  onUpgrade: (packId: string, version: string, previousVersion: string) => void;
+  onUpgrade: (
+    packId: string,
+    version: string,
+    previousVersion: string,
+    ownerId?: string | null,
+  ) => void;
   onRemove: (packId: string) => void;
   onOpenImport: () => void;
   onBrowse: () => void;
   onExport: (packId: string, destinationPath: string) => void;
   authenticated: boolean;
+  hubUser: HubUser | null;
   onSignIn: () => void;
-  onPublish: (packId: string) => void;
+  onPublish: (packId: string, version: string, description: string) => void;
+  publishing?: boolean;
+  onRename: (packId: string, name: string) => void;
+  renaming?: boolean;
 }) {
   const { t } = useI18n();
   if (isLoading) {
@@ -93,8 +111,12 @@ export function InstalledTab({
           onRemove={() => onRemove(pack.pack_id)}
           onExport={onExport}
           authenticated={authenticated}
+          canEdit={canEditPack(pack, hubUser)}
           onSignIn={onSignIn}
           onPublish={onPublish}
+          publishing={publishing}
+          onRename={onRename}
+          renaming={renaming}
         />
       ))}
       <Button
@@ -121,8 +143,12 @@ function InstalledPackRow({
   onRemove,
   onExport,
   authenticated,
+  canEdit,
   onSignIn,
   onPublish,
+  publishing,
+  onRename,
+  renaming,
 }: {
   index: number;
   pack: InstalledPack;
@@ -131,15 +157,26 @@ function InstalledPackRow({
   downloading: boolean;
   removePending: boolean;
   t: ReturnType<typeof useI18n>["t"];
-  onUpgrade: (packId: string, version: string, previousVersion: string) => void;
+  onUpgrade: (
+    packId: string,
+    version: string,
+    previousVersion: string,
+    ownerId?: string | null,
+  ) => void;
   onRemove: () => void;
   onExport: (packId: string, destinationPath: string) => void;
   authenticated: boolean;
+  canEdit: boolean;
   onSignIn: () => void;
-  onPublish: (packId: string) => void;
+  onPublish: (packId: string, version: string, description: string) => void;
+  publishing?: boolean;
+  onRename: (packId: string, name: string) => void;
+  renaming?: boolean;
 }) {
   const updateAvailable =
     catalogEntry != null && catalogEntry.latest_version !== pack.version;
+  const [publishDialogOpen, setPublishDialogOpen] = useState(false);
+  const [renameDialogOpen, setRenameDialogOpen] = useState(false);
 
   return (
     <motion.div
@@ -163,15 +200,46 @@ function InstalledPackRow({
         }}
         onConfirm={onRemove}
         onPublish={
-          pack.origin === "local"
-            ? () => (authenticated ? onPublish(pack.pack_id) : onSignIn())
+          canEdit
+            ? () => (authenticated ? setPublishDialogOpen(true) : onSignIn())
             : undefined
         }
         publishLabel={authenticated ? "Publish" : "Sign in to publish"}
+        onRename={
+          canRenamePack(pack) ? () => setRenameDialogOpen(true) : undefined
+        }
+      />
+      <RenamePackDialog
+        open={renameDialogOpen}
+        onOpenChange={setRenameDialogOpen}
+        currentName={pack.name}
+        renaming={renaming}
+        onRename={(name) => {
+          onRename(pack.pack_id, name);
+          setRenameDialogOpen(false);
+        }}
+      />
+      <PublishPackDialog
+        open={publishDialogOpen}
+        onOpenChange={setPublishDialogOpen}
+        packName={pack.name}
+        currentVersion={pack.version}
+        currentDescription={pack.description}
+        isFirstPublish={catalogEntry == null}
+        publishing={publishing}
+        onPublish={(version, description) => {
+          onPublish(pack.pack_id, version, description);
+          setPublishDialogOpen(false);
+        }}
       />
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2 pr-7">
-          <Package className="size-4 text-primary" />
+          <Package
+            className={cn(
+              "size-4",
+              pack.origin === "registry" ? "text-sky-500" : "text-primary",
+            )}
+          />
           <h3 className="font-medium">{pack.name}</h3>
           <span className="text-xs text-muted-foreground">v{pack.version}</span>
           {pack.origin === "local" && (
@@ -201,7 +269,12 @@ function InstalledPackRow({
             className="h-7 gap-1 bg-[#e4f4e8] px-2 text-[11px] text-[#23663a] hover:bg-[#d7eddc]"
             disabled={busy}
             onClick={() =>
-              onUpgrade(pack.pack_id, catalogEntry.latest_version, pack.version)
+              onUpgrade(
+                pack.pack_id,
+                catalogEntry.latest_version,
+                pack.version,
+                catalogEntry.owner_id,
+              )
             }
           >
             {downloading ? (

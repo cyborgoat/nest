@@ -1,4 +1,4 @@
-import { Download, MoreHorizontal, Send, Trash2 } from "lucide-react";
+import { Download, MoreHorizontal, Pencil, Send, Trash2 } from "lucide-react";
 import { useState } from "react";
 import {
   AlertDialog,
@@ -31,6 +31,7 @@ export function RemovePackButton({
   onConfirm,
   onPublish,
   publishLabel,
+  onRename,
 }: {
   name: string;
   disabled: boolean;
@@ -40,6 +41,7 @@ export function RemovePackButton({
   onConfirm: () => void;
   onPublish?: () => void;
   publishLabel?: string;
+  onRename?: () => void;
 }) {
   const { t } = useI18n();
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -70,6 +72,12 @@ export function RemovePackButton({
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
               </>
+            )}
+            {onRename && (
+              <DropdownMenuItem disabled={disabled} onSelect={() => onRename()}>
+                <Pencil className="size-3.5" />
+                Rename
+              </DropdownMenuItem>
             )}
             {onExport && (
               <DropdownMenuItem
