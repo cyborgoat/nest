@@ -17,7 +17,7 @@ docs/             Architecture and development notes
 
 ## Prerequisites
 
-- Node.js 20+
+- Node.js 22+
 - Rust (stable) + Tauri [prerequisites](https://v2.tauri.app/start/prerequisites/)
 
 ## Desktop app

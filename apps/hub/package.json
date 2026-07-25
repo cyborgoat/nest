@@ -5,6 +5,9 @@
   "author": "Nest",
   "private": true,
   "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "build": "npm --prefix ../admin run build && nest build",
     "build:server": "nest build",
