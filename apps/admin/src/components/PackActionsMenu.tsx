@@ -16,8 +16,10 @@ export function PackActionsMenu({
   pack: Pack;
   /** Omit "View details" when this menu already lives on that pack's detail page. */
   hideViewDetails?: boolean;
-  /** Parent owns the delete-confirmation dialog's target state. */
-  onDeleteRequest: (pack: Pack) => void;
+  /** Parent owns the delete-confirmation dialog's target state. Omit to hide
+   *  the Delete item entirely — pack deletion is now version-wise, driven
+   *  from the pack detail page's release list instead of this menu. */
+  onDeleteRequest?: (pack: Pack) => void;
   triggerLabel?: string;
 }) {
   const api = useApi();
@@ -75,13 +77,17 @@ export function PackActionsMenu({
             <Archive className="size-4" />
             {pack.archived ? "Restore" : "Archive"}
           </DropdownMenuPrimitive.Item>
-          <DropdownMenuPrimitive.Separator className="my-1 h-px bg-border" />
-          <DropdownMenuPrimitive.Item
-            className="flex cursor-default items-center gap-2 rounded-md px-3 py-2 text-sm text-destructive outline-none data-[highlighted]:bg-destructive/10"
-            onSelect={() => onDeleteRequest(pack)}
-          >
-            <Trash2 className="size-4" /> Delete permanently
-          </DropdownMenuPrimitive.Item>
+          {onDeleteRequest && (
+            <>
+              <DropdownMenuPrimitive.Separator className="my-1 h-px bg-border" />
+              <DropdownMenuPrimitive.Item
+                className="flex cursor-default items-center gap-2 rounded-md px-3 py-2 text-sm text-destructive outline-none data-[highlighted]:bg-destructive/10"
+                onSelect={() => onDeleteRequest(pack)}
+              >
+                <Trash2 className="size-4" /> Delete permanently
+              </DropdownMenuPrimitive.Item>
+            </>
+          )}
         </DropdownMenuPrimitive.Content>
       </DropdownMenuPrimitive.Portal>
     </DropdownMenuPrimitive.Root>

@@ -12,7 +12,6 @@ import {
   Upload,
 } from "lucide-react";
 import type { AdminPack as Pack } from "@nest/shared";
-import { DeletePackDialog } from "../components/DeletePackDialog";
 import { Metric } from "../components/Metric";
 import { PackActionsMenu } from "../components/PackActionsMenu";
 import { UploadPackDialog } from "../components/UploadPackDialog";
@@ -37,7 +36,6 @@ export function PacksPage() {
   const { packs } = useAdminData();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [deleteTarget, setDeleteTarget] = useState<Pack | null>(null);
   const [uploadOpen, setUploadOpen] = useState(false);
   const upload = useMutation({
     mutationFn: (file: File) => {
@@ -49,17 +47,6 @@ export function PacksPage() {
       setUploadOpen(false);
       void qc.invalidateQueries({ queryKey: adminQueryKeys.packs });
       void qc.invalidateQueries({ queryKey: adminQueryKeys.reviews });
-    },
-  });
-  const remove = useMutation({
-    mutationFn: (pack: Pack) =>
-      api(`/api/admin/packs/${pack.id}`, { method: "DELETE" }),
-    onSuccess: () => {
-      setDeleteTarget(null);
-      void Promise.all([
-        qc.invalidateQueries({ queryKey: adminQueryKeys.packs }),
-        qc.invalidateQueries({ queryKey: adminQueryKeys.reviews }),
-      ]);
     },
   });
 
@@ -105,11 +92,20 @@ export function PacksPage() {
         ),
       },
       {
-        accessorKey: "owner_id",
+        id: "maintainers",
         header: "Maintainer",
-        cell: ({ getValue }) => (
-          <span className="text-sm">{String(getValue() || "Unassigned")}</span>
-        ),
+        cell: ({ row }) => {
+          const [first, ...rest] = row.original.maintainers;
+          return (
+            <span className="text-sm">
+              {first
+                ? rest.length > 0
+                  ? `${first.name} +${rest.length}`
+                  : first.name
+                : "Unassigned"}
+            </span>
+          );
+        },
       },
       {
         accessorKey: "visibility",
@@ -146,12 +142,7 @@ export function PacksPage() {
       {
         id: "actions",
         header: "",
-        cell: ({ row }) => (
-          <PackActionsMenu
-            pack={row.original}
-            onDeleteRequest={setDeleteTarget}
-          />
-        ),
+        cell: ({ row }) => <PackActionsMenu pack={row.original} />,
       },
     ],
     [],
@@ -178,7 +169,6 @@ export function PacksPage() {
         }
       />
       {packs.error && <ErrorBox error={packs.error} />}
-      {remove.error && <ErrorBox error={remove.error} />}
       <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Metric
           label="Total packs"
@@ -233,12 +223,6 @@ export function PacksPage() {
         busy={upload.isPending}
         error={upload.error}
         onUpload={(file) => upload.mutate(file)}
-      />
-      <DeletePackDialog
-        pack={deleteTarget}
-        onOpenChange={(open) => !open && setDeleteTarget(null)}
-        busy={remove.isPending}
-        onConfirm={() => deleteTarget && remove.mutate(deleteTarget)}
       />
     </>
   );

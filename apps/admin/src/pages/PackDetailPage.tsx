@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { Archive, Check, Eye, EyeOff } from "lucide-react";
+import { Archive, Check, Eye, EyeOff, Trash2 } from "lucide-react";
 import type { PackVisibility } from "@nest/shared";
 import { Breadcrumbs } from "../components/Breadcrumbs";
-import { DeletePackDialog } from "../components/DeletePackDialog";
+import { DeleteReleaseDialog } from "../components/DeleteReleaseDialog";
 import { PackActionsMenu } from "../components/PackActionsMenu";
 import { UserMultiPicker } from "../components/UserMultiPicker";
 import {
@@ -24,9 +24,6 @@ import { adminQueryKeys } from "../lib/api";
 import { useAdminData } from "../lib/hooks";
 import { PageHeader } from "../layout/PageHeader";
 
-// Radix Select forbids empty-string item values, so "no maintainer" needs a sentinel.
-const UNASSIGNED_MAINTAINER = "__unassigned__";
-
 export function PackDetailPage() {
   const { packId } = useParams({ from: "/packs/$packId" });
   const navigate = useNavigate();
@@ -34,34 +31,38 @@ export function PackDetailPage() {
   const qc = useQueryClient();
   const { packs, users } = useAdminData();
   const pack = packs.data?.find((item) => item.id === packId);
-  const [deleteTarget, setDeleteTarget] = useState<
-    NonNullable<typeof pack> | null
-  >(null);
+  const [deleteReleaseTarget, setDeleteReleaseTarget] = useState<{
+    packName: string;
+    version: string;
+    isLast: boolean;
+  } | null>(null);
 
-  // Yank + access-grant actions — both are POST-only endpoints.
+  // Yank, access-grant, and maintainer actions — all POST-only endpoints.
   const releaseAndAccess = useMutation({
     mutationFn: ({ url, body }: { url: string; body: unknown }) =>
       api(url, { method: "POST", body: JSON.stringify(body) }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: adminQueryKeys.packs }),
   });
   const update = useMutation({
-    mutationFn: (body: { visibility?: PackVisibility; owner_id?: string | null }) =>
+    mutationFn: (body: { visibility?: PackVisibility }) =>
       api(`/api/admin/packs/${packId}`, {
         method: "PATCH",
         body: JSON.stringify(body),
       }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: adminQueryKeys.packs }),
   });
-  const remove = useMutation({
-    mutationFn: (id: string) =>
-      api(`/api/admin/packs/${id}`, { method: "DELETE" }),
-    onSuccess: () => {
-      setDeleteTarget(null);
+  const removeRelease = useMutation({
+    mutationFn: (target: { version: string; isLast: boolean }) =>
+      api(`/api/admin/packs/${packId}/releases/${target.version}`, {
+        method: "DELETE",
+      }),
+    onSuccess: (_data, target) => {
+      setDeleteReleaseTarget(null);
       void Promise.all([
         qc.invalidateQueries({ queryKey: adminQueryKeys.packs }),
         qc.invalidateQueries({ queryKey: adminQueryKeys.reviews }),
       ]);
-      void navigate({ to: "/packs" });
+      if (target.isLast) void navigate({ to: "/packs" });
     },
   });
 
@@ -93,6 +94,7 @@ export function PackDetailPage() {
   const grantableUsers = (users.data ?? []).filter(
     (user) => user.role === "user",
   );
+  const maintainerUuids = new Set(pack.maintainers.map((user) => user.uuid));
   return (
     <>
       <Breadcrumbs
@@ -113,15 +115,14 @@ export function PackDetailPage() {
             <PackActionsMenu
               pack={pack}
               hideViewDetails
-              onDeleteRequest={setDeleteTarget}
               triggerLabel="Pack actions"
             />
           </div>
         }
       />
-      {(releaseAndAccess.error || update.error || remove.error) && (
+      {(releaseAndAccess.error || update.error || removeRelease.error) && (
         <ErrorBox
-          error={releaseAndAccess.error || update.error || remove.error}
+          error={releaseAndAccess.error || update.error || removeRelease.error}
         />
       )}
       <div className="grid gap-5 xl:grid-cols-[1fr_420px]">
@@ -154,20 +155,37 @@ export function PackDetailPage() {
                       Published {formatDate(release.published_at)}
                     </p>
                   </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={releaseAndAccess.isPending}
-                    onClick={() =>
-                      releaseAndAccess.mutate({
-                        url: `/api/admin/packs/${pack.id}/releases/${release.version}/yank`,
-                        body: { yanked: !release.yanked },
-                      })
-                    }
-                  >
-                    {release.yanked ? <Eye /> : <EyeOff />}
-                    {release.yanked ? "Restore" : "Yank"}
-                  </Button>
+                  <div className="flex shrink-0 gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={releaseAndAccess.isPending}
+                      onClick={() =>
+                        releaseAndAccess.mutate({
+                          url: `/api/admin/packs/${pack.id}/releases/${release.version}/yank`,
+                          body: { yanked: !release.yanked },
+                        })
+                      }
+                    >
+                      {release.yanked ? <Eye /> : <EyeOff />}
+                      {release.yanked ? "Restore" : "Yank"}
+                    </Button>
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      disabled={removeRelease.isPending}
+                      onClick={() =>
+                        setDeleteReleaseTarget({
+                          packName: pack.name,
+                          version: release.version,
+                          isLast: pack.releases.length === 1,
+                        })
+                      }
+                    >
+                      <Trash2 />
+                      Delete
+                    </Button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -198,24 +216,27 @@ export function PackDetailPage() {
                   ]}
                 />
               </Field>
-              <Field label="Maintainer">
-                <Select
-                  value={pack.owner_uuid ?? UNASSIGNED_MAINTAINER}
-                  onValueChange={(value) => {
-                    const loginId =
-                      value === UNASSIGNED_MAINTAINER
-                        ? null
-                        : (users.data ?? []).find((u) => u.uuid === value)
-                            ?.id ?? null;
-                    update.mutate({ owner_id: loginId });
+              <Field label="Maintainers">
+                <UserMultiPicker
+                  users={users.data ?? []}
+                  selectedUuids={[...maintainerUuids]}
+                  onChange={(nextUuids) => {
+                    const next = new Set(nextUuids);
+                    for (const uuid of next)
+                      if (!maintainerUuids.has(uuid))
+                        releaseAndAccess.mutate({
+                          url: `/api/admin/packs/${pack.id}/maintainers/${uuid}`,
+                          body: { allowed: true },
+                        });
+                    for (const uuid of maintainerUuids)
+                      if (!next.has(uuid))
+                        releaseAndAccess.mutate({
+                          url: `/api/admin/packs/${pack.id}/maintainers/${uuid}`,
+                          body: { allowed: false },
+                        });
                   }}
-                  options={[
-                    { value: UNASSIGNED_MAINTAINER, label: "Unassigned" },
-                    ...(users.data ?? []).map((user) => ({
-                      value: user.uuid,
-                      label: `${user.name} (@${user.id})`,
-                    })),
-                  ]}
+                  placeholder="Search users to add as a maintainer…"
+                  emptyHint="No user accounts exist yet."
                 />
               </Field>
             </div>
@@ -274,11 +295,13 @@ export function PackDetailPage() {
           </Card>
         </div>
       </div>
-      <DeletePackDialog
-        pack={deleteTarget}
-        onOpenChange={(open) => !open && setDeleteTarget(null)}
-        busy={remove.isPending}
-        onConfirm={() => deleteTarget && remove.mutate(deleteTarget.id)}
+      <DeleteReleaseDialog
+        target={deleteReleaseTarget}
+        onOpenChange={(open) => !open && setDeleteReleaseTarget(null)}
+        busy={removeRelease.isPending}
+        onConfirm={() =>
+          deleteReleaseTarget && removeRelease.mutate(deleteReleaseTarget)
+        }
       />
     </>
   );
