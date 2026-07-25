@@ -13,6 +13,7 @@ import {
   DataTable,
   Dialog,
   ErrorBox,
+  RefreshButton,
   Select,
   formatDate,
 } from "../components/ui";
@@ -151,18 +152,37 @@ export function UsersPage() {
         eyebrow="Authorization"
         title="User access"
         description="Control which accounts can publish, view restricted packs, and administer the Hub."
+        actions={
+          <RefreshButton
+            onClick={() =>
+              qc.invalidateQueries({ queryKey: adminQueryKeys.users })
+            }
+            busy={users.isFetching}
+          />
+        }
       />
-      {(role.error || remove.error) && (
-        <ErrorBox error={role.error || remove.error} />
+      {(users.error || role.error || remove.error) && (
+        <ErrorBox error={users.error || role.error || remove.error} />
       )}
       <div className="mb-6 grid gap-4 sm:grid-cols-3">
-        <Metric label="Total users" value={counts.total} icon={<UsersIcon />} />
-        <Metric label="Admins" value={counts.admin} icon={<ShieldCheck />} />
+        <Metric
+          label="Total users"
+          value={counts.total}
+          icon={<UsersIcon />}
+          loading={users.isLoading}
+        />
+        <Metric
+          label="Admins"
+          value={counts.admin}
+          icon={<ShieldCheck />}
+          loading={users.isLoading}
+        />
         <Metric
           label="Regular users"
           value={counts.user}
           icon={<UsersIcon />}
           tone="stone"
+          loading={users.isLoading}
         />
       </div>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -186,7 +206,7 @@ export function UsersPage() {
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
-        <DataTable data={data} columns={columns} />
+        <DataTable data={data} columns={columns} loading={users.isLoading} />
       </Card>
       <Dialog
         open={Boolean(deleteTarget)}

@@ -1,13 +1,17 @@
 import { Link } from "@tanstack/react-router";
+import { useQueryClient } from "@tanstack/react-query";
 import { BellRing, EyeOff, Package, Upload } from "lucide-react";
 import { Metric } from "../components/Metric";
 import { Progress } from "../components/Progress";
-import { Badge, Card, Empty } from "../components/ui";
+import { Badge, Card, Empty, ErrorBox, RefreshButton } from "../components/ui";
+import { adminQueryKeys } from "../lib/api";
 import { useAdminData } from "../lib/hooks";
 import { PageHeader } from "../layout/PageHeader";
 
 export function DashboardPage() {
+  const qc = useQueryClient();
   const { users, reviews, packs } = useAdminData();
+  const dataError = users.error ?? reviews.error ?? packs.error;
   const restricted =
     packs.data?.filter((p) => p.visibility === "restricted").length ?? 0;
   const releases =
@@ -18,25 +22,44 @@ export function DashboardPage() {
         eyebrow="Superuser administration"
         title="Good governance, at a glance."
         description="Review what needs attention and keep the shared knowledge catalog healthy."
+        actions={
+          <RefreshButton
+            onClick={() => {
+              void qc.invalidateQueries({ queryKey: adminQueryKeys.users });
+              void qc.invalidateQueries({ queryKey: adminQueryKeys.reviews });
+              void qc.invalidateQueries({ queryKey: adminQueryKeys.packs });
+            }}
+            busy={users.isFetching || reviews.isFetching || packs.isFetching}
+          />
+        }
       />
+      {dataError && <ErrorBox error={dataError} />}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Metric
           label="Awaiting review"
           value={reviews.data?.length}
           icon={<BellRing />}
           tone="amber"
+          loading={reviews.isLoading}
         />
         <Metric
           label="Knowledge packs"
           value={packs.data?.length}
           icon={<Package />}
+          loading={packs.isLoading}
         />
-        <Metric label="Published releases" value={releases} icon={<Upload />} />
+        <Metric
+          label="Published releases"
+          value={releases}
+          icon={<Upload />}
+          loading={packs.isLoading}
+        />
         <Metric
           label="Restricted packs"
           value={restricted}
           icon={<EyeOff />}
           tone="stone"
+          loading={packs.isLoading}
         />
       </div>
       <div className="mt-7 grid gap-5 lg:grid-cols-[1.4fr_.8fr]">

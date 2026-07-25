@@ -113,6 +113,10 @@ export function Empty({
   );
 }
 
+export function Skeleton({ className }: { className?: string }) {
+  return <div className={cn("animate-pulse rounded-md bg-muted", className)} />;
+}
+
 export function ErrorBox({ error }: { error: unknown }) {
   return (
     <div className="mb-5 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
@@ -255,9 +259,11 @@ export function Select({
 export function DataTable<T>({
   data,
   columns,
+  loading = false,
 }: {
   data: T[];
   columns: ColumnDef<T>[];
+  loading?: boolean;
 }) {
   const table = useReactTable({
     data,
@@ -284,18 +290,28 @@ export function DataTable<T>({
           ))}
         </thead>
         <tbody className="divide-y divide-border">
-          {table.getRowModel().rows.map((row) => (
-            <tr key={row.id} className="hover:bg-muted/60">
-              {row.getVisibleCells().map((cell) => (
-                <td key={cell.id} className="px-5 py-3.5 text-sm">
-                  {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                </td>
+          {loading && data.length === 0
+            ? Array.from({ length: 5 }, (_, rowIndex) => (
+                <tr key={rowIndex}>
+                  {columns.map((_, colIndex) => (
+                    <td key={colIndex} className="px-5 py-3.5">
+                      <Skeleton className="h-4 w-3/4" />
+                    </td>
+                  ))}
+                </tr>
+              ))
+            : table.getRowModel().rows.map((row) => (
+                <tr key={row.id} className="hover:bg-muted/60">
+                  {row.getVisibleCells().map((cell) => (
+                    <td key={cell.id} className="px-5 py-3.5 text-sm">
+                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                    </td>
+                  ))}
+                </tr>
               ))}
-            </tr>
-          ))}
         </tbody>
       </table>
-      {data.length === 0 && (
+      {!loading && data.length === 0 && (
         <div className="p-12 text-center text-sm text-muted-foreground">
           No matching records.
         </div>

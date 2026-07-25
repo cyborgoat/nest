@@ -12,6 +12,7 @@ import {
   Empty,
   ErrorBox,
   RefreshButton,
+  Skeleton,
   formatDate,
 } from "../components/ui";
 import { useApi } from "../app/contexts";
@@ -59,8 +60,18 @@ export function ReviewsPage() {
           />
         }
       />
-      {review.error && <ErrorBox error={review.error} />}
+      {(reviews.error || review.error) && (
+        <ErrorBox error={reviews.error || review.error} />
+      )}
       <div className="space-y-4">
+        {reviews.isLoading &&
+          Array.from({ length: 2 }, (_, i) => (
+            <Card key={i} className="space-y-3">
+              <Skeleton className="h-5 w-40" />
+              <Skeleton className="h-7 w-64" />
+              <Skeleton className="h-4 w-full max-w-xl" />
+            </Card>
+          ))}
         {reviews.data?.map((item) => (
           <Card
             key={item.id}

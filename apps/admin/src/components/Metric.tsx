@@ -1,17 +1,19 @@
 import React, { type ReactNode } from "react";
 import { cn } from "../lib/cn";
-import { Card } from "./ui";
+import { Card, Skeleton } from "./ui";
 
 export function Metric({
   label,
   value = 0,
   icon,
   tone = "green",
+  loading = false,
 }: {
   label: string;
   value?: number;
   icon: ReactNode;
   tone?: "green" | "amber" | "stone";
+  loading?: boolean;
 }) {
   return (
     <Card className="flex items-center gap-4">
@@ -31,7 +33,11 @@ export function Metric({
         )}
       </div>
       <div>
-        <p className="text-2xl font-semibold tabular-nums">{value}</p>
+        {loading ? (
+          <Skeleton className="h-8 w-10" />
+        ) : (
+          <p className="text-2xl font-semibold tabular-nums">{value}</p>
+        )}
         <p className="text-xs text-muted-foreground">{label}</p>
       </div>
     </Card>

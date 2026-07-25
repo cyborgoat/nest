@@ -18,7 +18,15 @@ import { FilterPills } from "../components/FilterPills";
 import { Metric } from "../components/Metric";
 import { PackActionsMenu } from "../components/PackActionsMenu";
 import { UploadPackDialog } from "../components/UploadPackDialog";
-import { Badge, Button, Card, DataTable, Dialog, ErrorBox } from "../components/ui";
+import {
+  Badge,
+  Button,
+  Card,
+  DataTable,
+  Dialog,
+  ErrorBox,
+  RefreshButton,
+} from "../components/ui";
 import { useApi } from "../app/contexts";
 import { adminQueryKeys } from "../lib/api";
 import { useAdminData } from "../lib/hooks";
@@ -158,27 +166,48 @@ export function PacksPage() {
         title="Knowledge packs"
         description="Browse published packs and their versions. Open a pack to manage its maintainer, visibility, and access."
         actions={
-          <Button onClick={() => setUploadOpen(true)}>
-            <Upload className="size-4" />
-            Upload pack
-          </Button>
+          <div className="flex items-center gap-2">
+            <RefreshButton
+              onClick={() =>
+                qc.invalidateQueries({ queryKey: adminQueryKeys.packs })
+              }
+              busy={packs.isFetching}
+            />
+            <Button onClick={() => setUploadOpen(true)}>
+              <Upload className="size-4" />
+              Upload pack
+            </Button>
+          </div>
         }
       />
+      {packs.error && <ErrorBox error={packs.error} />}
       {remove.error && <ErrorBox error={remove.error} />}
       <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Metric label="Total packs" value={counts.all} icon={<Package />} />
-        <Metric label="Active" value={counts.active} icon={<Check />} />
+        <Metric
+          label="Total packs"
+          value={counts.all}
+          icon={<Package />}
+          loading={packs.isLoading}
+        />
+        <Metric
+          label="Active"
+          value={counts.active}
+          icon={<Check />}
+          loading={packs.isLoading}
+        />
         <Metric
           label="Restricted"
           value={counts.restricted}
           icon={<EyeOff />}
           tone="amber"
+          loading={packs.isLoading}
         />
         <Metric
           label="Archived"
           value={counts.archived}
           icon={<Archive />}
           tone="stone"
+          loading={packs.isLoading}
         />
       </div>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -207,7 +236,7 @@ export function PacksPage() {
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
-        <DataTable data={shown} columns={columns} />
+        <DataTable data={shown} columns={columns} loading={packs.isLoading} />
       </Card>
       <UploadPackDialog
         open={uploadOpen}

@@ -12,9 +12,12 @@ import {
   Button,
   Card,
   Dialog,
+  Empty,
   ErrorBox,
   Field,
+  RefreshButton,
   Select,
+  Skeleton,
   formatDate,
 } from "../components/ui";
 import { useApi } from "../app/contexts";
@@ -63,11 +66,25 @@ export function PackDetailPage() {
   if (!pack)
     return (
       <>
-        <PageHeader
-          eyebrow="Catalog"
-          title={packs.isLoading ? "Loading pack…" : "Pack not found"}
-          description=""
+        <Breadcrumbs
+          items={[{ label: "Knowledge packs", to: "/packs" }, { label: packId }]}
         />
+        {packs.error && <ErrorBox error={packs.error} />}
+        {packs.isLoading ? (
+          <div className="space-y-5">
+            <Skeleton className="h-9 w-72" />
+            <Skeleton className="h-4 w-96" />
+            <div className="grid gap-5 xl:grid-cols-[1fr_420px]">
+              <Skeleton className="h-64" />
+              <Skeleton className="h-64" />
+            </div>
+          </div>
+        ) : (
+          <Empty
+            title="Pack not found"
+            body={`No pack with id "${packId}" exists. It may have been deleted.`}
+          />
+        )}
       </>
     );
   const granted = new Set(pack.grants.map((user) => user.uuid));
@@ -84,12 +101,20 @@ export function PackDetailPage() {
         title={pack.name}
         description={`${pack.id} · ${pack.releases.length} published release${pack.releases.length === 1 ? "" : "s"}`}
         actions={
-          <PackActionsMenu
-            pack={pack}
-            hideViewDetails
-            onDeleteRequest={setDeleteTarget}
-            triggerLabel="Pack actions"
-          />
+          <div className="flex items-center gap-2">
+            <RefreshButton
+              onClick={() =>
+                qc.invalidateQueries({ queryKey: adminQueryKeys.packs })
+              }
+              busy={packs.isFetching}
+            />
+            <PackActionsMenu
+              pack={pack}
+              hideViewDetails
+              onDeleteRequest={setDeleteTarget}
+              triggerLabel="Pack actions"
+            />
+          </div>
         }
       />
       {(releaseAndAccess.error || update.error || remove.error) && (
