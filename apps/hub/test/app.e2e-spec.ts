@@ -616,6 +616,200 @@ describe('Hub (e2e)', () => {
       .expect(201);
   });
 
+  it('allows multiple maintainers to publish new versions for the same pack', async () => {
+    const authorLogin = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ id: 'pack-author', password: 'a-secure-password' })
+      .expect(201);
+    const adminLogin = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ id: 'role-admin', password: 'role-test-password' })
+      .expect(201);
+    const coMaintainer = await request(app.getHttpServer())
+      .post('/api/auth/register')
+      .send({
+        id: 'co-maintainer',
+        name: 'Co Maintainer',
+        password: 'a-secure-password',
+      })
+      .expect(201);
+    const packZip = (version: string) => {
+      const zip = new AdmZip();
+      zip.addFile(
+        'shared-pack/pack.json',
+        Buffer.from(
+          JSON.stringify({
+            id: 'shared-pack',
+            name: 'Shared Pack',
+            description: 'Multi-maintainer fixture',
+            version,
+          }),
+        ),
+      );
+      zip.addFile('shared-pack/README.md', Buffer.from(`# v${version}`));
+      return zip;
+    };
+
+    const first = await request(app.getHttpServer())
+      .post('/api/publish-requests')
+      .set('Authorization', `Bearer ${authorLogin.body.access_token}`)
+      .attach('file', packZip('1.0.0').toBuffer(), 'shared-pack-1.0.0.zip')
+      .expect(201);
+    await request(app.getHttpServer())
+      .post(`/api/admin/publish-requests/${first.body.id}/approve`)
+      .set('Authorization', `Bearer ${adminLogin.body.access_token}`)
+      .expect(201);
+
+    // Not a maintainer yet — forbidden.
+    await request(app.getHttpServer())
+      .post('/api/publish-requests')
+      .set('Authorization', `Bearer ${coMaintainer.body.access_token}`)
+      .attach(
+        'file',
+        packZip('1.1.0').toBuffer(),
+        'shared-pack-1.1.0-denied.zip',
+      )
+      .expect(403);
+
+    const users = await request(app.getHttpServer())
+      .get('/api/admin/users')
+      .set('Authorization', `Bearer ${adminLogin.body.access_token}`)
+      .expect(200);
+    const coMaintainerUuid = (
+      users.body as Array<{ id: string; uuid: string }>
+    ).find((u) => u.id === 'co-maintainer')!.uuid;
+
+    await request(app.getHttpServer())
+      .post(`/api/admin/packs/shared-pack/maintainers/${coMaintainerUuid}`)
+      .set('Authorization', `Bearer ${adminLogin.body.access_token}`)
+      .send({ allowed: true })
+      .expect(201);
+
+    const packsAfterAdd = await request(app.getHttpServer())
+      .get('/api/admin/packs')
+      .set('Authorization', `Bearer ${adminLogin.body.access_token}`)
+      .expect(200);
+    const sharedPackAfterAdd = (
+      packsAfterAdd.body as Array<{
+        id: string;
+        maintainers: Array<{ id: string }>;
+      }>
+    ).find((p) => p.id === 'shared-pack')!;
+    expect(sharedPackAfterAdd.maintainers).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'pack-author' }),
+        expect.objectContaining({ id: 'co-maintainer' }),
+      ]),
+    );
+
+    // Now allowed to submit.
+    await request(app.getHttpServer())
+      .post('/api/publish-requests')
+      .set('Authorization', `Bearer ${coMaintainer.body.access_token}`)
+      .attach('file', packZip('1.1.0').toBuffer(), 'shared-pack-1.1.0.zip')
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post(`/api/admin/packs/shared-pack/maintainers/${coMaintainerUuid}`)
+      .set('Authorization', `Bearer ${adminLogin.body.access_token}`)
+      .send({ allowed: false })
+      .expect(201);
+
+    const packsAfterRemove = await request(app.getHttpServer())
+      .get('/api/admin/packs')
+      .set('Authorization', `Bearer ${adminLogin.body.access_token}`)
+      .expect(200);
+    const sharedPackAfterRemove = (
+      packsAfterRemove.body as Array<{
+        id: string;
+        maintainers: Array<{ id: string }>;
+      }>
+    ).find((p) => p.id === 'shared-pack')!;
+    expect(sharedPackAfterRemove.maintainers).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: 'co-maintainer' })]),
+    );
+  });
+
+  it('deletes a single release without touching the pack, then deletes the whole pack once the last release goes', async () => {
+    const adminLogin = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ id: 'role-admin', password: 'role-test-password' })
+      .expect(201);
+    const packZip = (version: string) => {
+      const zip = new AdmZip();
+      zip.addFile(
+        'multi-version-pack/pack.json',
+        Buffer.from(
+          JSON.stringify({
+            id: 'multi-version-pack',
+            name: 'Multi Version Pack',
+            description: 'Version-delete fixture',
+            version,
+          }),
+        ),
+      );
+      zip.addFile('multi-version-pack/README.md', Buffer.from(`# v${version}`));
+      return zip;
+    };
+    const submitAndApprove = async (version: string) => {
+      const submission = await request(app.getHttpServer())
+        .post('/api/publish-requests')
+        .set('Authorization', `Bearer ${adminLogin.body.access_token}`)
+        .attach(
+          'file',
+          packZip(version).toBuffer(),
+          `multi-version-pack-${version}.zip`,
+        )
+        .expect(201);
+      await request(app.getHttpServer())
+        .post(`/api/admin/publish-requests/${submission.body.id}/approve`)
+        .set('Authorization', `Bearer ${adminLogin.body.access_token}`)
+        .expect(201);
+    };
+    await submitAndApprove('1.0.0');
+    await submitAndApprove('1.1.0');
+
+    // Deleting a non-last release leaves the pack (and its other version) intact.
+    await request(app.getHttpServer())
+      .delete('/api/admin/packs/multi-version-pack/releases/1.0.0')
+      .set('Authorization', `Bearer ${adminLogin.body.access_token}`)
+      .expect(200);
+    await request(app.getHttpServer())
+      .get('/packs/multi-version-pack')
+      .expect(200);
+    await request(app.getHttpServer())
+      .get('/packs/multi-version-pack/1.0.0')
+      .expect(404);
+    await request(app.getHttpServer())
+      .get('/packs/multi-version-pack/1.1.0')
+      .expect(200);
+
+    // Deleting the only remaining release deletes the whole pack.
+    await request(app.getHttpServer())
+      .delete('/api/admin/packs/multi-version-pack/releases/1.1.0')
+      .set('Authorization', `Bearer ${adminLogin.body.access_token}`)
+      .expect(200);
+    await request(app.getHttpServer())
+      .get('/packs/multi-version-pack')
+      .expect(404);
+
+    const database = app.get(DatabaseService).db;
+    expect(
+      database
+        .prepare(
+          "SELECT 1 FROM audit_log WHERE action = 'release.delete' AND target_id = ?",
+        )
+        .get('multi-version-pack@1.0.0'),
+    ).toBeDefined();
+    expect(
+      database
+        .prepare(
+          "SELECT 1 FROM audit_log WHERE action = 'pack.delete' AND target_id = ?",
+        )
+        .get('multi-version-pack'),
+    ).toBeDefined();
+  });
+
   it('permanently deletes a pack while retaining reviewed and audit history', async () => {
     const adminLogin = await request(app.getHttpServer())
       .post('/api/auth/login')

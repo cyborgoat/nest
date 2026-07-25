@@ -72,6 +72,12 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
         created_at TEXT NOT NULL,
         PRIMARY KEY(pack_id, user_uuid)
       );
+      CREATE TABLE IF NOT EXISTS pack_maintainers (
+        pack_id TEXT NOT NULL REFERENCES packs(id) ON DELETE CASCADE,
+        user_uuid TEXT NOT NULL REFERENCES users(uuid) ON DELETE CASCADE,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY(pack_id, user_uuid)
+      );
       CREATE TABLE IF NOT EXISTS releases (
         pack_id TEXT NOT NULL REFERENCES packs(id) ON DELETE CASCADE,
         version TEXT NOT NULL,
@@ -128,6 +134,12 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
         ON messages(user_uuid, created_at DESC);
       CREATE INDEX IF NOT EXISTS messages_user_unread_idx
         ON messages(user_uuid, read_at) WHERE read_at IS NULL;
+    `);
+    // One-time backfill: packs.owner_uuid predates multi-maintainer support.
+    // Idempotent (INSERT OR IGNORE), safe to run on every boot.
+    this.database.exec(`
+      INSERT OR IGNORE INTO pack_maintainers(pack_id, user_uuid, created_at)
+      SELECT id, owner_uuid, created_at FROM packs WHERE owner_uuid IS NOT NULL;
     `);
   }
 }

@@ -76,16 +76,19 @@ export class PublishingService {
     const pack = this.validateZip(file.buffer);
     const db = this.database.db;
     const existing = db
-      .prepare('SELECT owner_uuid FROM packs WHERE id = ?')
-      .get(pack.id) as { owner_uuid: string | null } | undefined;
-    if (
-      existing &&
-      existing.owner_uuid !== user.uuid &&
-      !isRegistryAdmin(user)
-    ) {
-      throw new ForbiddenException(
-        'Only the pack owner may submit a new version',
-      );
+      .prepare('SELECT 1 FROM packs WHERE id = ?')
+      .get(pack.id);
+    if (existing && !isRegistryAdmin(user)) {
+      const isMaintainer = db
+        .prepare(
+          'SELECT 1 FROM pack_maintainers WHERE pack_id = ? AND user_uuid = ?',
+        )
+        .get(pack.id, user.uuid);
+      if (!isMaintainer) {
+        throw new ForbiddenException(
+          'Only a pack maintainer may submit a new version',
+        );
+      }
     }
     // Pack-wide lock: no new submission for this pack — at any version, from
     // anyone, admins included — while an earlier one is still unresolved.
@@ -197,7 +200,7 @@ export class PublishingService {
     const timestamp = now();
     try {
       this.database.db.transaction(() => {
-        this.database.db
+        const packInsert = this.database.db
           .prepare(
             `INSERT OR IGNORE INTO packs(id, name, description, owner_uuid, visibility, archived, created_at, updated_at)
           VALUES (?, ?, ?, ?, 'public', 0, ?, ?)`,
@@ -210,6 +213,16 @@ export class PublishingService {
             timestamp,
             timestamp,
           );
+        // Only the pack's very first approval seeds the maintainer list —
+        // an admin approving a later version bump on someone else's pack
+        // shouldn't silently make themselves a co-maintainer.
+        if (packInsert.changes > 0 && request.submitter_uuid) {
+          this.database.db
+            .prepare(
+              'INSERT OR IGNORE INTO pack_maintainers(pack_id, user_uuid, created_at) VALUES (?, ?, ?)',
+            )
+            .run(validated.id, request.submitter_uuid, timestamp);
+        }
         this.database.db
           .prepare(
             `INSERT INTO releases(pack_id, version, storage_path, checksum, submitted_by, approved_by, published_at)

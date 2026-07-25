@@ -11,6 +11,7 @@ import { AuditService } from '../database/audit.service';
 import type { AuthUser, UserRole } from '../auth/auth.types';
 import type {
   AdminGrant,
+  AdminMaintainer,
   AdminPack,
   AdminRelease,
   AdminUser,
@@ -27,15 +28,12 @@ const now = () => new Date().toISOString();
 export type PackPatch = {
   visibility?: PackVisibility;
   archived?: boolean;
-  owner_id?: string | null;
 };
 type AdminUserView = AdminUser;
 type PackRow = {
   id: string;
   name: string;
   description: string;
-  owner_uuid: string | null;
-  owner_id: string | null;
   visibility: 'public' | 'restricted';
   archived: number;
   created_at: string;
@@ -43,6 +41,7 @@ type PackRow = {
 };
 type ReleaseRow = Omit<AdminRelease, 'yanked'> & { yanked: number };
 type GrantRow = AdminGrant;
+type MaintainerRow = AdminMaintainer & { pack_id: string };
 export type AdminPackView = AdminPack;
 
 @Injectable()
@@ -134,8 +133,8 @@ export class AdminService {
   listPacks(): AdminPackView[] {
     const packs = this.database.db
       .prepare(
-        `SELECT p.*, u.login_id AS owner_id FROM packs p
-      LEFT JOIN users u ON u.uuid = p.owner_uuid ORDER BY p.id`,
+        `SELECT id, name, description, visibility, archived, created_at, updated_at
+      FROM packs ORDER BY id`,
       )
       .all() as PackRow[];
     const releases = this.database.db
@@ -148,6 +147,11 @@ export class AdminService {
         `SELECT a.pack_id, u.uuid, u.login_id AS id, u.name FROM pack_access a JOIN users u ON u.uuid = a.user_uuid`,
       )
       .all() as GrantRow[];
+    const maintainers = this.database.db
+      .prepare(
+        `SELECT m.pack_id, u.uuid, u.login_id AS id, u.name FROM pack_maintainers m JOIN users u ON u.uuid = m.user_uuid`,
+      )
+      .all() as MaintainerRow[];
     return packs.map((pack) => ({
       ...pack,
       archived: pack.archived === 1,
@@ -155,6 +159,9 @@ export class AdminService {
         .filter((r) => r.pack_id === pack.id)
         .map((r) => ({ ...r, yanked: r.yanked === 1 })),
       grants: grants.filter((g) => g.pack_id === pack.id),
+      maintainers: maintainers
+        .filter((m) => m.pack_id === pack.id)
+        .map(({ pack_id: _packId, ...maintainer }) => maintainer),
     }));
   }
 
@@ -168,29 +175,15 @@ export class AdminService {
       !['public', 'restricted'].includes(patch.visibility)
     )
       throw new BadRequestException('Invalid visibility');
-    let ownerUuid: string | null | undefined;
-    if (patch.owner_id !== undefined) {
-      if (patch.owner_id === null || patch.owner_id === '') ownerUuid = null;
-      else {
-        const owner = this.database.db
-          .prepare('SELECT uuid FROM users WHERE login_id = ?')
-          .get(patch.owner_id) as { uuid: string } | undefined;
-        if (!owner)
-          throw new BadRequestException('Owner account does not exist');
-        ownerUuid = owner.uuid;
-      }
-    }
     this.database.db
       .prepare(
         `UPDATE packs SET
       visibility = COALESCE(?, visibility), archived = COALESCE(?, archived),
-      owner_uuid = CASE WHEN ? = 1 THEN ? ELSE owner_uuid END, updated_at = ? WHERE id = ?`,
+      updated_at = ? WHERE id = ?`,
       )
       .run(
         patch.visibility ?? null,
         patch.archived === undefined ? null : Number(patch.archived),
-        Number(ownerUuid !== undefined),
-        ownerUuid ?? null,
         now(),
         id,
       );
@@ -297,6 +290,44 @@ export class AdminService {
     return { success: true };
   }
 
+  setMaintainer(
+    actor: AuthUser,
+    packId: string,
+    userUuid: string,
+    allowed: boolean,
+  ) {
+    if (
+      !this.database.db.prepare('SELECT 1 FROM packs WHERE id = ?').get(packId)
+    )
+      throw new NotFoundException('Pack not found');
+    if (
+      !this.database.db
+        .prepare('SELECT 1 FROM users WHERE uuid = ?')
+        .get(userUuid)
+    )
+      throw new NotFoundException('User not found');
+    if (allowed)
+      this.database.db
+        .prepare(
+          'INSERT OR IGNORE INTO pack_maintainers(pack_id, user_uuid, created_at) VALUES (?, ?, ?)',
+        )
+        .run(packId, userUuid, now());
+    else
+      this.database.db
+        .prepare(
+          'DELETE FROM pack_maintainers WHERE pack_id = ? AND user_uuid = ?',
+        )
+        .run(packId, userUuid);
+    this.audit.record(
+      actor,
+      allowed ? 'pack.maintainer.add' : 'pack.maintainer.remove',
+      'pack',
+      packId,
+      { user_uuid: userUuid },
+    );
+    return { success: true };
+  }
+
   setYanked(actor: AuthUser, packId: string, version: string, yanked: boolean) {
     const result = this.database.db
       .prepare(
@@ -310,6 +341,51 @@ export class AdminService {
       'release',
       `${packId}@${version}`,
     );
+    return { success: true };
+  }
+
+  /**
+   * Deletes one release. If it's the pack's only remaining version, this
+   * deletes the whole pack instead (reusing removePack's cascade-safe
+   * cleanup) — a knowledge pack with zero releases isn't a coherent state,
+   * so the frontend must warn the user about that escalation up front.
+   */
+  async removeRelease(actor: AuthUser, packId: string, version: string) {
+    const release = this.database.db
+      .prepare('SELECT 1 FROM releases WHERE pack_id = ? AND version = ?')
+      .get(packId, version);
+    if (!release) throw new NotFoundException('Release not found');
+    const releaseCount = (
+      this.database.db
+        .prepare('SELECT COUNT(*) AS count FROM releases WHERE pack_id = ?')
+        .get(packId) as { count: number }
+    ).count;
+    if (releaseCount <= 1) {
+      return this.removePack(actor, packId);
+    }
+    const registryRoot = this.config.value.registryPath;
+    const versionPath = path.join(registryRoot, packId, version);
+    const temporaryPath = path.join(
+      registryRoot,
+      `.deleting-${packId}-${version}-${randomUUID()}`,
+    );
+    const moved = await fs
+      .rename(versionPath, temporaryPath)
+      .then(() => true)
+      .catch((error: NodeJS.ErrnoException) => {
+        if (error.code === 'ENOENT') return false;
+        throw error;
+      });
+    try {
+      this.database.db
+        .prepare('DELETE FROM releases WHERE pack_id = ? AND version = ?')
+        .run(packId, version);
+      this.audit.record(actor, 'release.delete', 'release', `${packId}@${version}`);
+    } catch (error) {
+      if (moved) await fs.rename(temporaryPath, versionPath);
+      throw error;
+    }
+    if (moved) await fs.rm(temporaryPath, { recursive: true, force: true });
     return { success: true };
   }
 }

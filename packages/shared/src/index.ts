@@ -18,6 +18,9 @@ export type PackProject = {
   latest_version: string;
   versions: string[];
   visibility: PackVisibility;
+  /** The requesting user's own login id, echoed back only if they're one of
+   *  this pack's maintainers (a pack can have several) — null otherwise.
+   *  Personalized per-request; not "the owner." */
   owner_id: string | null;
 };
 
@@ -94,18 +97,19 @@ export type AdminGrant = Pick<HubUser, "uuid" | "id" | "name"> & {
   pack_id: string;
 };
 
+export type AdminMaintainer = Pick<HubUser, "uuid" | "id" | "name">;
+
 export type AdminPack = {
   id: string;
   name: string;
   description: string;
-  owner_uuid: string | null;
-  owner_id: string | null;
   visibility: PackVisibility;
   archived: boolean;
   created_at: string;
   updated_at: string;
   releases: AdminRelease[];
   grants: AdminGrant[];
+  maintainers: AdminMaintainer[];
 };
 
 export type SuccessResponse = { success: true };
@@ -118,8 +122,10 @@ export type InstalledPack = {
   last_synced: string | null;
   active: boolean;
   origin: "local" | "registry" | "bundled" | "unknown";
-  /** Hub login id of the pack owner, if known. Null for packs installed before
-   *  this field existed, or when the origin has no hub-side owner. */
+  /** The signed-in user's own Hub login id, echoed back only if they're one
+   *  of this pack's maintainers — not "the owner" (a pack can have several
+   *  maintainers). Null if they aren't one, or the origin has no hub-side
+   *  owner at all. Purely a can-I-edit-this flag, not for display. */
   owner_id: string | null;
   description: string;
   /** Version of an unresolved publish request for this pack, if any. `version`

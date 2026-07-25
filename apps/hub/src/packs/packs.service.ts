@@ -207,8 +207,10 @@ export class PacksService implements OnModuleInit {
       SELECT r.pack_id AS id, p.name, p.description, r.version, r.yanked
       FROM releases r JOIN packs p ON p.id = r.pack_id
       WHERE (? = 1 OR p.archived = 0)
-        AND (? = 1 OR p.visibility = 'public' OR p.owner_uuid = ? OR EXISTS (
+        AND (? = 1 OR p.visibility = 'public' OR EXISTS (
           SELECT 1 FROM pack_access a WHERE a.pack_id = p.id AND a.user_uuid = ?
+        ) OR EXISTS (
+          SELECT 1 FROM pack_maintainers m WHERE m.pack_id = p.id AND m.user_uuid = ?
         ))
     `,
       )
@@ -265,18 +267,24 @@ export class PacksService implements OnModuleInit {
     for (const id of [...byId.keys()].sort()) {
       const project = this.projectFromReleases(byId.get(id)!);
       if (project) {
+        // owner_id is resolved per-requester: the caller's own login id when
+        // they're one of the pack's maintainers, else null. There is no
+        // single "the owner" anymore now that packs support multiple
+        // maintainers — this field only ever answers "can *I* edit this."
         const row = this.database.db
           .prepare(
-            `SELECT p.visibility, u.login_id AS owner_id FROM packs p LEFT JOIN users u ON u.uuid = p.owner_uuid WHERE p.id = ?`,
+            `SELECT visibility, EXISTS (
+              SELECT 1 FROM pack_maintainers m WHERE m.pack_id = packs.id AND m.user_uuid = ?
+            ) AS is_maintainer FROM packs WHERE id = ?`,
           )
-          .get(id) as {
+          .get(user?.uuid ?? '', id) as {
           visibility: 'public' | 'restricted';
-          owner_id: string | null;
+          is_maintainer: number;
         };
         projects.push({
           ...project,
           visibility: row.visibility,
-          owner_id: row.owner_id,
+          owner_id: row.is_maintainer && user ? user.id : null,
         });
       }
     }

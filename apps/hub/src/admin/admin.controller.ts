@@ -94,6 +94,14 @@ export class AdminController {
   ) {
     return this.admin.setGrant(req.authUser!, id, userUuid, body.allowed);
   }
+  @Post('packs/:id/maintainers/:userUuid') maintainer(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Param('userUuid') userUuid: string,
+    @Body() body: { allowed: boolean },
+  ) {
+    return this.admin.setMaintainer(req.authUser!, id, userUuid, body.allowed);
+  }
   @Post('packs/:id/releases/:version/yank') yank(
     @Req() req: Request,
     @Param('id') id: string,
@@ -101,6 +109,13 @@ export class AdminController {
     @Body() body: { yanked: boolean },
   ) {
     return this.admin.setYanked(req.authUser!, id, version, body.yanked);
+  }
+  @Delete('packs/:id/releases/:version') removeRelease(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Param('version') version: string,
+  ) {
+    return this.admin.removeRelease(req.authUser!, id, version);
   }
   @Post('packs/upload')
   @UseInterceptors(FileInterceptor('file'))
