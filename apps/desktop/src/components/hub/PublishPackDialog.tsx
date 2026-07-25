@@ -41,14 +41,17 @@ export function PublishPackDialog({
   lockedPendingVersion?: string | null;
 }) {
   const [version, setVersion] = useState(currentVersion);
-  const [description, setDescription] = useState(currentDescription);
+  const [description, setDescription] = useState("");
 
   useEffect(() => {
     if (open) {
       setVersion(isFirstPublish ? currentVersion : nextPatchVersion(currentVersion));
-      setDescription(currentDescription);
+      // Start blank rather than pre-filled: the previous description shows
+      // as a placeholder instead, so it's a legible reference while typing
+      // a fresh (often more concise) one, not text to edit in place.
+      setDescription("");
     }
-  }, [open, currentVersion, currentDescription, isFirstPublish]);
+  }, [open, currentVersion, isFirstPublish]);
 
   if (lockedPendingVersion) {
     return (
@@ -95,7 +98,9 @@ export function PublishPackDialog({
             <Textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="What is this knowledge pack for?"
+              placeholder={
+                currentDescription || "What is this knowledge pack for?"
+              }
               rows={3}
             />
           </Field>
@@ -111,7 +116,9 @@ export function PublishPackDialog({
           </Button>
           <Button
             disabled={!version.trim() || publishing}
-            onClick={() => onPublish(version.trim(), description.trim())}
+            onClick={() =>
+              onPublish(version.trim(), description.trim() || currentDescription)
+            }
           >
             {publishing && <Loader2 className="size-4 animate-spin" />}
             Publish
