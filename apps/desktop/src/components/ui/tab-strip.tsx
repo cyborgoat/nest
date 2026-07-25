@@ -2,7 +2,7 @@ import { X } from "lucide-react";
 import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
-export type TabStripItem = {
+type TabStripItem = {
   id: string;
   label: string;
   /** Hover tooltip; defaults to label. */

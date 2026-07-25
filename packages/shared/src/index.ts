@@ -112,8 +112,6 @@ export type AdminPack = {
   maintainers: AdminMaintainer[];
 };
 
-export type SuccessResponse = { success: true };
-
 export type InstalledPack = {
   pack_id: string;
   name: string;

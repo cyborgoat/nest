@@ -115,11 +115,8 @@ fn pack_dirs(
         require_installed_pack(&conn, pack_id)?
     };
     let pack_dir = state.vault_path().join(&installed.local_path);
-    let snapshot_dir = crate::snapshot::snapshot_root(
-        &state.app_data_dir,
-        &installed.pack_id,
-        &installed.version,
-    );
+    let snapshot_dir =
+        crate::snapshot::snapshot_root(&state.app_data_dir, &installed.pack_id, &installed.version);
     Ok((pack_dir, snapshot_dir, installed.local_path))
 }
 
@@ -1134,25 +1131,6 @@ pub fn hub_rename_pack(
     let conn = state.db.lock();
     db::get_sync_state(&conn, &updated.id)?
         .ok_or_else(|| AppError::msg("Renamed pack record was not saved"))
-}
-
-#[tauri::command]
-pub async fn hub_list_publish_requests(
-    state: State<'_, SharedState>,
-) -> AppResult<Vec<hub::PublishRequest>> {
-    let settings = {
-        let conn = state.db.lock();
-        db::get_settings(&conn)?
-    };
-    let token = ensure_hub_access(state.inner(), &settings, false)
-        .await?
-        .ok_or_else(|| AppError::msg("Sign in to view publish requests"))?;
-    hub::list_publish_requests_remote(
-        &settings.hub_base_url,
-        settings.effective_proxy_url(),
-        &token,
-    )
-    .await
 }
 
 async fn hub_message_context(state: &SharedState) -> AppResult<(AppSettings, String)> {

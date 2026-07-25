@@ -498,9 +498,15 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         ensure_dir(&dir).unwrap();
         write_file(&dir, "pack/notes.md", "# Hello").unwrap();
-        assert_eq!(fs::read_to_string(dir.join("pack/notes.md")).unwrap(), "# Hello");
+        assert_eq!(
+            fs::read_to_string(dir.join("pack/notes.md")).unwrap(),
+            "# Hello"
+        );
         write_file(&dir, "pack/notes.md", "# Updated").unwrap();
-        assert_eq!(fs::read_to_string(dir.join("pack/notes.md")).unwrap(), "# Updated");
+        assert_eq!(
+            fs::read_to_string(dir.join("pack/notes.md")).unwrap(),
+            "# Updated"
+        );
     }
 
     #[test]

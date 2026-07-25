@@ -29,6 +29,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { useI18n } from "@/lib/i18n";
+import { compareSemVer } from "@/lib/semver";
 import {
   Select,
   SelectContent,
@@ -379,26 +380,4 @@ function PackRow({
       </AlertDialogContent>
     </AlertDialog>
   );
-}
-
-function compareSemVer(a: string, b: string): number {
-  const parse = (version: string): [number, number, number] | null => {
-    const match = version.trim().match(/^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/);
-    if (!match) return null;
-    return [Number(match[1]), Number(match[2]), Number(match[3])];
-  };
-
-  const parsedA = parse(a);
-  const parsedB = parse(b);
-  if (!parsedA || !parsedB) {
-    return a.localeCompare(b);
-  }
-
-  for (let i = 0; i < 3; i += 1) {
-    if (parsedA[i] !== parsedB[i]) {
-      return parsedA[i] - parsedB[i];
-    }
-  }
-
-  return 0;
 }

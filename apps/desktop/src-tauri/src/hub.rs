@@ -493,30 +493,6 @@ pub async fn publish_pack_remote(
     Ok(response.json().await?)
 }
 
-pub async fn list_publish_requests_remote(
-    hub_base_url: &str,
-    proxy_url: &str,
-    access_token: &str,
-) -> AppResult<Vec<PublishRequest>> {
-    let url = format!(
-        "{}/api/publish-requests/mine",
-        hub_base_url.trim_end_matches('/')
-    );
-    let response = http::build_client(proxy_url)?
-        .get(url)
-        .bearer_auth(access_token)
-        .send()
-        .await
-        .map_err(|e| map_hub_http_error("Publish request list", e))?;
-    if !response.status().is_success() {
-        return Err(AppError::msg(format!(
-            "Publish request list failed: HTTP {}",
-            response.status()
-        )));
-    }
-    Ok(response.json().await?)
-}
-
 pub async fn get_publish_request_remote(
     hub_base_url: &str,
     proxy_url: &str,
@@ -840,10 +816,7 @@ pub fn create_empty_pack(submitted: PackMeta, vault_root: &Path) -> AppResult<Pa
     }
     let result = (|| {
         vault::ensure_dir(&destination)?;
-        fs::write(
-            destination.join("README.md"),
-            format!("# {}\n", pack.name),
-        )?;
+        fs::write(destination.join("README.md"), format!("# {}\n", pack.name))?;
         write_pack_meta(&destination, &pack)?;
         Ok(pack.clone())
     })();
@@ -1388,7 +1361,10 @@ mod local_pack_tests {
         };
 
         let created = create_empty_pack(metadata, &vault).unwrap();
-        assert_eq!(created.id, "My New Pack", "id must come from name, not the submitted id");
+        assert_eq!(
+            created.id, "My New Pack",
+            "id must come from name, not the submitted id"
+        );
         assert_eq!(created.path, "My New Pack");
         assert!(vault.join("My New Pack/README.md").is_file());
         assert!(vault.join("My New Pack/pack.json").is_file());
@@ -1453,7 +1429,10 @@ mod local_pack_tests {
         let updated = update_pack_version(&pack_dir, "1.1.0").unwrap();
         assert_eq!(updated.version, "1.1.0");
         assert_eq!(updated.name, "Original Name", "name must never change here");
-        assert_eq!(updated.description, "Keep me", "description must never change here");
+        assert_eq!(
+            updated.description, "Keep me",
+            "description must never change here"
+        );
 
         // The bug this guards against: export_pack re-reads pack.json from
         // disk, so a version bump that never lands there gets silently
@@ -1493,7 +1472,10 @@ mod local_pack_tests {
         assert_eq!(renamed.id, "New Name");
         assert_eq!(renamed.name, "New Name");
         assert_eq!(renamed.path, "New Name");
-        assert_eq!(renamed.description, "Keep me", "description is untouched by rename");
+        assert_eq!(
+            renamed.description, "Keep me",
+            "description is untouched by rename"
+        );
         assert!(!vault.join("Original Name").exists());
         assert!(vault.join("New Name/README.md").is_file());
 
@@ -1528,7 +1510,10 @@ mod local_pack_tests {
         .unwrap();
 
         assert!(rename_pack_folder(&vault, "Pack A", "Pack B").is_err());
-        assert!(vault.join("Pack A").exists(), "source must survive a rejected rename");
+        assert!(
+            vault.join("Pack A").exists(),
+            "source must survive a rejected rename"
+        );
 
         let _ = fs::remove_dir_all(root);
     }

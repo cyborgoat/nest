@@ -161,7 +161,7 @@ export class AdminService {
       grants: grants.filter((g) => g.pack_id === pack.id),
       maintainers: maintainers
         .filter((m) => m.pack_id === pack.id)
-        .map(({ pack_id: _packId, ...maintainer }) => maintainer),
+        .map(({ uuid, id, name }) => ({ uuid, id, name })),
     }));
   }
 
@@ -380,7 +380,12 @@ export class AdminService {
       this.database.db
         .prepare('DELETE FROM releases WHERE pack_id = ? AND version = ?')
         .run(packId, version);
-      this.audit.record(actor, 'release.delete', 'release', `${packId}@${version}`);
+      this.audit.record(
+        actor,
+        'release.delete',
+        'release',
+        `${packId}@${version}`,
+      );
     } catch (error) {
       if (moved) await fs.rename(temporaryPath, versionPath);
       throw error;

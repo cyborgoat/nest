@@ -226,9 +226,7 @@ pub fn agent_preamble() -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        dedupe_overlapping_chunks, format_active_packs_for_prompt, snippet, SearchHit,
-    };
+    use super::{dedupe_overlapping_chunks, format_active_packs_for_prompt, snippet, SearchHit};
     use crate::db::{Citation, InstalledPack};
 
     #[test]
@@ -271,7 +269,12 @@ mod tests {
     fn keeps_distinct_non_overlapping_sections_of_same_file() {
         let mut hits = vec![
             hit("chunk-1", "notes.md", "the first section covers setup", 0.9),
-            hit("chunk-2", "notes.md", "the second section covers teardown", 0.8),
+            hit(
+                "chunk-2",
+                "notes.md",
+                "the second section covers teardown",
+                0.8,
+            ),
         ];
         dedupe_overlapping_chunks(&mut hits);
         assert_eq!(hits.len(), 2);

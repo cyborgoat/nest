@@ -21,7 +21,11 @@ pub fn snapshot_root(app_data: &Path, pack_id: &str, version: &str) -> PathBuf {
 /// needed when a local pack is renamed, since its identity (and therefore
 /// its snapshot key) changes. A no-op if there's no snapshot yet (e.g. a
 /// pack that was created locally and never published).
-pub fn rename_snapshot_root(app_data: &Path, old_pack_id: &str, new_pack_id: &str) -> AppResult<()> {
+pub fn rename_snapshot_root(
+    app_data: &Path,
+    old_pack_id: &str,
+    new_pack_id: &str,
+) -> AppResult<()> {
     if old_pack_id == new_pack_id {
         return Ok(());
     }
@@ -44,7 +48,12 @@ pub fn rename_snapshot_root(app_data: &Path, old_pack_id: &str, new_pack_id: &st
 /// overwriting any prior snapshot for that pack_id+version. Only markdown
 /// files matter for diffing (image/pack.json changes aren't part of the
 /// M/N/D surface).
-pub fn write_snapshot(app_data: &Path, pack_id: &str, version: &str, pack_dir: &Path) -> AppResult<()> {
+pub fn write_snapshot(
+    app_data: &Path,
+    pack_id: &str,
+    version: &str,
+    pack_dir: &Path,
+) -> AppResult<()> {
     let dest = snapshot_root(app_data, pack_id, version);
     if dest.exists() {
         fs::remove_dir_all(&dest)?;
@@ -322,7 +331,10 @@ mod tests {
         fs::write(pack_dir.join("b.md"), "new file").unwrap();
 
         discard_file(&pack_dir, &snap_dir, "a.md").unwrap();
-        assert_eq!(fs::read_to_string(pack_dir.join("a.md")).unwrap(), "original");
+        assert_eq!(
+            fs::read_to_string(pack_dir.join("a.md")).unwrap(),
+            "original"
+        );
 
         discard_file(&pack_dir, &snap_dir, "b.md").unwrap();
         assert!(!pack_dir.join("b.md").exists());

@@ -2,11 +2,9 @@ import { cva, type VariantProps } from "class-variance-authority";
 import * as React from "react";
 import { cn } from "@/lib/utils";
 
-/** Positive/success tone — shared so callers outside Badge (e.g. the
- * Message Center's kind-coding) stay on the same tokens. */
-export const POSITIVE_TONE_CLASSES = "bg-success-muted text-success";
+const POSITIVE_TONE_CLASSES = "bg-success-muted text-success";
 
-export const badgeVariants = cva(
+const badgeVariants = cva(
   "inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium",
   {
     variants: {
@@ -26,7 +24,7 @@ export const badgeVariants = cva(
   },
 );
 
-export interface BadgeProps
+interface BadgeProps
   extends React.HTMLAttributes<HTMLSpanElement>,
     VariantProps<typeof badgeVariants> {}
 

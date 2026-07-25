@@ -17,6 +17,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { PublishPackDialog } from "@/components/hub/PublishPackDialog";
+import { usePublishPack } from "@/hooks/use-publish-pack";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -40,7 +41,6 @@ import {
   STATUS_LETTER,
   STATUS_TEXT_CLASSES,
 } from "@/lib/file-status-ui";
-import { appErrorMessage } from "@/lib/errors";
 import { canEditPack } from "@/lib/pack-permissions";
 import { fileMutationInvalidations, queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
@@ -79,31 +79,7 @@ function PackChanges({
     (project) => project.id === pack.pack_id,
   );
 
-  const publish = useMutation({
-    mutationFn: async ({
-      version,
-      description,
-    }: {
-      version: string;
-      description: string;
-    }) => {
-      await api.hubUpdatePackMetadata(pack.pack_id, description);
-      return api.hubPublishPack(pack.pack_id, version);
-    },
-    onSuccess: () => {
-      toast.success("Pack submitted for administrator review");
-      void queryClient.invalidateQueries({
-        queryKey: queryKeys.installedPacks,
-      });
-      void queryClient.invalidateQueries({
-        queryKey: queryKeys.packStatus(pack.pack_id),
-      });
-    },
-    onError: (error: unknown) => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.hubAuth });
-      toast.error(appErrorMessage(error, "Could not publish pack"));
-    },
-  });
+  const publish = usePublishPack();
 
   const discard = useMutation({
     mutationFn: (change: FileStatus) =>
@@ -300,7 +276,7 @@ function PackChanges({
         publishing={publish.isPending}
         lockedPendingVersion={pack.pending_version}
         onPublish={(version, description) => {
-          publish.mutate({ version, description });
+          publish.mutate({ packId: pack.pack_id, version, description });
           setPublishDialogOpen(false);
         }}
       />

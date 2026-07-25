@@ -29,7 +29,9 @@ export class PublishingController {
     @Req() req: Request,
     @Param('packId') packId: string,
   ) {
-    return { pending: this.publishing.getPendingForPack(packId, req.authUser!) };
+    return {
+      pending: this.publishing.getPendingForPack(packId, req.authUser!),
+    };
   }
   @Get(':id') get(@Req() req: Request, @Param('id') id: string) {
     return this.publishing.getRequest(id, req.authUser!);

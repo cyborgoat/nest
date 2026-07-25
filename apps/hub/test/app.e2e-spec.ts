@@ -574,7 +574,11 @@ describe('Hub (e2e)', () => {
     await request(app.getHttpServer())
       .post('/api/publish-requests')
       .set('Authorization', `Bearer ${authorLogin.body.access_token}`)
-      .attach('file', packZip('0.2.0').toBuffer(), 'locked-pack-0.2.0-again.zip')
+      .attach(
+        'file',
+        packZip('0.2.0').toBuffer(),
+        'locked-pack-0.2.0-again.zip',
+      )
       .expect(409);
     await request(app.getHttpServer())
       .post('/api/publish-requests')
@@ -612,7 +616,11 @@ describe('Hub (e2e)', () => {
     await request(app.getHttpServer())
       .post('/api/publish-requests')
       .set('Authorization', `Bearer ${authorLogin.body.access_token}`)
-      .attach('file', packZip('0.3.0').toBuffer(), 'locked-pack-0.3.0-retry.zip')
+      .attach(
+        'file',
+        packZip('0.3.0').toBuffer(),
+        'locked-pack-0.3.0-retry.zip',
+      )
       .expect(201);
   });
 
@@ -726,7 +734,9 @@ describe('Hub (e2e)', () => {
       }>
     ).find((p) => p.id === 'shared-pack')!;
     expect(sharedPackAfterRemove.maintainers).not.toEqual(
-      expect.arrayContaining([expect.objectContaining({ id: 'co-maintainer' })]),
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'co-maintainer' }),
+      ]),
     );
   });
 

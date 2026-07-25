@@ -30,7 +30,9 @@ import { api } from "@/lib/api";
 import { appErrorMessage } from "@/lib/errors";
 import { packMutationInvalidations, queryKeys } from "@/lib/query-keys";
 import { useI18n } from "@/lib/i18n";
+import { compareSemVer } from "@/lib/semver";
 import { useUiStore } from "@/stores/ui";
+import { usePublishPack } from "@/hooks/use-publish-pack";
 
 export function HubPanel() {
   const { t } = useI18n();
@@ -66,7 +68,6 @@ export function HubPanel() {
   const hubOnline = hubStatusQuery.data?.online === true;
   const hubOffline = hubStatusQuery.data?.online === false;
   const wasOnlineRef = useRef<boolean | null>(null);
-  const publishToastRef = useRef<string | number | undefined>(undefined);
 
   useEffect(() => {
     if (hubStatusQuery.data == null) return;
@@ -180,7 +181,7 @@ export function HubPanel() {
   }) => {
     if (
       previousVersion &&
-      comparePackVersions(version, previousVersion) > 0
+      compareSemVer(version, previousVersion) > 0
     ) {
       setPendingPackUpdate({
         packId,
@@ -289,47 +290,7 @@ export function HubPanel() {
       }),
   });
 
-  const publish = useMutation({
-    mutationFn: async ({
-      packId,
-      version,
-      description,
-    }: {
-      packId: string;
-      version: string;
-      description: string;
-    }) => {
-      // Save the (possibly edited) description before submitting, so the
-      // publish payload reflects it and it's remembered locally too.
-      await api.hubUpdatePackMetadata(packId, description);
-      return api.hubPublishPack(packId, version);
-    },
-    onMutate: () => {
-      publishToastRef.current = toast.loading(
-        "Uploading knowledge pack to Hub…",
-      );
-    },
-    onSuccess: (_data, vars) => {
-      toast.success("Pack submitted for administrator review", {
-        id: publishToastRef.current,
-      });
-      publishToastRef.current = undefined;
-      // Refresh the install list to pick up the new pending marker — the
-      // version/diff baseline itself doesn't move until the request is
-      // approved (see hub_reconcile_publish_requests).
-      queryClient.invalidateQueries({ queryKey: queryKeys.installedPacks });
-      queryClient.invalidateQueries({
-        queryKey: queryKeys.packStatus(vars.packId),
-      });
-    },
-    onError: (error: unknown) => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.hubAuth });
-      toast.error(appErrorMessage(error, "Could not publish pack"), {
-        id: publishToastRef.current,
-      });
-      publishToastRef.current = undefined;
-    },
-  });
+  const publish = usePublishPack();
 
   const rename = useMutation({
     mutationFn: ({ packId, name }: { packId: string; name: string }) =>
@@ -607,26 +568,4 @@ export function HubPanel() {
       </AlertDialog>
     </div>
   );
-}
-
-function comparePackVersions(a: string, b: string): number {
-  const parse = (version: string): [number, number, number] | null => {
-    const match = version.trim().match(/^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/);
-    if (!match) return null;
-    return [Number(match[1]), Number(match[2]), Number(match[3])];
-  };
-
-  const parsedA = parse(a);
-  const parsedB = parse(b);
-  if (!parsedA || !parsedB) {
-    return a.localeCompare(b);
-  }
-
-  for (let i = 0; i < 3; i += 1) {
-    if (parsedA[i] !== parsedB[i]) {
-      return parsedA[i] - parsedB[i];
-    }
-  }
-
-  return 0;
 }

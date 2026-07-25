@@ -5701,7 +5701,6 @@ dependencies = [
  "chrono",
  "dotenvy",
  "futures",
- "futures-util",
  "include_dir",
  "keyring",
  "parking_lot",

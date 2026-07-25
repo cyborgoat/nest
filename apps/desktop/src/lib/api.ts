@@ -9,6 +9,7 @@ import type {
   HubConnectionStatus,
   HubAuthState,
   HubMessagePage,
+  HubUnreadCount,
   HubUser,
   IndexStatus,
   InstalledPack,
@@ -150,7 +151,7 @@ export const api = {
       cursor: cursor ?? null,
     }),
   hubUnreadMessageCount: () =>
-    invoke<{ count: number }>("hub_unread_message_count"),
+    invoke<HubUnreadCount>("hub_unread_message_count"),
   hubMarkMessageRead: (messageId: string) =>
     invoke<void>("hub_mark_message_read", { messageId }),
   hubMarkAllMessagesRead: () => invoke<void>("hub_mark_all_messages_read"),

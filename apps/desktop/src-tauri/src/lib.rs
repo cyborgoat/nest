@@ -86,7 +86,6 @@ pub fn run() {
             commands::hub_publish_pack,
             commands::hub_update_pack_metadata,
             commands::hub_rename_pack,
-            commands::hub_list_publish_requests,
             commands::hub_reconcile_publish_requests,
             commands::hub_list_messages,
             commands::hub_unread_message_count,

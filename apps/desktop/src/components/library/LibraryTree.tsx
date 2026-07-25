@@ -65,6 +65,7 @@ import { PublishPackDialog } from "@/components/hub/PublishPackDialog";
 import { RenamePackDialog } from "@/components/hub/RenamePackDialog";
 import { api } from "@/lib/api";
 import { appErrorMessage } from "@/lib/errors";
+import { usePublishPack } from "@/hooks/use-publish-pack";
 import {
   STATUS_BADGE_VARIANT,
   STATUS_LETTER,
@@ -1083,31 +1084,7 @@ export function LibraryTree({
       toast.error(appErrorMessage(error, "Could not rename pack")),
   });
 
-  const publishPack = useMutation({
-    mutationFn: async ({
-      packId,
-      version,
-      description,
-    }: {
-      packId: string;
-      version: string;
-      description: string;
-    }) => {
-      await api.hubUpdatePackMetadata(packId, description);
-      return api.hubPublishPack(packId, version);
-    },
-    onSuccess: (_data, vars) => {
-      toast.success("Pack submitted for administrator review");
-      void queryClient.invalidateQueries({ queryKey: queryKeys.installedPacks });
-      void queryClient.invalidateQueries({
-        queryKey: queryKeys.packStatus(vars.packId),
-      });
-    },
-    onError: (error: unknown) => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.hubAuth });
-      toast.error(appErrorMessage(error, "Could not publish pack"));
-    },
-  });
+  const publishPack = usePublishPack();
 
   const handleExport = async (packId: string) => {
     const pack = byPath.get(packId);
