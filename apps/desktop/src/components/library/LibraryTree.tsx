@@ -14,6 +14,7 @@ import {
   FileText,
   Folder,
   FolderPlus,
+  Info,
   Minus,
   Package,
   Pencil,
@@ -48,6 +49,7 @@ import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuLabel,
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
@@ -58,6 +60,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { PackDetailsDialog } from "@/components/hub/PackDetailsDialog";
 import { PublishPackDialog } from "@/components/hub/PublishPackDialog";
 import { RenamePackDialog } from "@/components/hub/RenamePackDialog";
 import { api } from "@/lib/api";
@@ -247,6 +250,7 @@ function TreeItem({
   const [uninstallDialogOpen, setUninstallDialogOpen] = useState(false);
   const [renamePackDialogOpen, setRenamePackDialogOpen] = useState(false);
   const [publishDialogOpen, setPublishDialogOpen] = useState(false);
+  const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
   useEffect(() => {
     if (forceOpen) setOpen(true);
   }, [forceOpen]);
@@ -561,6 +565,16 @@ function TreeItem({
           {isRoot && (
             <>
               <ContextMenuSeparator />
+              {installedPack?.version && (
+                <ContextMenuLabel>
+                  Version {installedPack.version}
+                </ContextMenuLabel>
+              )}
+              <ContextMenuItem onSelect={() => setDetailsDialogOpen(true)}>
+                <Info className="size-3.5" />
+                View Details
+              </ContextMenuItem>
+              <ContextMenuSeparator />
               <ContextMenuItem
                 disabled={setActivePending}
                 onSelect={() => onSetActive?.(!packActive)}
@@ -697,6 +711,16 @@ function TreeItem({
             onPublish?.(packId, version, description);
             setPublishDialogOpen(false);
           }}
+        />
+      )}
+
+      {isRoot && (
+        <PackDetailsDialog
+          open={detailsDialogOpen}
+          onOpenChange={setDetailsDialogOpen}
+          name={installedPack?.name ?? node.name}
+          description={installedPack?.description ?? ""}
+          version={installedPack?.version}
         />
       )}
     </>
