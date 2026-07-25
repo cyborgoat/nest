@@ -17,6 +17,6 @@ export const STATUS_BADGE_VARIANT: Record<
 
 export const STATUS_TEXT_CLASSES: Record<FileChangeStatus, string> = {
   modified: "text-amber-700 dark:text-amber-400",
-  new: "text-[#23663a] dark:text-emerald-400",
+  new: "text-success dark:text-emerald-400",
   deleted: "text-destructive line-through",
 };
