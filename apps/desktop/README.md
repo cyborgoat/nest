@@ -11,7 +11,7 @@ npm run tauri dev
 
 - **Library** — read-only Markdown tree; activate/deactivate packs for chat; search
 - **Hub** — public/restricted catalog, download/upgrade, local pack import, and owner publishing actions
-- **Messages** — durable Hub publish-submitted, approved, and rejected notifications
+- **Messages** — durable Hub publish-submitted, approved, and rejected notifications in a compact list with unread markers, per-row mark-read/delete, bulk actions, and a manual refresh button (plus 30s background polling)
 - **Chat** — RAG over active packs; `@` mention files/folders to focus; session tabs, history, pin/archive
 - **Settings** — General (vault, appearance, LLM, Hub, network) and Account (sign-in, profile, password) tabs; General auto-saves
 
