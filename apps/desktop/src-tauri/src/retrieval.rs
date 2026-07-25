@@ -289,6 +289,8 @@ mod tests {
             origin: "hub".into(),
             owner_id: None,
             description: String::new(),
+            pending_version: None,
+            pending_request_id: None,
         };
         let out = format_active_packs_for_prompt(&[pack]);
         assert!(out.contains("Cooking Basics"));

@@ -137,6 +137,14 @@ pub struct InstalledPack {
     pub owner_id: Option<String>,
     #[serde(default)]
     pub description: String,
+    /// Version of an unresolved publish request for this pack, if any.
+    /// `version` above stays at the last-*approved* value while this is set
+    /// — the pack isn't considered "current" at the submitted version until
+    /// the Hub approves it.
+    #[serde(default)]
+    pub pending_version: Option<String>,
+    #[serde(default)]
+    pub pending_request_id: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -233,6 +241,20 @@ fn migrate(conn: &Connection) -> AppResult<()> {
     ensure_sync_state_origin_column(conn)?;
     ensure_sync_state_owner_id_column(conn)?;
     ensure_sync_state_description_column(conn)?;
+    ensure_sync_state_pending_columns(conn)?;
+    Ok(())
+}
+
+fn ensure_sync_state_pending_columns(conn: &Connection) -> AppResult<()> {
+    if !table_has_column(conn, "sync_state", "pending_version")? {
+        conn.execute("ALTER TABLE sync_state ADD COLUMN pending_version TEXT", [])?;
+    }
+    if !table_has_column(conn, "sync_state", "pending_request_id")? {
+        conn.execute(
+            "ALTER TABLE sync_state ADD COLUMN pending_request_id TEXT",
+            [],
+        )?;
+    }
     Ok(())
 }
 
@@ -887,7 +909,7 @@ pub fn list_active_pack_roots(conn: &Connection) -> AppResult<Vec<String>> {
 
 pub fn list_sync_state(conn: &Connection) -> AppResult<Vec<InstalledPack>> {
     let mut stmt = conn.prepare(
-        "SELECT pack_id, name, local_path, version, last_synced, COALESCE(active, 1), COALESCE(origin, 'unknown'), owner_id, COALESCE(description, '')
+        "SELECT pack_id, name, local_path, version, last_synced, COALESCE(active, 1), COALESCE(origin, 'unknown'), owner_id, COALESCE(description, ''), pending_version, pending_request_id
          FROM sync_state ORDER BY name",
     )?;
     let rows = stmt.query_map([], |row| {
@@ -901,6 +923,8 @@ pub fn list_sync_state(conn: &Connection) -> AppResult<Vec<InstalledPack>> {
             origin: row.get(6)?,
             owner_id: row.get(7)?,
             description: row.get(8)?,
+            pending_version: row.get(9)?,
+            pending_request_id: row.get(10)?,
         })
     })?;
     Ok(rows.filter_map(|r| r.ok()).collect())
@@ -908,7 +932,7 @@ pub fn list_sync_state(conn: &Connection) -> AppResult<Vec<InstalledPack>> {
 
 pub fn get_sync_state(conn: &Connection, pack_id: &str) -> AppResult<Option<InstalledPack>> {
     conn.query_row(
-        "SELECT pack_id, name, local_path, version, last_synced, COALESCE(active, 1), COALESCE(origin, 'unknown'), owner_id, COALESCE(description, '')
+        "SELECT pack_id, name, local_path, version, last_synced, COALESCE(active, 1), COALESCE(origin, 'unknown'), owner_id, COALESCE(description, ''), pending_version, pending_request_id
          FROM sync_state WHERE pack_id = ?1",
         params![pack_id],
         |row| {
@@ -922,11 +946,40 @@ pub fn get_sync_state(conn: &Connection, pack_id: &str) -> AppResult<Option<Inst
                 origin: row.get(6)?,
                 owner_id: row.get(7)?,
                 description: row.get(8)?,
+                pending_version: row.get(9)?,
+                pending_request_id: row.get(10)?,
             })
         },
     )
     .optional()
     .map_err(Into::into)
+}
+
+/// Records that `pack_id` has an unresolved publish request awaiting Hub
+/// review. `version`/snapshot baseline are deliberately left untouched —
+/// see `hub_publish_pack` for why.
+pub fn set_pending_publish(
+    conn: &Connection,
+    pack_id: &str,
+    request_id: &str,
+    version: &str,
+) -> AppResult<()> {
+    conn.execute(
+        "UPDATE sync_state SET pending_request_id = ?1, pending_version = ?2 WHERE pack_id = ?3",
+        params![request_id, version, pack_id],
+    )?;
+    Ok(())
+}
+
+/// Clears a resolved (approved or rejected) publish request's marker. Does
+/// not touch `version`/snapshot — callers decide separately whether the
+/// resolution also advances those (see `hub_reconcile_publish_requests`).
+pub fn clear_pending_publish(conn: &Connection, pack_id: &str) -> AppResult<()> {
+    conn.execute(
+        "UPDATE sync_state SET pending_request_id = NULL, pending_version = NULL WHERE pack_id = ?1",
+        params![pack_id],
+    )?;
+    Ok(())
 }
 
 /// Resolve retrieval prefixes: @ focus under active packs, else all active roots.
@@ -1075,5 +1128,47 @@ mod sync_state_tests {
         assert_eq!(updated.version, "2.0.0");
         assert_eq!(updated.description, "An updated description");
         assert!(!updated.active, "replacement must preserve active state");
+        assert_eq!(updated.pending_version, None);
+        assert_eq!(updated.pending_request_id, None);
+    }
+
+    fn seeded_conn() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        upsert_sync_state(
+            &conn,
+            SyncStateUpsert {
+                pack_id: "sample",
+                name: "Sample",
+                version: "1.0.0",
+                local_path: "sample",
+                origin: "local",
+                owner_id: None,
+                description: "",
+            },
+        )
+        .unwrap();
+        conn
+    }
+
+    #[test]
+    fn pending_publish_round_trips_through_get_and_list_sync_state() {
+        let conn = seeded_conn();
+
+        set_pending_publish(&conn, "sample", "req-1", "1.1.0").unwrap();
+        let pending = get_sync_state(&conn, "sample").unwrap().unwrap();
+        assert_eq!(pending.pending_request_id.as_deref(), Some("req-1"));
+        assert_eq!(pending.pending_version.as_deref(), Some("1.1.0"));
+        // `version` (the last-approved value) must stay untouched by a pending marker.
+        assert_eq!(pending.version, "1.0.0");
+        let listed = list_sync_state(&conn).unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].pending_request_id.as_deref(), Some("req-1"));
+
+        clear_pending_publish(&conn, "sample").unwrap();
+        let cleared = get_sync_state(&conn, "sample").unwrap().unwrap();
+        assert_eq!(cleared.pending_request_id, None);
+        assert_eq!(cleared.pending_version, None);
+        assert_eq!(cleared.version, "1.0.0", "clearing must not touch version");
     }
 }

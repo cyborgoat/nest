@@ -891,6 +891,12 @@ pub async fn hub_publish_pack(
         require_installed_pack(&conn, &pack_id)?
     };
     ensure_pack_publishable(&installed)?;
+    if let Some(pending_version) = &installed.pending_version {
+        return Err(AppError::msg(format!(
+            "{} already has a submission awaiting review (v{pending_version}). Wait for it to be approved or rejected before submitting again.",
+            installed.name,
+        )));
+    }
     let version = match version {
         Some(v) if !v.trim().is_empty() => v.trim().to_string(),
         _ => installed.version.clone(),
@@ -932,23 +938,112 @@ pub async fn hub_publish_pack(
         }
         result => result,
     };
-    if result.is_ok() {
-        // Refresh the local-version-control baseline to "what was just
-        // submitted" so M/N/D resets after a successful publish.
-        crate::snapshot::write_snapshot(
-            &state.app_data_dir,
-            &pack.id,
-            &pack.version,
-            &vault.join(&pack.path),
-        )?;
-        // The local install is now "at" the version that was just submitted
-        // — without this, sync_state would still point at the old version,
-        // and the next status check would look for a snapshot at the old
-        // version's path (missing) and report every file as New again.
+    if let Ok(request) = &result {
+        // Don't advance `version` or the M/N/D snapshot baseline yet — the
+        // request is only pending, not approved. Just record that this pack
+        // now has an unresolved submission; hub_reconcile_publish_requests
+        // is what advances things once the Hub actually resolves it.
         let conn = state.db.lock();
-        hub::record_sync(&conn, &pack, &installed.origin, installed.owner_id.as_deref())?;
+        db::set_pending_publish(&conn, &pack.id, &request.id, &pack.version)?;
     }
     result
+}
+
+/// Reconciles every publishable installed pack's locally-known pending-review
+/// state against the Hub's actual state, and returns the refreshed pack list.
+/// A no-op (just returns the current list) when not signed in — safe to call
+/// unconditionally without the frontend gating on auth state first.
+#[tauri::command]
+pub async fn hub_reconcile_publish_requests(
+    state: State<'_, SharedState>,
+) -> AppResult<Vec<InstalledPack>> {
+    let settings = {
+        let conn = state.db.lock();
+        db::get_settings(&conn)?
+    };
+    let Some(token) = ensure_hub_access(state.inner(), &settings, false).await? else {
+        let conn = state.db.lock();
+        return db::list_sync_state(&conn);
+    };
+    let installed = {
+        let conn = state.db.lock();
+        db::list_sync_state(&conn)?
+    };
+    let vault = state.vault_path();
+    for pack in installed
+        .iter()
+        .filter(|p| p.origin == "local" || p.origin == "registry")
+    {
+        reconcile_one_pack(&state, &settings, &token, &vault, pack).await;
+    }
+    let conn = state.db.lock();
+    db::list_sync_state(&conn)
+}
+
+/// Best-effort per pack — a transient network error or a lookup this device
+/// can't see (e.g. someone else's request) must not abort reconciliation for
+/// the rest of the library, so every fallible step here just skips forward.
+async fn reconcile_one_pack(
+    state: &SharedState,
+    settings: &AppSettings,
+    token: &str,
+    vault: &std::path::Path,
+    pack: &InstalledPack,
+) {
+    let Ok(remote_pending) = hub::get_pack_pending_remote(
+        &settings.hub_base_url,
+        settings.effective_proxy_url(),
+        token,
+        &pack.pack_id,
+    )
+    .await
+    else {
+        return;
+    };
+
+    if let Some(remote) = remote_pending {
+        // Hub says pending — possibly a request this device didn't submit
+        // itself (a teammate/admin publishing the same pack elsewhere).
+        let conn = state.db.lock();
+        let _ = db::set_pending_publish(&conn, &pack.pack_id, &remote.id, &remote.version);
+        return;
+    }
+
+    let Some(request_id) = &pack.pending_request_id else {
+        return;
+    };
+    // We locally thought this pack still had a pending request; the Hub now
+    // says it doesn't, so it just resolved. Learn the outcome to decide
+    // whether to advance the version/snapshot baseline.
+    let resolved = hub::get_publish_request_remote(
+        &settings.hub_base_url,
+        settings.effective_proxy_url(),
+        token,
+        request_id,
+    )
+    .await
+    .ok();
+    if let hub::ResolvedOutcome::Approved { version } = hub::resolved_outcome(resolved.as_ref()) {
+        let approved = PackMeta {
+            id: pack.pack_id.clone(),
+            name: pack.name.clone(),
+            description: pack.description.clone(),
+            version,
+            path: pack.local_path.clone(),
+        };
+        let _ = crate::snapshot::write_snapshot(
+            &state.app_data_dir,
+            &approved.id,
+            &approved.version,
+            &vault.join(&approved.path),
+        );
+        let conn = state.db.lock();
+        let _ = hub::record_sync(&conn, &approved, &pack.origin, pack.owner_id.as_deref());
+    }
+    // Rejected (or approved) both release the lock; only an approval also
+    // advances the version/snapshot above.
+    let conn = state.db.lock();
+    let _ = db::clear_pending_publish(&conn, &pack.pack_id);
 }
 
 /// Local sanity gate only — real ownership is enforced by the hub itself
@@ -1234,6 +1329,8 @@ mod publishing_origin_tests {
             origin: origin.into(),
             owner_id: None,
             description: String::new(),
+            pending_version: None,
+            pending_request_id: None,
         }
     }
 
