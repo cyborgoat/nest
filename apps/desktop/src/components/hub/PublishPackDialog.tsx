@@ -23,6 +23,7 @@ export function PublishPackDialog({
   isFirstPublish,
   onPublish,
   publishing = false,
+  lockedPendingVersion,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -33,6 +34,11 @@ export function PublishPackDialog({
   isFirstPublish: boolean;
   onPublish: (version: string, description: string) => void;
   publishing?: boolean;
+  /** Set when this pack already has an unresolved submission. Renders an
+   *  explanation instead of the form — defense-in-depth in case the dialog
+   *  is already open when a reconcile poll flips the lock on; the entry
+   *  points that open this dialog already prevent it in the normal case. */
+  lockedPendingVersion?: string | null;
 }) {
   const [version, setVersion] = useState(currentVersion);
   const [description, setDescription] = useState(currentDescription);
@@ -43,6 +49,27 @@ export function PublishPackDialog({
       setDescription(currentDescription);
     }
   }, [open, currentVersion, currentDescription, isFirstPublish]);
+
+  if (lockedPendingVersion) {
+    return (
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="max-w-[480px]">
+          <DialogHeader>
+            <DialogTitle>Publish {packName}</DialogTitle>
+            <DialogDescription>
+              {packName} already has v{lockedPendingVersion} awaiting review.
+              You can submit again once it's approved or rejected.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" onClick={() => onOpenChange(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

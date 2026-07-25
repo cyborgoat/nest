@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { TreeNode } from "@nest/shared";
 import { Bell, Cloud, MessageSquare, Settings2 } from "lucide-react";
 import { useEffect, useRef, type ReactNode } from "react";
@@ -46,6 +46,7 @@ function collectFilePaths(nodes: TreeNode[]): string[] {
 }
 
 export default function App() {
+  const queryClient = useQueryClient();
   const activeMainTabId = useUiStore((s) => s.activeMainTabId);
   const openHubTab = useUiStore((s) => s.openHubTab);
   const openSettingsTab = useUiStore((s) => s.openSettingsTab);
@@ -100,6 +101,21 @@ export default function App() {
     enabled: hubAuthQuery.data?.authenticated === true,
     refetchInterval: 30_000,
   });
+  // Reconciles each pack's pending-review state against the Hub (covers a
+  // teammate/admin's submission too, not just this device's own) and
+  // advances the version/diff baseline once a request resolves. Reuses the
+  // messages poll's 30s cadence instead of adding a second interval.
+  const reconcileQuery = useQuery({
+    queryKey: queryKeys.publishReconcile,
+    queryFn: api.hubReconcilePublishRequests,
+    enabled: hubAuthQuery.data?.authenticated === true,
+    refetchInterval: 30_000,
+  });
+  useEffect(() => {
+    if (!reconcileQuery.data) return;
+    queryClient.setQueryData(queryKeys.installedPacks, reconcileQuery.data);
+    void queryClient.invalidateQueries({ queryKey: ["pack-status"] });
+  }, [reconcileQuery.data, queryClient]);
 
   const fontSizePt = settingsQuery.data?.font_size_pt ?? 10;
   const shell = {

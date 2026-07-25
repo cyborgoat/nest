@@ -272,9 +272,12 @@ function TreeItem({
   const renameReason = canRename
     ? undefined
     : "Only local packs can be renamed.";
-  const publishReason = canEdit
-    ? undefined
-    : "You don't have edit access to this pack.";
+  const publishLocked = Boolean(installedPack?.pending_version);
+  const publishReason = !canEdit
+    ? "You don't have edit access to this pack."
+    : publishLocked
+      ? `v${installedPack?.pending_version} is already awaiting review.`
+      : undefined;
   const origin = installedPack?.origin;
   // Packs downloaded from the hub get a distinct stroke color in the tree.
   const rootIconClass = origin === "registry" ? "text-info" : undefined;
@@ -587,7 +590,7 @@ function TreeItem({
                 Rename pack
               </PermissionMenuItem>
               <PermissionMenuItem
-                disabled={!canEdit}
+                disabled={!canEdit || publishLocked}
                 reason={publishReason}
                 onSelect={() => {
                   window.setTimeout(() => {
@@ -689,6 +692,7 @@ function TreeItem({
           currentDescription={installedPack?.description ?? ""}
           isFirstPublish={isFirstPublish}
           publishing={publishPending}
+          lockedPendingVersion={installedPack?.pending_version}
           onPublish={(version, description) => {
             onPublish?.(packId, version, description);
             setPublishDialogOpen(false);

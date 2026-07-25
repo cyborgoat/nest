@@ -1,7 +1,7 @@
 import type { FileStatus, InstalledPack } from "@nest/shared";
 import { FileText, GitBranch, Package } from "lucide-react";
-import { useQueries, useQuery } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { SectionLabel } from "@/components/ui/section-label";
@@ -35,6 +35,11 @@ function PackChanges({
         <span className="font-normal normal-case tracking-normal opacity-70">
           ({statuses.length})
         </span>
+        {pack.pending_version && (
+          <Badge variant="accent" className="normal-case tracking-normal">
+            v{pack.pending_version} under review
+          </Badge>
+        )}
       </SectionLabel>
       <div className="pb-2">
         {statuses.map((s) => {
@@ -70,11 +75,18 @@ export function SourceControlPanel({
 }: {
   installed: InstalledPack[];
 }) {
+  const queryClient = useQueryClient();
   const hubAuthQuery = useQuery({
     queryKey: queryKeys.hubAuth,
     queryFn: api.hubAuthState,
   });
   const hubUser = hubAuthQuery.data?.user ?? null;
+
+  // Get fresh "under review" state as soon as this view is opened, rather
+  // than waiting for the background poll.
+  useEffect(() => {
+    void queryClient.invalidateQueries({ queryKey: queryKeys.publishReconcile });
+  }, [queryClient]);
 
   const editablePacks = useMemo(
     () => installed.filter((p) => canEditPack(p, hubUser)),

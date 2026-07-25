@@ -133,6 +133,7 @@ export function HubPanel() {
       queryClient.invalidateQueries({ queryKey: queryKeys.hubStatus }),
       queryClient.invalidateQueries({ queryKey: queryKeys.catalog }),
       queryClient.invalidateQueries({ queryKey: queryKeys.installedPacks }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.publishReconcile }),
     ]);
   };
 
@@ -279,8 +280,9 @@ export function HubPanel() {
       });
       publishToastRef.current = undefined;
       queryClient.invalidateQueries({ queryKey: queryKeys.publishRequests });
-      // Publishing bumps the local install to the submitted version and
-      // resets its version-control baseline — refresh both.
+      // Refresh the install list to pick up the new pending marker — the
+      // version/diff baseline itself doesn't move until the request is
+      // approved (see hub_reconcile_publish_requests).
       queryClient.invalidateQueries({ queryKey: queryKeys.installedPacks });
       queryClient.invalidateQueries({
         queryKey: queryKeys.packStatus(vars.packId),

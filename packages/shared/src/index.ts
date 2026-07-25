@@ -122,6 +122,10 @@ export type InstalledPack = {
    *  this field existed, or when the origin has no hub-side owner. */
   owner_id: string | null;
   description: string;
+  /** Version of an unresolved publish request for this pack, if any. `version`
+   *  above stays at the last-approved value while this is set. */
+  pending_version: string | null;
+  pending_request_id: string | null;
 };
 
 /** Editable metadata used when creating a knowledge pack from a local folder. */

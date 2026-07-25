@@ -207,7 +207,14 @@ function InstalledPackRow({
             ? () => (authenticated ? setPublishDialogOpen(true) : onSignIn())
             : undefined
         }
-        publishLabel={authenticated ? "Publish" : "Sign in to publish"}
+        publishLabel={
+          pack.pending_version
+            ? `v${pack.pending_version} awaiting review`
+            : authenticated
+              ? "Publish"
+              : "Sign in to publish"
+        }
+        publishDisabled={Boolean(pack.pending_version)}
         onRename={
           canRenamePack(pack) ? () => setRenameDialogOpen(true) : undefined
         }
@@ -230,6 +237,7 @@ function InstalledPackRow({
         currentDescription={pack.description}
         isFirstPublish={catalogEntry == null}
         publishing={publishing}
+        lockedPendingVersion={pack.pending_version}
         onPublish={(version, description) => {
           onPublish(pack.pack_id, version, description);
           setPublishDialogOpen(false);
@@ -245,6 +253,9 @@ function InstalledPackRow({
           />
           <h3 className="font-medium">{pack.name}</h3>
           <span className="text-xs text-muted-foreground">v{pack.version}</span>
+          {pack.pending_version && (
+            <Badge variant="accent">v{pack.pending_version} under review</Badge>
+          )}
           {pack.origin === "local" && (
             <Badge variant="accent">{t("hub.importedLocally")}</Badge>
           )}

@@ -13,6 +13,8 @@ function pack(overrides: Partial<InstalledPack> = {}): InstalledPack {
     origin: "registry",
     owner_id: null,
     description: "",
+    pending_version: null,
+    pending_request_id: null,
     ...overrides,
   };
 }

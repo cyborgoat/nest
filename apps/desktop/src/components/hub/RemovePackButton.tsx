@@ -31,6 +31,7 @@ export function RemovePackButton({
   onConfirm,
   onPublish,
   publishLabel,
+  publishDisabled,
   onRename,
 }: {
   name: string;
@@ -41,6 +42,9 @@ export function RemovePackButton({
   onConfirm: () => void;
   onPublish?: () => void;
   publishLabel?: string;
+  /** Disables only the Publish item — Export/Rename/Remove stay usable, e.g.
+   *  while a previous submission for this pack is still under review. */
+  publishDisabled?: boolean;
   onRename?: () => void;
 }) {
   const { t } = useI18n();
@@ -64,7 +68,7 @@ export function RemovePackButton({
             {onPublish && (
               <>
                 <DropdownMenuItem
-                  disabled={disabled}
+                  disabled={disabled || publishDisabled}
                   onSelect={() => void onPublish()}
                 >
                   <Send className="size-3.5" />
