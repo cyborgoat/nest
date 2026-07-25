@@ -101,6 +101,8 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
       );
       CREATE UNIQUE INDEX IF NOT EXISTS pending_release_idx
         ON publish_requests(pack_id, version) WHERE status = 'pending';
+      CREATE INDEX IF NOT EXISTS publish_requests_pack_status_idx
+        ON publish_requests(pack_id, status);
       CREATE TABLE IF NOT EXISTS audit_log (
         id TEXT PRIMARY KEY,
         actor_uuid TEXT REFERENCES users(uuid) ON DELETE SET NULL,

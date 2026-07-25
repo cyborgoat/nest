@@ -57,6 +57,8 @@ export type PendingPublishRequest = PublishRequest & {
   validation_json: string;
 };
 
+export type PackPendingStatus = { pending: PublishRequest | null };
+
 export type HubMessageKind =
   "publish_submitted" | "publish_approved" | "publish_rejected";
 export type HubMessage = {

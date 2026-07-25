@@ -105,6 +105,6 @@ export class AdminController {
   @Post('packs/upload')
   @UseInterceptors(FileInterceptor('file'))
   upload(@Req() req: Request, @UploadedFile() file: UploadedPackFile) {
-    return this.publishing.submit(req.authUser!, file, true);
+    return this.publishing.submit(req.authUser!, file);
   }
 }

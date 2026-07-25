@@ -455,6 +455,98 @@ describe('Hub (e2e)', () => {
     );
   });
 
+  it('locks a pack against further submissions while any version is pending review, for anyone', async () => {
+    const authorLogin = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ id: 'pack-author', password: 'a-secure-password' })
+      .expect(201);
+    const adminLogin = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ id: 'role-admin', password: 'role-test-password' })
+      .expect(201);
+    const packZip = (version: string) => {
+      const zip = new AdmZip();
+      zip.addFile(
+        'locked-pack/pack.json',
+        Buffer.from(
+          JSON.stringify({
+            id: 'locked-pack',
+            name: 'Locked Pack',
+            description: 'Pack-wide lock fixture',
+            version,
+          }),
+        ),
+      );
+      zip.addFile('locked-pack/README.md', Buffer.from(`# v${version}`));
+      return zip;
+    };
+    // 0.1.0 goes through submit -> approve, so the pack exists and is free.
+    const first = await request(app.getHttpServer())
+      .post('/api/publish-requests')
+      .set('Authorization', `Bearer ${authorLogin.body.access_token}`)
+      .attach('file', packZip('0.1.0').toBuffer(), 'locked-pack-0.1.0.zip')
+      .expect(201);
+    await request(app.getHttpServer())
+      .post(`/api/admin/publish-requests/${first.body.id}/approve`)
+      .set('Authorization', `Bearer ${adminLogin.body.access_token}`)
+      .expect(201);
+
+    // 0.2.0 submission leaves the pack with a pending request.
+    const second = await request(app.getHttpServer())
+      .post('/api/publish-requests')
+      .set('Authorization', `Bearer ${authorLogin.body.access_token}`)
+      .attach('file', packZip('0.2.0').toBuffer(), 'locked-pack-0.2.0.zip')
+      .expect(201);
+    expect(second.body.status).toBe('pending');
+
+    // Resubmitting 0.2.0, and submitting a different 0.3.0, are both
+    // rejected — by the original owner AND by an admin, proving there's no
+    // role exception to the pack-wide lock.
+    await request(app.getHttpServer())
+      .post('/api/publish-requests')
+      .set('Authorization', `Bearer ${authorLogin.body.access_token}`)
+      .attach('file', packZip('0.2.0').toBuffer(), 'locked-pack-0.2.0-again.zip')
+      .expect(409);
+    await request(app.getHttpServer())
+      .post('/api/publish-requests')
+      .set('Authorization', `Bearer ${adminLogin.body.access_token}`)
+      .attach('file', packZip('0.3.0').toBuffer(), 'locked-pack-0.3.0.zip')
+      .expect(409);
+
+    const pendingStatus = await request(app.getHttpServer())
+      .get('/api/publish-requests/pack/locked-pack/pending')
+      .set('Authorization', `Bearer ${authorLogin.body.access_token}`)
+      .expect(200);
+    expect(pendingStatus.body.pending).toEqual(
+      expect.objectContaining({ id: second.body.id, version: '0.2.0' }),
+    );
+    const strangerLogin = await request(app.getHttpServer())
+      .post('/api/auth/register')
+      .send({
+        id: 'locked-pack-stranger',
+        name: 'Stranger',
+        password: 'a-secure-password',
+      })
+      .expect(201);
+    const strangerStatus = await request(app.getHttpServer())
+      .get('/api/publish-requests/pack/locked-pack/pending')
+      .set('Authorization', `Bearer ${strangerLogin.body.access_token}`)
+      .expect(200);
+    expect(strangerStatus.body.pending).toBeNull();
+
+    // Once 0.2.0 is resolved, the lock releases and 0.3.0 succeeds.
+    await request(app.getHttpServer())
+      .post(`/api/admin/publish-requests/${second.body.id}/reject`)
+      .set('Authorization', `Bearer ${adminLogin.body.access_token}`)
+      .send({ note: 'Needs another look.' })
+      .expect(201);
+    await request(app.getHttpServer())
+      .post('/api/publish-requests')
+      .set('Authorization', `Bearer ${authorLogin.body.access_token}`)
+      .attach('file', packZip('0.3.0').toBuffer(), 'locked-pack-0.3.0-retry.zip')
+      .expect(201);
+  });
+
   it('permanently deletes a pack while retaining reviewed and audit history', async () => {
     const adminLogin = await request(app.getHttpServer())
       .post('/api/auth/login')
@@ -473,10 +565,15 @@ describe('Hub (e2e)', () => {
       ),
     );
     zip.addFile('disposable-pack/README.md', Buffer.from('# Disposable'));
-    const publication = await request(app.getHttpServer())
+    const upload = await request(app.getHttpServer())
       .post('/api/admin/packs/upload')
       .set('Authorization', `Bearer ${adminLogin.body.access_token}`)
       .attach('file', zip.toBuffer(), 'disposable-pack.zip')
+      .expect(201);
+    expect(upload.body.status).toBe('pending');
+    const publication = await request(app.getHttpServer())
+      .post(`/api/admin/publish-requests/${upload.body.id}/approve`)
+      .set('Authorization', `Bearer ${adminLogin.body.access_token}`)
       .expect(201);
     expect(publication.body.status).toBe('approved');
     const nextVersion = new AdmZip();

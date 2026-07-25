@@ -36,7 +36,7 @@ export function UploadPackDialog({
       open={open}
       onOpenChange={reset}
       title="Upload pack"
-      description="Upload a pack .zip to publish immediately — no review queue. If the pack ID inside it is new, this creates a new catalog entry; if it matches an existing pack, this adds a new version."
+      description="Upload a pack .zip to submit it for review. It lands on the Reviews page as pending — approve it there to publish. If the pack ID is new, approval creates a new catalog entry; if it matches an existing pack, approval adds a new version."
     >
       <button
         type="button"

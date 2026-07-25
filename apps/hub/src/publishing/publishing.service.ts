@@ -67,7 +67,6 @@ export class PublishingService {
   async submit(
     user: AuthUser,
     file: UploadedPackFile,
-    publishImmediately = false,
   ): Promise<PublishRequestView> {
     if (!file?.buffer?.length)
       throw new BadRequestException('A pack ZIP is required');
@@ -88,18 +87,17 @@ export class PublishingService {
         'Only the pack owner may submit a new version',
       );
     }
-    const competing = db
+    // Pack-wide lock: no new submission for this pack — at any version, from
+    // anyone, admins included — while an earlier one is still unresolved.
+    const pending = db
       .prepare(
-        "SELECT submitter_uuid FROM publish_requests WHERE pack_id = ? AND status = 'pending' LIMIT 1",
+        "SELECT id, version FROM publish_requests WHERE pack_id = ? AND status = 'pending' LIMIT 1",
       )
-      .get(pack.id) as { submitter_uuid: string } | undefined;
-    if (
-      !existing &&
-      competing &&
-      competing.submitter_uuid !== user.uuid &&
-      !isRegistryAdmin(user)
-    ) {
-      throw new ConflictException('This pack ID is already pending review');
+      .get(pack.id) as { id: string; version: string } | undefined;
+    if (pending) {
+      throw new ConflictException(
+        `${pack.id} already has a pending publish request for version ${pending.version} — wait for it to be approved or rejected before submitting again`,
+      );
     }
     if (
       db
@@ -109,15 +107,6 @@ export class PublishingService {
       throw new ConflictException(
         `Pack release already exists: ${pack.id}@${pack.version}`,
       );
-    }
-    if (
-      db
-        .prepare(
-          "SELECT 1 FROM publish_requests WHERE pack_id = ? AND version = ? AND status = 'pending'",
-        )
-        .get(pack.id, pack.version)
-    ) {
-      throw new ConflictException('This release already has a pending request');
     }
     const stagingRoot = this.config.value.stagingPath;
     mkdirSync(stagingRoot, { recursive: true });
@@ -142,21 +131,17 @@ export class PublishingService {
         JSON.stringify({ files: pack.files }),
         timestamp,
       );
-      if (!publishImmediately) {
-        this.messages.create({
-          userUuid: user.uuid,
-          kind: 'publish_submitted',
-          title: 'Publish request submitted',
-          body: `${pack.name} ${pack.version} is waiting for review.`,
-          packId: pack.id,
-          publishRequestId: requestId,
-          eventKey: `publish:${requestId}:submitted`,
-          createdAt: timestamp,
-        });
-      }
+      this.messages.create({
+        userUuid: user.uuid,
+        kind: 'publish_submitted',
+        title: 'Publish request submitted',
+        body: `${pack.name} ${pack.version} is waiting for review.`,
+        packId: pack.id,
+        publishRequestId: requestId,
+        eventKey: `publish:${requestId}:submitted`,
+        createdAt: timestamp,
+      });
     })();
-    if (publishImmediately && isRegistryAdmin(user))
-      return this.approve(requestId, user);
     return this.getRequest(requestId, user);
   }
 
@@ -325,6 +310,35 @@ export class PublishingService {
     const row = this.requestRow(id);
     if (!isRegistryAdmin(user) && row.submitter_uuid !== user.uuid)
       throw new NotFoundException('Publish request not found');
+    return this.toView(row);
+  }
+
+  /**
+   * The latest pending request for a pack, regardless of who submitted it —
+   * used by the desktop app to show "under review" state for a pack even
+   * when a teammate/admin (not the current viewer) submitted it. Returns
+   * `null` rather than throwing for a viewer with no stake in the pack
+   * (not admin, owner, or submitter): they can't submit for it either, so
+   * there's nothing to act on, just no submitter identity to leak.
+   */
+  getPendingForPack(packId: string, user: AuthUser): PublishRequestView | null {
+    const row = this.database.db
+      .prepare(
+        "SELECT * FROM publish_requests WHERE pack_id = ? AND status = 'pending' ORDER BY created_at DESC LIMIT 1",
+      )
+      .get(packId) as PublishRequestRow | undefined;
+    if (!row) return null;
+    const pack = this.database.db
+      .prepare('SELECT owner_uuid FROM packs WHERE id = ?')
+      .get(packId) as { owner_uuid: string | null } | undefined;
+    const visible =
+      isRegistryAdmin(user) ||
+      row.submitter_uuid === user.uuid ||
+      pack?.owner_uuid === user.uuid;
+    return visible ? this.toView(row) : null;
+  }
+
+  private toView(row: PublishRequestRow): PublishRequestView {
     return {
       id: row.id,
       pack_id: row.pack_id,
