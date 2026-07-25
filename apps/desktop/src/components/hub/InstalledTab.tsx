@@ -63,7 +63,10 @@ export function InstalledTab({
   const { t } = useI18n();
   if (isLoading) {
     return (
-      <p className="text-sm text-muted-foreground">{t("hub.loadingPacks")}</p>
+      <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
+        <Spinner />
+        {t("hub.loadingPacks")}
+      </div>
     );
   }
 
@@ -237,7 +240,7 @@ function InstalledPackRow({
           <Package
             className={cn(
               "size-4",
-              pack.origin === "registry" ? "text-sky-500" : "text-primary",
+              pack.origin === "registry" ? "text-info" : "text-primary",
             )}
           />
           <h3 className="font-medium">{pack.name}</h3>
@@ -266,7 +269,7 @@ function InstalledPackRow({
         {updateAvailable && catalogEntry && (
           <Button
             size="sm"
-            className="h-7 gap-1 bg-[#e4f4e8] px-2 text-[11px] text-[#23663a] hover:bg-[#d7eddc]"
+            className="h-7 gap-1 bg-success-muted px-2 text-[11px] text-success hover:bg-success-muted-hover"
             disabled={busy}
             onClick={() =>
               onUpgrade(

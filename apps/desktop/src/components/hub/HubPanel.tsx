@@ -4,7 +4,7 @@ import type {
   KnowledgePackMeta,
   PackProject,
 } from "@nest/shared";
-import { CloudOff, FolderInput, Info, Settings2 } from "lucide-react";
+import { CloudOff, FolderInput, Info } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { BrowseTab } from "@/components/hub/BrowseTab";
@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { PanelHeader } from "@/components/ui/panel-header";
+import { RefreshButton } from "@/components/ui/refresh-button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
@@ -125,6 +126,14 @@ export function HubPanel() {
     for (const queryKey of packMutationInvalidations) {
       void queryClient.invalidateQueries({ queryKey });
     }
+  };
+
+  const refreshHub = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: queryKeys.hubStatus }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.catalog }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.installedPacks }),
+    ]);
   };
 
   const download = useMutation({
@@ -338,15 +347,15 @@ export function HubPanel() {
           </>
         }
         actions={
-          <div className="flex gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={openAccountSettingsTab}
-            >
-              <Settings2 className="size-4" />
-              {authQuery.data?.user?.name ?? "Account settings"}
-            </Button>
+          <div className="flex items-center gap-2">
+            <RefreshButton
+              onRefresh={refreshHub}
+              refreshing={
+                hubStatusQuery.isFetching ||
+                packsQuery.isFetching ||
+                installedQuery.isFetching
+              }
+            />
             <Button
               size="sm"
               variant="outline"

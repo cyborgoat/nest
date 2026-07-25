@@ -46,8 +46,7 @@ export function ActivityBar() {
                 }}
                 className={cn(
                   "text-muted-foreground",
-                  isOpenAndActive &&
-                    "bg-muted text-foreground border-l-2 border-primary",
+                  isOpenAndActive && "bg-muted text-foreground",
                 )}
               >
                 <Icon className="size-4" />

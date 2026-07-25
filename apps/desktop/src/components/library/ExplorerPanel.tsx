@@ -6,7 +6,8 @@ import { toast } from "sonner";
 import { LibraryTree } from "@/components/library/LibraryTree";
 import { NewPackDialog } from "@/components/library/NewPackDialog";
 import { Button } from "@/components/ui/button";
-import { SectionLabel } from "@/components/ui/section-label";
+import { SidebarPaneHeader } from "@/components/ui/sidebar-pane-header";
+import { Spinner } from "@/components/ui/spinner";
 import {
   Tooltip,
   TooltipContent,
@@ -51,26 +52,31 @@ export function ExplorerPanel({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
-        <SectionLabel className="px-0">Explorer</SectionLabel>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              type="button"
-              size="icon-xs"
-              variant="ghost"
-              aria-label="New knowledge pack"
-              onClick={() => setNewPackOpen(true)}
-            >
-              <Plus className="size-3.5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">New knowledge pack</TooltipContent>
-        </Tooltip>
-      </div>
+      <SidebarPaneHeader
+        title="Explorer"
+        actions={
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                size="icon-xs"
+                variant="ghost"
+                aria-label="New knowledge pack"
+                onClick={() => setNewPackOpen(true)}
+              >
+                <Plus className="size-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">New knowledge pack</TooltipContent>
+          </Tooltip>
+        }
+      />
       <div className="min-h-0 flex-1">
         {loading ? (
-          <p className="p-4 text-sm text-muted-foreground">Loading…</p>
+          <div className="flex items-center gap-2 p-4 text-sm text-muted-foreground">
+            <Spinner />
+            Loading…
+          </div>
         ) : error ? (
           <p className="p-4 text-sm text-destructive">{error.message}</p>
         ) : (

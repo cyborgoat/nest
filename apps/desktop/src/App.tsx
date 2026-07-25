@@ -15,6 +15,11 @@ import {
 } from "@/components/ui/resizable";
 import { Separator } from "@/components/ui/separator";
 import { Toaster } from "@/components/ui/sonner";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { I18nProvider } from "@/lib/i18n";
@@ -375,20 +380,27 @@ function NavButton({
   title?: string;
   dot?: boolean;
 }) {
-  return (
+  const button = (
     <Button
       size="sm"
       variant={active ? "secondary" : "ghost"}
+      aria-pressed={active}
       onClick={onClick}
-      title={title}
     >
       <span className="relative inline-flex">
         {icon}
         {dot ? (
-          <span className="absolute -right-1 -top-1 block size-2.5 rounded-full bg-destructive ring-2 ring-background" />
+          <span className="absolute -right-1 -top-1 block size-2.5 rounded-full bg-primary ring-2 ring-background" />
         ) : null}
       </span>
       {label}
     </Button>
+  );
+  if (!title) return button;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{button}</TooltipTrigger>
+      <TooltipContent side="bottom">{title}</TooltipContent>
+    </Tooltip>
   );
 }

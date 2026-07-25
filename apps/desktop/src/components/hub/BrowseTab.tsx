@@ -3,7 +3,6 @@ import { save } from "@tauri-apps/plugin-dialog";
 import {
   ArrowDownCircle,
   ArrowUpCircle,
-  Check,
   CloudDownload,
   CloudOff,
   FolderInput,
@@ -125,7 +124,10 @@ export function BrowseTab({
         />
       </div>
       {packsLoading && (
-        <p className="text-sm text-muted-foreground">{t("hub.loadingPacks")}</p>
+        <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
+          <Spinner />
+          {t("hub.loadingPacks")}
+        </div>
       )}
       {packsError && (
         <p className="text-sm text-destructive">{packsError.message}</p>
@@ -162,12 +164,7 @@ export function BrowseTab({
           variant="dashed"
           icon={<Package className="size-6" />}
           title={t("hub.registryEmpty")}
-        >
-          <Button size="sm" variant="outline" onClick={onOpenImport}>
-            <FolderInput className="size-4" />
-            {t("hub.import")}
-          </Button>
-        </EmptyState>
+        />
       )}
     </div>
   );
@@ -258,7 +255,7 @@ function PackRow({
         )}
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-2 pr-7">
-            <Package className="size-4 shrink-0 text-sky-500" />
+            <Package className="size-4 shrink-0 text-info" />
             <h3 className="min-w-0 truncate font-medium">{project.name}</h3>
             <span className="shrink-0 text-[11px] text-muted-foreground">
               {t("hub.version")}
@@ -299,32 +296,21 @@ function PackRow({
           <div className="mt-2 flex justify-end">
             <div className="flex shrink-0 items-center gap-1.5">
               {selectedIsInstalled ? (
-                <>
+                updateAvailable && (
                   <Button
                     size="sm"
-                    variant="secondary"
-                    className="h-7 gap-1 px-2 text-[11px]"
-                    disabled
+                    className="h-7 gap-1 bg-success-muted px-2 text-[11px] text-success hover:bg-success-muted-hover"
+                    disabled={busy}
+                    onClick={() => installVersion(project.latest_version)}
                   >
-                    <Check className="size-3.5" />
-                    {t("hub.installedBadge")}
+                    {downloading ? (
+                      <Spinner data-icon="inline-start" className="size-3.5" />
+                    ) : (
+                      <ArrowUpCircle className="size-3.5" />
+                    )}
+                    {downloading ? t("hub.upgrading") : t("hub.upgrade")}
                   </Button>
-                  {updateAvailable && (
-                    <Button
-                      size="sm"
-                      className="h-7 gap-1 bg-[#e4f4e8] px-2 text-[11px] text-[#23663a] hover:bg-[#d7eddc]"
-                      disabled={busy}
-                      onClick={() => installVersion(project.latest_version)}
-                    >
-                      {downloading ? (
-                        <Spinner data-icon="inline-start" className="size-3.5" />
-                      ) : (
-                        <ArrowUpCircle className="size-3.5" />
-                      )}
-                      {downloading ? t("hub.upgrading") : t("hub.upgrade")}
-                    </Button>
-                  )}
-                </>
+                )
               ) : (
                 <>
                   <Button

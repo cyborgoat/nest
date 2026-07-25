@@ -277,7 +277,7 @@ function TreeItem({
     : "You don't have edit access to this pack.";
   const origin = installedPack?.origin;
   // Packs downloaded from the hub get a distinct stroke color in the tree.
-  const rootIconClass = origin === "registry" ? "text-sky-500" : undefined;
+  const rootIconClass = origin === "registry" ? "text-info" : undefined;
 
   const catalogQuery = useQuery({
     queryKey: queryKeys.catalog,

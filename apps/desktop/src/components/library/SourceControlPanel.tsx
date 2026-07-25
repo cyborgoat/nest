@@ -5,6 +5,7 @@ import { useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { SectionLabel } from "@/components/ui/section-label";
+import { SidebarPaneHeader } from "@/components/ui/sidebar-pane-header";
 import { api } from "@/lib/api";
 import {
   STATUS_BADGE_VARIANT,
@@ -91,24 +92,25 @@ export function SourceControlPanel({
     .map((pack, i) => ({ pack, statuses: statusQueries[i]?.data ?? [] }))
     .filter((s) => s.statuses.length > 0);
 
-  if (sections.length === 0) {
-    return (
-      <div className="p-3">
-        <EmptyState
-          variant="dashed"
-          icon={<GitBranch className="size-6" />}
-          title="No changes to review"
-          description="Source control shows changes for knowledge packs you own."
-        />
-      </div>
-    );
-  }
-
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto py-1">
-      {sections.map(({ pack, statuses }) => (
-        <PackChanges key={pack.pack_id} pack={pack} statuses={statuses} />
-      ))}
+    <div className="flex h-full min-h-0 flex-col">
+      <SidebarPaneHeader title="Source Control" />
+      {sections.length === 0 ? (
+        <div className="p-3">
+          <EmptyState
+            variant="dashed"
+            icon={<GitBranch className="size-6" />}
+            title="No changes to review"
+            description="Source control shows changes for knowledge packs you own."
+          />
+        </div>
+      ) : (
+        <div className="min-h-0 flex-1 overflow-y-auto py-1">
+          {sections.map(({ pack, statuses }) => (
+            <PackChanges key={pack.pack_id} pack={pack} statuses={statuses} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
