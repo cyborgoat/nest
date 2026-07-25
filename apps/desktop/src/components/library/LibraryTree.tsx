@@ -2,11 +2,14 @@ import type {
   FileChangeStatus,
   HubUser,
   InstalledPack,
+  PackProject,
   TreeNode,
 } from "@nest/shared";
+import { save } from "@tauri-apps/plugin-dialog";
 import {
   ChevronDown,
   ChevronRight,
+  Download,
   FilePlus2,
   FileText,
   Folder,
@@ -16,10 +19,11 @@ import {
   Pencil,
   Plus,
   Search,
+  Send,
   Trash2,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -54,15 +58,23 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { PublishPackDialog } from "@/components/hub/PublishPackDialog";
+import { RenamePackDialog } from "@/components/hub/RenamePackDialog";
 import { api } from "@/lib/api";
+import { appErrorMessage } from "@/lib/errors";
 import {
   STATUS_BADGE_VARIANT,
   STATUS_LETTER,
   STATUS_TEXT_CLASSES,
 } from "@/lib/file-status-ui";
+import { useI18n } from "@/lib/i18n";
 import { mergeDeletedIntoTree } from "@/lib/merge-deleted-tree";
-import { canEditPack } from "@/lib/pack-permissions";
-import { fileMutationInvalidations, queryKeys } from "@/lib/query-keys";
+import { canEditPack, canRenamePack } from "@/lib/pack-permissions";
+import {
+  fileMutationInvalidations,
+  packMutationInvalidations,
+  queryKeys,
+} from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
 import { useEditorStore } from "@/stores/editor";
 import { useUiStore } from "@/stores/ui";
@@ -101,6 +113,38 @@ function joinPath(dir: string, name: string): string {
 
 function ensureMdExtension(name: string): string {
   return name.toLowerCase().endsWith(".md") ? name : `${name}.md`;
+}
+
+/** A ContextMenuItem that stays visible but disabled — with a hover tooltip
+ * explaining why — instead of disappearing, so every row's menu has the same
+ * shape regardless of the viewer's permissions. */
+function PermissionMenuItem({
+  disabled,
+  reason,
+  className,
+  onSelect,
+  children,
+}: {
+  disabled: boolean;
+  reason?: string;
+  className?: string;
+  onSelect: () => void;
+  children: ReactNode;
+}) {
+  const item = (
+    <ContextMenuItem disabled={disabled} className={className} onSelect={onSelect}>
+      {children}
+    </ContextMenuItem>
+  );
+  if (!disabled || !reason) return item;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="block">{item}</span>
+      </TooltipTrigger>
+      <TooltipContent side="right">{reason}</TooltipContent>
+    </Tooltip>
+  );
 }
 
 /** Inline text input for creating a new child file/folder under a tree node. */
@@ -155,22 +199,44 @@ function TreeItem({
   forceOpen,
   packActive,
   canEdit,
+  canRename,
   packId,
-  origin,
+  installedPack,
   statusMap,
   onSetActive,
   setActivePending,
+  authenticated,
+  onSignIn,
+  onExport,
+  exportPending,
+  onUninstallPack,
+  uninstallPending,
+  onRenamePack,
+  renamePackPending,
+  onPublish,
+  publishPending,
 }: {
   node: TreeNode;
   depth?: number;
   forceOpen?: boolean;
   packActive: boolean;
   canEdit: boolean;
+  canRename?: boolean;
   packId: string;
-  origin?: InstalledPack["origin"];
+  installedPack?: InstalledPack;
   statusMap: Map<string, FileChangeStatus>;
   onSetActive?: (active: boolean) => void;
   setActivePending?: boolean;
+  authenticated?: boolean;
+  onSignIn?: () => void;
+  onExport?: (packId: string) => void;
+  exportPending?: boolean;
+  onUninstallPack?: (packId: string) => void;
+  uninstallPending?: boolean;
+  onRenamePack?: (packId: string, name: string) => void;
+  renamePackPending?: boolean;
+  onPublish?: (packId: string, version: string, description: string) => void;
+  publishPending?: boolean;
 }) {
   const [open, setOpen] = useState(!!forceOpen);
   const [renaming, setRenaming] = useState(false);
@@ -178,10 +244,14 @@ function TreeItem({
     null,
   );
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [uninstallDialogOpen, setUninstallDialogOpen] = useState(false);
+  const [renamePackDialogOpen, setRenamePackDialogOpen] = useState(false);
+  const [publishDialogOpen, setPublishDialogOpen] = useState(false);
   useEffect(() => {
     if (forceOpen) setOpen(true);
   }, [forceOpen]);
 
+  const { t } = useI18n();
   const activeMainTabId = useUiStore((s) => s.activeMainTabId);
   const openFileTab = useUiStore((s) => s.openFileTab);
   const clearPathsUnder = useUiStore((s) => s.clearPathsUnder);
@@ -194,8 +264,30 @@ function TreeItem({
   const status = statusMap.get(node.path);
   const isDeleted = status === "deleted";
   const editableHere = canEdit && !isDeleted;
+  const editReason = isDeleted
+    ? "This file has already been deleted."
+    : !canEdit
+      ? "You don't have edit access to this pack."
+      : undefined;
+  const renameReason = canRename
+    ? undefined
+    : "Only local packs can be renamed.";
+  const publishReason = canEdit
+    ? undefined
+    : "You don't have edit access to this pack.";
+  const origin = installedPack?.origin;
   // Packs downloaded from the hub get a distinct stroke color in the tree.
   const rootIconClass = origin === "registry" ? "text-sky-500" : undefined;
+
+  const catalogQuery = useQuery({
+    queryKey: queryKeys.catalog,
+    queryFn: api.hubListPacks,
+    enabled: isRoot && canEdit && publishDialogOpen,
+    retry: 1,
+  });
+  const isFirstPublish = !catalogQuery.data?.some(
+    (p: PackProject) => p.id === packId,
+  );
 
   const invalidateAfterEdit = () => {
     for (const key of fileMutationInvalidations(packId)) {
@@ -269,10 +361,74 @@ function TreeItem({
     createChild.mutate({ kind, name });
   };
 
+  const nameButton = (
+    <button
+      type="button"
+      className="flex min-w-0 flex-1 select-none items-center gap-1.5 py-1.5 text-left"
+      onClick={() => {
+        if (isFolder) setOpen((v) => !v);
+        else if (!isDeleted) openFileTab(node.path);
+      }}
+      onDoubleClick={() => {
+        if (!isFolder && !isDeleted) openFileTab(node.path, { preview: false });
+      }}
+    >
+      {isFolder ? (
+        open ? (
+          <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
+        ) : (
+          <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
+        )
+      ) : (
+        <span className="inline-block w-3.5" />
+      )}
+      {isRoot ? (
+        <Package
+          className={cn(
+            "size-3.5 shrink-0",
+            rootIconClass ??
+              (packActive ? "text-primary" : "text-muted-foreground"),
+          )}
+        />
+      ) : isFolder ? (
+        <Folder
+          className={cn(
+            "size-3.5 shrink-0",
+            packActive ? "text-primary" : "text-muted-foreground",
+          )}
+        />
+      ) : (
+        <FileText
+          className={cn(
+            "size-3.5 shrink-0",
+            packActive ? "text-primary" : "text-muted-foreground",
+          )}
+        />
+      )}
+      <span
+        className={cn(
+          "truncate",
+          !packActive && "opacity-80",
+          status && STATUS_TEXT_CLASSES[status],
+        )}
+      >
+        {node.name}
+      </span>
+      {status && (
+        <Badge
+          variant={STATUS_BADGE_VARIANT[status]}
+          className="ml-auto shrink-0 px-1 py-0 text-[10px] leading-4"
+        >
+          {STATUS_LETTER[status]}
+        </Badge>
+      )}
+    </button>
+  );
+
   const row = (
     <div
       className={cn(
-        "group flex items-center gap-1 rounded-md pr-1 text-sm transition-colors",
+        "group flex select-none items-center gap-1 rounded-md pr-1 text-sm transition-colors",
         isSelected ? "bg-primary/10 text-foreground" : "hover:bg-muted/80",
         !packActive && "text-muted-foreground",
       )}
@@ -311,67 +467,7 @@ function TreeItem({
           />
         </div>
       ) : (
-        <button
-          type="button"
-          className="flex min-w-0 flex-1 items-center gap-1.5 py-1.5 text-left"
-          onClick={() => {
-            if (isFolder) setOpen((v) => !v);
-            else if (!isDeleted) openFileTab(node.path);
-          }}
-          onDoubleClick={() => {
-            if (!isFolder && !isDeleted) openFileTab(node.path, { preview: false });
-          }}
-        >
-          {isFolder ? (
-            open ? (
-              <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
-            ) : (
-              <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
-            )
-          ) : (
-            <span className="inline-block w-3.5" />
-          )}
-          {isRoot ? (
-            <Package
-              className={cn(
-                "size-3.5 shrink-0",
-                rootIconClass ??
-                  (packActive ? "text-primary" : "text-muted-foreground"),
-              )}
-            />
-          ) : isFolder ? (
-            <Folder
-              className={cn(
-                "size-3.5 shrink-0",
-                packActive ? "text-primary" : "text-muted-foreground",
-              )}
-            />
-          ) : (
-            <FileText
-              className={cn(
-                "size-3.5 shrink-0",
-                packActive ? "text-primary" : "text-muted-foreground",
-              )}
-            />
-          )}
-          <span
-            className={cn(
-              "truncate",
-              !packActive && "opacity-80",
-              status && STATUS_TEXT_CLASSES[status],
-            )}
-          >
-            {node.name}
-          </span>
-          {status && (
-            <Badge
-              variant={STATUS_BADGE_VARIANT[status]}
-              className="ml-auto shrink-0 px-1 py-0 text-[10px] leading-4"
-            >
-              {STATUS_LETTER[status]}
-            </Badge>
-          )}
-        </button>
+        nameButton
       )}
 
       {isRoot && onSetActive && !renaming && (
@@ -410,31 +506,45 @@ function TreeItem({
     </div>
   );
 
-  const wrapped = editableHere ? (
-    <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+  const wrapped = (
+    <>
       <ContextMenu>
         <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
         <ContextMenuContent>
           {isFolder && (
             <>
-              <ContextMenuItem onSelect={() => startCreate("file")}>
+              <PermissionMenuItem
+                disabled={!editableHere}
+                reason={editReason}
+                onSelect={() => startCreate("file")}
+              >
                 <FilePlus2 className="size-3.5" />
                 New File
-              </ContextMenuItem>
-              <ContextMenuItem onSelect={() => startCreate("folder")}>
+              </PermissionMenuItem>
+              <PermissionMenuItem
+                disabled={!editableHere}
+                reason={editReason}
+                onSelect={() => startCreate("folder")}
+              >
                 <FolderPlus className="size-3.5" />
                 New Folder
-              </ContextMenuItem>
+              </PermissionMenuItem>
             </>
           )}
           {!isRoot && (
             <>
               {isFolder && <ContextMenuSeparator />}
-              <ContextMenuItem onSelect={startRename}>
+              <PermissionMenuItem
+                disabled={!editableHere}
+                reason={editReason}
+                onSelect={startRename}
+              >
                 <Pencil className="size-3.5" />
                 Rename
-              </ContextMenuItem>
-              <ContextMenuItem
+              </PermissionMenuItem>
+              <PermissionMenuItem
+                disabled={!editableHere}
+                reason={editReason}
                 className="text-destructive focus:text-destructive"
                 onSelect={() => {
                   window.setTimeout(() => setDeleteDialogOpen(true), 0);
@@ -442,34 +552,150 @@ function TreeItem({
               >
                 <Trash2 className="size-3.5" />
                 Delete
+              </PermissionMenuItem>
+            </>
+          )}
+          {isRoot && (
+            <>
+              <ContextMenuSeparator />
+              <ContextMenuItem
+                disabled={setActivePending}
+                onSelect={() => onSetActive?.(!packActive)}
+              >
+                {packActive ? (
+                  <Minus className="size-3.5" />
+                ) : (
+                  <Plus className="size-3.5" />
+                )}
+                {packActive ? "Deactivate pack" : "Activate pack"}
+              </ContextMenuItem>
+              <ContextMenuItem
+                disabled={exportPending}
+                onSelect={() => onExport?.(packId)}
+              >
+                <Download className="size-3.5" />
+                Export ZIP
+              </ContextMenuItem>
+              <PermissionMenuItem
+                disabled={!canRename}
+                reason={renameReason}
+                onSelect={() => {
+                  window.setTimeout(() => setRenamePackDialogOpen(true), 0);
+                }}
+              >
+                <Pencil className="size-3.5" />
+                Rename pack
+              </PermissionMenuItem>
+              <PermissionMenuItem
+                disabled={!canEdit}
+                reason={publishReason}
+                onSelect={() => {
+                  window.setTimeout(() => {
+                    if (authenticated) setPublishDialogOpen(true);
+                    else onSignIn?.();
+                  }, 0);
+                }}
+              >
+                <Send className="size-3.5" />
+                {canEdit && !authenticated ? "Sign in to publish" : "Publish"}
+              </PermissionMenuItem>
+              <ContextMenuSeparator />
+              <ContextMenuItem
+                className="text-destructive focus:text-destructive"
+                onSelect={() => {
+                  window.setTimeout(() => setUninstallDialogOpen(true), 0);
+                }}
+              >
+                <Trash2 className="size-3.5" />
+                Uninstall
               </ContextMenuItem>
             </>
           )}
         </ContextMenuContent>
       </ContextMenu>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>Delete {node.name}?</AlertDialogTitle>
-          <AlertDialogDescription>
-            {isFolder
-              ? "This deletes the folder and everything inside it. This can't be undone."
-              : "This can't be undone."}
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction
-            className={cn(buttonVariants({ variant: "destructive" }))}
-            disabled={remove.isPending}
-            onClick={() => remove.mutate()}
-          >
-            Delete
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-  ) : (
-    row
+
+      {editableHere && (
+        <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete {node.name}?</AlertDialogTitle>
+              <AlertDialogDescription>
+                {isFolder
+                  ? "This deletes the folder and everything inside it. This can't be undone."
+                  : "This can't be undone."}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                className={cn(buttonVariants({ variant: "destructive" }))}
+                disabled={remove.isPending}
+                onClick={() => remove.mutate()}
+              >
+                Delete
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
+
+      {isRoot && (
+        <AlertDialog
+          open={uninstallDialogOpen}
+          onOpenChange={setUninstallDialogOpen}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>{t("hub.uninstallPackTitle")}</AlertDialogTitle>
+              <AlertDialogDescription>
+                {t("hub.uninstallPackDescription", {
+                  name: installedPack?.name ?? node.name,
+                })}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>{t("hub.cancel")}</AlertDialogCancel>
+              <AlertDialogAction
+                className={cn(buttonVariants({ variant: "destructive" }))}
+                disabled={uninstallPending}
+                onClick={() => onUninstallPack?.(packId)}
+              >
+                {uninstallPending ? t("hub.uninstalling") : t("hub.uninstall")}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
+
+      {isRoot && canRename && (
+        <RenamePackDialog
+          open={renamePackDialogOpen}
+          onOpenChange={setRenamePackDialogOpen}
+          currentName={installedPack?.name ?? node.name}
+          renaming={renamePackPending}
+          onRename={(name) => {
+            onRenamePack?.(packId, name);
+            setRenamePackDialogOpen(false);
+          }}
+        />
+      )}
+
+      {isRoot && canEdit && (
+        <PublishPackDialog
+          open={publishDialogOpen}
+          onOpenChange={setPublishDialogOpen}
+          packName={installedPack?.name ?? node.name}
+          currentVersion={installedPack?.version ?? ""}
+          currentDescription={installedPack?.description ?? ""}
+          isFirstPublish={isFirstPublish}
+          publishing={publishPending}
+          onPublish={(version, description) => {
+            onPublish?.(packId, version, description);
+            setPublishDialogOpen(false);
+          }}
+        />
+      )}
+    </>
   );
 
   return (
@@ -516,21 +742,43 @@ function TreeItem({
 function PackRootTreeItem({
   node,
   canEdit,
+  canRename,
   packId,
-  origin,
+  installedPack,
   forceOpen,
   packActive,
   setActivePending,
   onSetActive,
+  authenticated,
+  onSignIn,
+  onExport,
+  exportPending,
+  onUninstallPack,
+  uninstallPending,
+  onRenamePack,
+  renamePackPending,
+  onPublish,
+  publishPending,
 }: {
   node: TreeNode;
   canEdit: boolean;
+  canRename: boolean;
   packId: string;
-  origin?: InstalledPack["origin"];
+  installedPack?: InstalledPack;
   forceOpen: boolean;
   packActive: boolean;
   setActivePending: boolean;
   onSetActive: (active: boolean) => void;
+  authenticated: boolean;
+  onSignIn: () => void;
+  onExport: (packId: string) => void;
+  exportPending: boolean;
+  onUninstallPack: (packId: string) => void;
+  uninstallPending: boolean;
+  onRenamePack: (packId: string, name: string) => void;
+  renamePackPending: boolean;
+  onPublish: (packId: string, version: string, description: string) => void;
+  publishPending: boolean;
 }) {
   const statusQuery = useQuery({
     queryKey: queryKeys.packStatus(packId),
@@ -559,11 +807,22 @@ function PackRootTreeItem({
       forceOpen={forceOpen}
       packActive={packActive}
       canEdit={canEdit}
+      canRename={canRename}
       packId={packId}
-      origin={origin}
+      installedPack={installedPack}
       statusMap={statusMap}
       setActivePending={setActivePending}
       onSetActive={onSetActive}
+      authenticated={authenticated}
+      onSignIn={onSignIn}
+      onExport={onExport}
+      exportPending={exportPending}
+      onUninstallPack={onUninstallPack}
+      uninstallPending={uninstallPending}
+      onRenamePack={onRenamePack}
+      renamePackPending={renamePackPending}
+      onPublish={onPublish}
+      publishPending={publishPending}
     />
   );
 }
@@ -582,6 +841,16 @@ function PackSection({
   accordionValue,
   onAccordionChange,
   resetKey = 0,
+  authenticated,
+  onSignIn,
+  onExport,
+  exportPending,
+  onUninstallPack,
+  uninstallPending,
+  onRenamePack,
+  renamePackPending,
+  onPublish,
+  publishPending,
 }: {
   title: string;
   nodes: TreeNode[];
@@ -598,6 +867,16 @@ function PackSection({
   onAccordionChange?: (value: string) => void;
   /** Bumping this remounts every root TreeItem, collapsing any expanded folders. */
   resetKey?: number;
+  authenticated: boolean;
+  onSignIn: () => void;
+  onExport: (packId: string) => void;
+  exportPending: boolean;
+  onUninstallPack: (packId: string) => void;
+  uninstallPending: boolean;
+  onRenamePack: (packId: string, name: string) => void;
+  renamePackPending: boolean;
+  onPublish: (packId: string, version: string, description: string) => void;
+  publishPending: boolean;
 }) {
   const filtered = useMemo(() => filterTree(nodes, search), [nodes, search]);
   if (filtered.length === 0) return null;
@@ -609,6 +888,7 @@ function PackSection({
         const canEdit = installedPack
           ? canEditPack(installedPack, hubUser)
           : false;
+        const canRename = installedPack ? canRenamePack(installedPack) : false;
         const packId = installedPack?.pack_id ?? node.path;
         return (
           <PackRootTreeItem
@@ -617,10 +897,21 @@ function PackSection({
             forceOpen={forceOpen}
             packActive={packActive}
             canEdit={canEdit}
+            canRename={canRename}
             packId={packId}
-            origin={installedPack?.origin}
+            installedPack={installedPack}
             setActivePending={setActivePending}
             onSetActive={(active) => onSetActive(node.path, active)}
+            authenticated={authenticated}
+            onSignIn={onSignIn}
+            onExport={onExport}
+            exportPending={exportPending}
+            onUninstallPack={onUninstallPack}
+            uninstallPending={uninstallPending}
+            onRenamePack={onRenamePack}
+            renamePackPending={renamePackPending}
+            onPublish={onPublish}
+            publishPending={publishPending}
           />
         );
       })}
@@ -669,17 +960,20 @@ export function LibraryTree({
   tree: TreeNode[];
   installed: InstalledPack[];
 }) {
+  const { t } = useI18n();
   const [search, setSearch] = useState("");
   const [inactiveOpen, setInactiveOpen] = useState("");
   const [inactiveResetKey, setInactiveResetKey] = useState(0);
   const queryClient = useQueryClient();
   const clearPathsUnder = useUiStore((s) => s.clearPathsUnder);
+  const openAccountSettingsTab = useUiStore((s) => s.openAccountSettingsTab);
 
   const hubAuthQuery = useQuery({
     queryKey: queryKeys.hubAuth,
     queryFn: api.hubAuthState,
   });
   const hubUser = hubAuthQuery.data?.user ?? null;
+  const authenticated = hubAuthQuery.data?.authenticated ?? false;
 
   const byPath = useMemo(() => {
     const map = new Map<string, InstalledPack>();
@@ -718,6 +1012,85 @@ export function LibraryTree({
     onError: (e: Error) =>
       toast.error("Could not update pack", { description: e.message }),
   });
+
+  const exportPack = useMutation({
+    mutationFn: ({
+      packId,
+      destinationPath,
+    }: {
+      packId: string;
+      destinationPath: string;
+    }) => api.hubExportPack(packId, destinationPath),
+    onSuccess: () => toast.success(t("hub.packExported")),
+    onError: (e: Error) =>
+      toast.error(t("hub.exportFailed"), { description: e.message }),
+  });
+
+  const uninstallPack = useMutation({
+    mutationFn: (packId: string) => api.hubRemovePack(packId),
+    onSuccess: (_status, packId) => {
+      const localPath = byPath.get(packId)?.local_path ?? packId;
+      clearPathsUnder(localPath);
+      for (const key of packMutationInvalidations) {
+        void queryClient.invalidateQueries({ queryKey: key });
+      }
+      toast.success(t("hub.packRemoved"));
+    },
+    onError: (e: Error) =>
+      toast.error(t("hub.removeFailed"), { description: e.message }),
+  });
+
+  const renamePack = useMutation({
+    mutationFn: ({ packId, name }: { packId: string; name: string }) =>
+      api.hubRenamePack(packId, name),
+    onSuccess: (_data, vars) => {
+      toast.success("Pack renamed");
+      const oldLocalPath = byPath.get(vars.packId)?.local_path ?? vars.packId;
+      clearPathsUnder(oldLocalPath);
+      for (const key of packMutationInvalidations) {
+        void queryClient.invalidateQueries({ queryKey: key });
+      }
+    },
+    onError: (error: unknown) =>
+      toast.error(appErrorMessage(error, "Could not rename pack")),
+  });
+
+  const publishPack = useMutation({
+    mutationFn: async ({
+      packId,
+      version,
+      description,
+    }: {
+      packId: string;
+      version: string;
+      description: string;
+    }) => {
+      await api.hubUpdatePackMetadata(packId, description);
+      return api.hubPublishPack(packId, version);
+    },
+    onSuccess: (_data, vars) => {
+      toast.success("Pack submitted for administrator review");
+      void queryClient.invalidateQueries({ queryKey: queryKeys.publishRequests });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.installedPacks });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.packStatus(vars.packId),
+      });
+    },
+    onError: (error: unknown) => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.hubAuth });
+      toast.error(appErrorMessage(error, "Could not publish pack"));
+    },
+  });
+
+  const handleExport = async (packId: string) => {
+    const pack = byPath.get(packId);
+    const destination = await save({
+      title: t("hub.exportKnowledgePack"),
+      defaultPath: pack ? `${pack.pack_id}-${pack.version}.zip` : `${packId}.zip`,
+      filters: [{ name: "Knowledge pack", extensions: ["zip"] }],
+    });
+    if (destination) exportPack.mutate({ packId, destinationPath: destination });
+  };
 
   const forceOpen = search.trim().length > 0;
   const inactiveMatches = useMemo(
@@ -770,6 +1143,18 @@ export function LibraryTree({
             const packId = byPath.get(packPath)?.pack_id ?? packPath;
             setActive.mutate({ packId, active });
           }}
+          authenticated={authenticated}
+          onSignIn={openAccountSettingsTab}
+          onExport={handleExport}
+          exportPending={exportPack.isPending}
+          onUninstallPack={(packId) => uninstallPack.mutate(packId)}
+          uninstallPending={uninstallPack.isPending}
+          onRenamePack={(packId, name) => renamePack.mutate({ packId, name })}
+          renamePackPending={renamePack.isPending}
+          onPublish={(packId, version, description) =>
+            publishPack.mutate({ packId, version, description })
+          }
+          publishPending={publishPack.isPending}
         />
         <PackSection
           title="Inactive"
@@ -791,6 +1176,18 @@ export function LibraryTree({
             const packId = byPath.get(packPath)?.pack_id ?? packPath;
             setActive.mutate({ packId, active });
           }}
+          authenticated={authenticated}
+          onSignIn={openAccountSettingsTab}
+          onExport={handleExport}
+          exportPending={exportPack.isPending}
+          onUninstallPack={(packId) => uninstallPack.mutate(packId)}
+          uninstallPending={uninstallPack.isPending}
+          onRenamePack={(packId, name) => renamePack.mutate({ packId, name })}
+          renamePackPending={renamePack.isPending}
+          onPublish={(packId, version, description) =>
+            publishPack.mutate({ packId, version, description })
+          }
+          publishPending={publishPack.isPending}
         />
         {search.trim() &&
           filterTree(activeRoots, search).length === 0 &&

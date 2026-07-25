@@ -1,9 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 import type { TreeNode } from "@nest/shared";
-import { Bell, Cloud, MessageSquare, PanelLeft, Settings2 } from "lucide-react";
+import { Bell, Cloud, MessageSquare, Settings2 } from "lucide-react";
 import { useEffect, useRef, type ReactNode } from "react";
 import { usePanelRef } from "react-resizable-panels";
 import { ChatPanel } from "@/components/chat/ChatPanel";
+import { ActivityBar } from "@/components/library/ActivityBar";
 import { LibrarySidebar } from "@/components/library/LibrarySidebar";
 import { MainTabArea } from "@/components/main/MainTabArea";
 import { Button } from "@/components/ui/button";
@@ -26,9 +27,9 @@ import {
   useUiStore,
 } from "@/stores/ui";
 
-const LIBRARY_DEFAULT_PX = 260;
+const LIBRARY_DEFAULT_PX = 220;
 const LIBRARY_MIN_PX = 180;
-const CHAT_DEFAULT_PX = 360;
+const CHAT_DEFAULT_PX = 300;
 const CHAT_MIN_PX = 280;
 
 function collectFilePaths(nodes: TreeNode[]): string[] {
@@ -98,8 +99,6 @@ export default function App() {
   const fontSizePt = settingsQuery.data?.font_size_pt ?? 10;
   const shell = {
     appSubtitle: "Knowledge workspace",
-    collapseLibrary: "Collapse library",
-    expandLibrary: "Expand library",
     hub: "Hub",
     settings: "Settings",
     chat: "Chat",
@@ -199,10 +198,6 @@ export default function App() {
     };
   }, [chatOpen, chatPanelRef]);
 
-  function handleToggleSidebar() {
-    setSidebarOpen(!sidebarOpen);
-  }
-
   function handleToggleChat() {
     setChatOpen(!chatOpen);
   }
@@ -212,18 +207,6 @@ export default function App() {
       <div className="flex h-full flex-col">
         <header className="flex items-center justify-between border-b border-border bg-panel/80 px-4 py-2.5 backdrop-blur">
           <div className="flex items-center gap-3">
-            <Button
-              size="icon"
-              variant={sidebarOpen ? "secondary" : "ghost"}
-              onClick={handleToggleSidebar}
-              title={sidebarOpen ? shell.collapseLibrary : shell.expandLibrary}
-              aria-label={
-                sidebarOpen ? shell.collapseLibrary : shell.expandLibrary
-              }
-            >
-              <PanelLeft className="size-5" />
-            </Button>
-            <Separator orientation="vertical" className="h-6" />
             <div className="flex items-center gap-3">
               <img
                 src="/nest-logo-transparent.png"
@@ -272,8 +255,9 @@ export default function App() {
           </nav>
         </header>
 
-        <div className="min-h-0 flex-1">
-          <ResizablePanelGroup orientation="horizontal" className="h-full">
+        <div className="flex min-h-0 flex-1">
+          <ActivityBar />
+          <ResizablePanelGroup orientation="horizontal" className="h-full flex-1">
             <ResizablePanel
               id="library"
               panelRef={libraryPanelRef}
