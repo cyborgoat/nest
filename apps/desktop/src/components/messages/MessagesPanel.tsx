@@ -16,38 +16,53 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
-import { Badge, POSITIVE_TONE_CLASSES } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PanelHeader } from "@/components/ui/panel-header";
+import { RefreshButton } from "@/components/ui/refresh-button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import { appErrorMessage } from "@/lib/errors";
 import { queryKeys } from "@/lib/query-keys";
 import { useUiStore } from "@/stores/ui";
 import { useState } from "react";
 
-const MESSAGE_KIND_STYLES: Record<
-  HubMessageKind,
-  { Icon: LucideIcon; tone: string; stripe: string }
+const MESSAGE_KIND_STYLES: Partial<
+  Record<HubMessageKind, { Icon: LucideIcon; iconClass: string }>
 > = {
-  publish_submitted: {
-    Icon: Send,
-    tone: "text-accent-foreground bg-accent/15",
-    stripe: "border-l-accent",
-  },
-  publish_approved: {
-    Icon: Check,
-    tone: POSITIVE_TONE_CLASSES,
-    stripe: "border-l-[#23663a]",
-  },
-  publish_rejected: {
-    Icon: CircleAlert,
-    tone: "text-destructive bg-destructive/10",
-    stripe: "border-l-destructive",
-  },
+  publish_submitted: { Icon: Send, iconClass: "text-accent-text" },
+  publish_approved: { Icon: Check, iconClass: "text-success" },
+  publish_rejected: { Icon: CircleAlert, iconClass: "text-destructive" },
 };
+
+const FALLBACK_KIND_STYLE = {
+  Icon: Bell,
+  iconClass: "text-muted-foreground",
+} as const;
+
+function formatMessageTime(iso: string) {
+  const date = new Date(iso);
+  const now = new Date();
+  if (date.toDateString() === now.toDateString()) {
+    return date.toLocaleTimeString(undefined, {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  }
+  return date.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: date.getFullYear() === now.getFullYear() ? undefined : "numeric",
+  });
+}
 
 export function MessagesPanel() {
   const [filter, setFilter] = useState<"all" | "unread">("all");
@@ -102,7 +117,11 @@ export function MessagesPanel() {
         description="Publishing updates and notices from Nest Hub."
         actions={
           auth.data?.authenticated ? (
-            <div className="flex gap-2">
+            <div className="flex items-center gap-2">
+              <RefreshButton
+                onRefresh={refresh}
+                refreshing={messages.isFetching}
+              />
               <Button
                 size="sm"
                 variant="outline"
@@ -149,42 +168,46 @@ export function MessagesPanel() {
             </Tabs>
           </div>
           <ScrollArea className="min-h-0 flex-1">
-            <div className="mx-auto max-w-3xl space-y-3 p-5">
+            <div className="mx-auto max-w-3xl">
               {messages.isLoading ? (
-                <p className="text-sm text-muted-foreground">
-                  Loading messages…
-                </p>
+                <div className="flex justify-center py-10">
+                  <Spinner className="size-5 text-muted-foreground" />
+                </div>
               ) : messages.error ? (
-                <p className="text-sm text-destructive">
+                <p className="p-5 text-sm text-destructive">
                   {(messages.error as Error).message}
                 </p>
               ) : items.length === 0 ? (
-                <EmptyState
-                  icon={<Inbox className="size-7 text-muted-foreground" />}
-                  title={
-                    filter === "unread"
-                      ? "You’re all caught up"
-                      : "No messages yet"
-                  }
-                  description="Publishing confirmations and review decisions will appear here."
-                />
-              ) : (
-                items.map((message) => (
-                  <MessageRow
-                    key={message.id}
-                    message={message}
-                    busy={action.isPending}
-                    onRead={() =>
-                      action.mutate({ type: "read", id: message.id })
+                <div className="p-5">
+                  <EmptyState
+                    icon={<Inbox className="size-7 text-muted-foreground" />}
+                    title={
+                      filter === "unread"
+                        ? "You’re all caught up"
+                        : "No messages yet"
                     }
-                    onDelete={() =>
-                      action.mutate({ type: "delete", id: message.id })
-                    }
+                    description="Publishing confirmations and review decisions will appear here."
                   />
-                ))
+                </div>
+              ) : (
+                <div className="divide-y divide-border">
+                  {items.map((message) => (
+                    <MessageRow
+                      key={message.id}
+                      message={message}
+                      busy={action.isPending}
+                      onRead={() =>
+                        action.mutate({ type: "read", id: message.id })
+                      }
+                      onDelete={() =>
+                        action.mutate({ type: "delete", id: message.id })
+                      }
+                    />
+                  ))}
+                </div>
               )}
               {messages.hasNextPage && (
-                <div className="flex justify-center pt-2">
+                <div className="flex justify-center py-4">
                   <Button
                     variant="outline"
                     disabled={messages.isFetchingNextPage}
@@ -214,49 +237,74 @@ function MessageRow({
   onDelete: () => void;
 }) {
   const unread = !message.read_at;
-  const { Icon, tone, stripe } = MESSAGE_KIND_STYLES[message.kind];
+  const { Icon, iconClass } =
+    MESSAGE_KIND_STYLES[message.kind] ?? FALLBACK_KIND_STYLE;
   return (
     <article
-      className={`rounded-lg border border-l-4 bg-card p-4 transition-colors ${stripe} ${unread ? "border-primary/30 shadow-sm" : "border-border"}`}
+      className={cn(
+        "group flex items-start gap-3 px-4 py-2.5 transition-colors hover:bg-muted/50",
+        unread && "bg-primary/[0.03]",
+      )}
     >
-      <div className="flex items-start gap-3">
-        <div
-          className={`mt-0.5 grid size-9 shrink-0 place-items-center rounded-full ${tone}`}
-        >
-          <Icon className="size-4" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-sm font-semibold">{message.title}</h3>
-            {unread && <Badge variant="accent">New</Badge>}
-          </div>
-          <p className="mt-1 text-sm text-muted-foreground">{message.body}</p>
-          <p className="mt-2 text-xs text-muted-foreground">
-            {new Date(message.created_at).toLocaleString()}
-          </p>
-        </div>
-        <div className="flex shrink-0 gap-1">
+      <Icon className={cn("mt-0.5 size-4 shrink-0", iconClass)} />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline gap-2">
           {unread && (
+            <span
+              className="size-1.5 shrink-0 self-center rounded-full bg-primary"
+              aria-label="Unread"
+            />
+          )}
+          <h3
+            className={cn(
+              "min-w-0 truncate text-sm",
+              unread ? "font-semibold" : "font-medium",
+            )}
+          >
+            {message.title}
+          </h3>
+          <time
+            dateTime={message.created_at}
+            className="ml-auto shrink-0 text-xs tabular-nums text-muted-foreground"
+          >
+            {formatMessageTime(message.created_at)}
+          </time>
+        </div>
+        <p className="mt-0.5 line-clamp-2 text-xs leading-5 text-muted-foreground">
+          {message.body}
+        </p>
+      </div>
+      <div className="flex shrink-0 gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+        {unread && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                disabled={busy}
+                aria-label="Mark read"
+                onClick={onRead}
+              >
+                <Check className="size-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">Mark read</TooltipContent>
+          </Tooltip>
+        )}
+        <Tooltip>
+          <TooltipTrigger asChild>
             <Button
-              size="icon"
+              size="icon-sm"
               variant="ghost"
               disabled={busy}
-              title="Mark read"
-              onClick={onRead}
+              aria-label="Delete message"
+              onClick={onDelete}
             >
-              <Check className="size-4" />
+              <Trash2 className="size-4" />
             </Button>
-          )}
-          <Button
-            size="icon"
-            variant="ghost"
-            disabled={busy}
-            title="Delete message"
-            onClick={onDelete}
-          >
-            <Trash2 className="size-4" />
-          </Button>
-        </div>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">Delete message</TooltipContent>
+        </Tooltip>
       </div>
     </article>
   );
