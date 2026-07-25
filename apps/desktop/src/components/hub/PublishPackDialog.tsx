@@ -1,4 +1,4 @@
-import { Loader2 } from "lucide-react";
+import { CloudUpload, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -113,7 +113,11 @@ export function PublishPackDialog({
             disabled={!version.trim() || publishing}
             onClick={() => onPublish(version.trim(), description.trim())}
           >
-            {publishing && <Loader2 className="size-4 animate-spin" />}
+            {publishing ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <CloudUpload className="size-4" />
+            )}
             Publish
           </Button>
         </DialogFooter>

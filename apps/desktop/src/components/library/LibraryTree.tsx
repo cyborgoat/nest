@@ -20,7 +20,7 @@ import {
   Pencil,
   Plus,
   Search,
-  Send,
+  CloudUpload,
   Trash2,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
@@ -613,7 +613,7 @@ function TreeItem({
                   }, 0);
                 }}
               >
-                <Send className="size-3.5" />
+                <CloudUpload className="size-3.5" />
                 {canEdit && !authenticated ? "Sign in to publish" : "Publish"}
               </PermissionMenuItem>
               <ContextMenuSeparator />

@@ -1,14 +1,11 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { GitCompare, Undo2 } from "lucide-react";
-import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
+import { useQuery } from "@tanstack/react-query";
+import { GitCompare } from "lucide-react";
 import { PanelHeader } from "@/components/ui/panel-header";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { api } from "@/lib/api";
-import { fileMutationInvalidations, queryKeys } from "@/lib/query-keys";
+import { queryKeys } from "@/lib/query-keys";
 import { buildSideBySideRows, type DiffRow } from "@/lib/side-by-side-diff";
 import { cn } from "@/lib/utils";
-import { diffTabId, useUiStore } from "@/stores/ui";
 
 const ROW_BG: Record<DiffRow["type"], { old: string; new: string }> = {
   unchanged: { old: "", new: "" },
@@ -49,26 +46,9 @@ function DiffColumn({ rows, side }: { rows: DiffRow[]; side: "old" | "new" }) {
 }
 
 export function DiffViewer({ packId, path }: { packId: string; path: string }) {
-  const queryClient = useQueryClient();
-  const closeMainTab = useUiStore((s) => s.closeMainTab);
-
   const diffQuery = useQuery({
     queryKey: queryKeys.fileDiff(packId, path),
     queryFn: () => api.hubPackFileDiff(packId, path),
-  });
-
-  const discard = useMutation({
-    mutationFn: () => api.hubPackDiscardFile(packId, path),
-    onSuccess: () => {
-      for (const key of fileMutationInvalidations(packId, path)) {
-        void queryClient.invalidateQueries({ queryKey: key });
-      }
-      void queryClient.invalidateQueries({ queryKey: queryKeys.fileDiff(packId, path) });
-      toast.success("Change discarded");
-      closeMainTab(diffTabId(packId, path));
-    },
-    onError: (e: Error) =>
-      toast.error("Could not discard change", { description: e.message }),
   });
 
   const rows = diffQuery.data
@@ -77,20 +57,7 @@ export function DiffViewer({ packId, path }: { packId: string; path: string }) {
 
   return (
     <div className="flex h-full flex-col">
-      <PanelHeader
-        size="compact"
-        actions={
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={discard.isPending || diffQuery.isLoading}
-            onClick={() => discard.mutate()}
-          >
-            <Undo2 className="size-3.5" />
-            {discard.isPending ? "Discarding…" : "Discard changes"}
-          </Button>
-        }
-      >
+      <PanelHeader size="compact">
         <GitCompare className="size-3.5 shrink-0 text-muted-foreground" />
         <span className="truncate text-sm text-muted-foreground">{path}</span>
       </PanelHeader>

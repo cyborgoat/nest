@@ -42,6 +42,13 @@ export function HubPanel() {
   const [importOpen, setImportOpen] = useState(false);
   const [catalogSearch, setCatalogSearch] = useState("");
   const [tab, setTab] = useState<"browse" | "installed">("browse");
+  const [pendingPackUpdate, setPendingPackUpdate] = useState<{
+    packId: string;
+    packName: string;
+    version: string;
+    previousVersion: string;
+    ownerId?: string | null;
+  } | null>(null);
   const [pendingOverwrite, setPendingOverwrite] = useState<{
     kind: "zip" | "folder";
     sourcePath: string;
@@ -159,6 +166,34 @@ export function HubPanel() {
     onError: (e: Error) =>
       toast.error(t("hub.downloadFailed"), { description: e.message }),
   });
+
+  const requestDownload = ({
+    packId,
+    version,
+    previousVersion,
+    ownerId,
+  }: {
+    packId: string;
+    version: string;
+    previousVersion?: string;
+    ownerId?: string | null;
+  }) => {
+    if (
+      previousVersion &&
+      comparePackVersions(version, previousVersion) > 0
+    ) {
+      setPendingPackUpdate({
+        packId,
+        packName: installedById.get(packId)?.name ?? packId,
+        version,
+        previousVersion,
+        ownerId,
+      });
+      return;
+    }
+
+    download.mutate({ packId, version, previousVersion, ownerId });
+  };
 
   const importLocal = useMutation({
     mutationFn: ({
@@ -423,7 +458,12 @@ export function HubPanel() {
                 downloadPendingId={downloadPendingId}
                 removePendingId={removePendingId}
                 onInstall={(packId, version, previousVersion, ownerId) =>
-                  download.mutate({ packId, version, previousVersion, ownerId })
+                  requestDownload({
+                    packId,
+                    version,
+                    previousVersion,
+                    ownerId,
+                  })
                 }
                 onRemove={(packId) => remove.mutate(packId)}
                 onExport={(packId, destinationPath) =>
@@ -446,7 +486,12 @@ export function HubPanel() {
                 downloadPendingId={downloadPendingId}
                 removePendingId={removePendingId}
                 onUpgrade={(packId, version, previousVersion, ownerId) =>
-                  download.mutate({ packId, version, previousVersion, ownerId })
+                  requestDownload({
+                    packId,
+                    version,
+                    previousVersion,
+                    ownerId,
+                  })
                 }
                 onRemove={(packId) => remove.mutate(packId)}
                 onOpenImport={() => setImportOpen(true)}
@@ -493,6 +538,34 @@ export function HubPanel() {
         }}
       />
       <AlertDialog
+        open={Boolean(pendingPackUpdate)}
+        onOpenChange={(open) => !open && setPendingPackUpdate(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Update knowledge pack?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingPackUpdate
+                ? `Update “${pendingPackUpdate.packName}” from ${pendingPackUpdate.previousVersion} to ${pendingPackUpdate.version}? The currently installed version will be replaced.`
+                : "The currently installed knowledge pack will be replaced."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("hub.cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={!pendingPackUpdate}
+              onClick={() => {
+                if (!pendingPackUpdate) return;
+                download.mutate(pendingPackUpdate);
+                setPendingPackUpdate(null);
+              }}
+            >
+              {t("hub.upgrade")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog
         open={Boolean(pendingOverwrite)}
         onOpenChange={(open) => !open && setPendingOverwrite(null)}
       >
@@ -535,4 +608,26 @@ export function HubPanel() {
       </AlertDialog>
     </div>
   );
+}
+
+function comparePackVersions(a: string, b: string): number {
+  const parse = (version: string): [number, number, number] | null => {
+    const match = version.trim().match(/^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/);
+    if (!match) return null;
+    return [Number(match[1]), Number(match[2]), Number(match[3])];
+  };
+
+  const parsedA = parse(a);
+  const parsedB = parse(b);
+  if (!parsedA || !parsedB) {
+    return a.localeCompare(b);
+  }
+
+  for (let i = 0; i < 3; i += 1) {
+    if (parsedA[i] !== parsedB[i]) {
+      return parsedA[i] - parsedB[i];
+    }
+  }
+
+  return 0;
 }

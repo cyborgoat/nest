@@ -136,12 +136,18 @@ export function MarkdownEditor({ path }: { path: string }) {
         actions={
           <>
             <Tabs value={mode} onValueChange={(v) => setMode(v as typeof mode)}>
-              <TabsList>
-                <TabsTrigger value="wysiwyg">
+              <TabsList className="h-7 rounded-md p-0.5">
+                <TabsTrigger
+                  value="wysiwyg"
+                  className="h-6 px-2 py-0 text-xs"
+                >
                   <Eye className="size-3.5" />
                   Editor
                 </TabsTrigger>
-                <TabsTrigger value="source">
+                <TabsTrigger
+                  value="source"
+                  className="h-6 px-2 py-0 text-xs"
+                >
                   <Code2 className="size-3.5" />
                   Source
                 </TabsTrigger>
@@ -150,6 +156,7 @@ export function MarkdownEditor({ path }: { path: string }) {
             <Button
               size="sm"
               variant={dirty ? "default" : "outline"}
+              className="h-7"
               disabled={!dirty || save.isPending}
               onClick={() => save.mutate()}
             >
@@ -160,18 +167,21 @@ export function MarkdownEditor({ path }: { path: string }) {
               <TooltipTrigger asChild>
                 <span>
                   <Button
-                    size="sm"
+                    size="icon-sm"
                     variant="ghost"
+                    aria-label="View rendered markdown"
                     disabled={dirty}
                     onClick={() => setEditing(path, false)}
                   >
-                    View
+                    <Eye className="size-3.5" />
                   </Button>
                 </span>
               </TooltipTrigger>
-              {dirty && (
-                <TooltipContent>Save or discard changes first</TooltipContent>
-              )}
+              <TooltipContent side="bottom">
+                {dirty
+                  ? "Save or discard changes first"
+                  : "View rendered markdown"}
+              </TooltipContent>
             </Tooltip>
           </>
         }

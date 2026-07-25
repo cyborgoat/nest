@@ -11,7 +11,7 @@ import {
   CheckCheck,
   CircleAlert,
   Inbox,
-  Send,
+  CloudUpload,
   Trash2,
   type LucideIcon,
 } from "lucide-react";
@@ -38,7 +38,7 @@ import { useState } from "react";
 const MESSAGE_KIND_STYLES: Partial<
   Record<HubMessageKind, { Icon: LucideIcon; iconClass: string }>
 > = {
-  publish_submitted: { Icon: Send, iconClass: "text-accent-text" },
+  publish_submitted: { Icon: CloudUpload, iconClass: "text-accent-text" },
   publish_approved: { Icon: Check, iconClass: "text-success" },
   publish_rejected: { Icon: CircleAlert, iconClass: "text-destructive" },
 };

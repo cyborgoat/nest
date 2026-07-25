@@ -29,6 +29,11 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { PanelHeader } from "@/components/ui/panel-header";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { useEditorStore } from "@/stores/editor";
 import { useUiStore } from "@/stores/ui";
@@ -126,10 +131,19 @@ export function MarkdownViewer({ path }: { path: string }) {
         size="compact"
         actions={
           canEdit ? (
-            <Button size="sm" variant="outline" onClick={() => setEditing(path, true)}>
-              <Pencil className="size-3.5" />
-              Edit
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  aria-label="Edit markdown"
+                  onClick={() => setEditing(path, true)}
+                >
+                  <Pencil className="size-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">Edit markdown</TooltipContent>
+            </Tooltip>
           ) : (
             <Badge variant="muted">
               <Lock className="size-3" />

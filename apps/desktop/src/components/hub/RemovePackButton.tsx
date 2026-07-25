@@ -1,4 +1,10 @@
-import { Download, MoreHorizontal, Pencil, Send, Trash2 } from "lucide-react";
+import {
+  CloudUpload,
+  Download,
+  MoreHorizontal,
+  Pencil,
+  Trash2,
+} from "lucide-react";
 import { useState } from "react";
 import {
   AlertDialog,
@@ -71,7 +77,7 @@ export function RemovePackButton({
                   disabled={disabled || publishDisabled}
                   onSelect={() => void onPublish()}
                 >
-                  <Send className="size-3.5" />
+                  <CloudUpload className="size-3.5" />
                   {publishLabel ?? "Publish"}
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
