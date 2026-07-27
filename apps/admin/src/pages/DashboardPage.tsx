@@ -19,9 +19,9 @@ export function DashboardPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Superuser administration"
-        title="Good governance, at a glance."
-        description="Review what needs attention and keep the shared knowledge catalog healthy."
+        eyebrow="Administration"
+        title="Overview"
+        description="Monitor review activity, knowledge packs, releases, and registered users."
         actions={
           <RefreshButton
             onClick={() => {
