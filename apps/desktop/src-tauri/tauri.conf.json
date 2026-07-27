@@ -32,6 +32,13 @@
     "windows": {
       "webviewInstallMode": {
         "type": "offlineInstaller"
+      },
+      "nsis": {
+        "installerIcon": "icons/windows-icon.ico",
+        "uninstallerIcon": "icons/windows-icon.ico",
+        "headerImage": "windows/nsis/installer-header.bmp",
+        "uninstallerHeaderImage": "windows/nsis/installer-header.bmp",
+        "sidebarImage": "windows/nsis/installer-sidebar.bmp"
       }
     },
     "icon": [

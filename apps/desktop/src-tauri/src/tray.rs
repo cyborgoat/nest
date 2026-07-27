@@ -1,7 +1,8 @@
 //! System tray for Nest.
 //!
-//! macOS menu-bar icons are ~22pt template glyphs (white stroke / transparent).
-//! See `scripts/generate-tray-icon.py`. Dock icons stay on `nest.png` via `tauri icon`.
+//! macOS uses a white template glyph that follows the menu-bar theme. Windows
+//! uses a colored icon because its notification area does not tint templates.
+//! See `scripts/generate-tray-icon.py` and `scripts/generate-windows-icons.py`.
 
 use tauri::{
     image::Image,
@@ -15,13 +16,17 @@ pub fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&show_i, &quit_i])?;
 
-    let icon = Image::from_bytes(include_bytes!("../icons/tray-icon.png"))
-        .expect("failed to load tray icon");
+    #[cfg(target_os = "windows")]
+    let icon_bytes = include_bytes!("../icons/windows-tray-icon.png");
+    #[cfg(not(target_os = "windows"))]
+    let icon_bytes = include_bytes!("../icons/tray-icon.png");
+
+    let icon = Image::from_bytes(icon_bytes).expect("failed to load tray icon");
 
     let _tray = TrayIconBuilder::with_id("main")
         .icon(icon)
-        // macOS: treat as template so the glyph follows menu-bar light/dark.
-        .icon_as_template(true)
+        // Only macOS should tint the white template glyph.
+        .icon_as_template(cfg!(target_os = "macos"))
         .tooltip("Nest")
         .menu(&menu)
         .show_menu_on_left_click(false)
