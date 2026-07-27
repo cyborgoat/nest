@@ -167,6 +167,25 @@ describe('Hub (e2e)', () => {
       .expect(({ body }) => expect(body.id).toBe('pack-author'));
   });
 
+  it('marks session cookies secure only for HTTPS requests', async () => {
+    const credentials = {
+      id: 'root-admin',
+      password: 'test-superuser-password',
+    };
+    const httpLogin = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send(credentials)
+      .expect(201);
+    expect(String(httpLogin.headers['set-cookie'])).not.toContain('Secure');
+
+    const httpsLogin = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .set('X-Forwarded-Proto', 'https')
+      .send(credentials)
+      .expect(201);
+    expect(String(httpsLogin.headers['set-cookie'])).toContain('Secure');
+  });
+
   it('returns the configured password requirement when registration is too short', async () => {
     const response = await request(app.getHttpServer())
       .post('/api/auth/register')

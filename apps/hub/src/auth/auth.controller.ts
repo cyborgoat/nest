@@ -16,10 +16,12 @@ import { AuthService } from './auth.service';
 export class AuthController {
   constructor(private readonly auth: AuthService) {}
   @Post('register') async register(
+    @Req() req: Request,
     @Body() body: { id: string; password: string; name: string },
     @Res({ passthrough: true }) res: Response,
   ) {
     return this.cookies(
+      req,
       res,
       await this.auth.register(
         body.id ?? '',
@@ -29,10 +31,12 @@ export class AuthController {
     );
   }
   @Post('login') async login(
+    @Req() req: Request,
     @Body() body: { id: string; password: string },
     @Res({ passthrough: true }) res: Response,
   ) {
     return this.cookies(
+      req,
       res,
       await this.auth.login(body.id ?? '', body.password ?? ''),
     );
@@ -43,7 +47,7 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const token = body.refresh_token || this.cookie(req, 'nest_refresh') || '';
-    return this.cookies(res, this.auth.refresh(token));
+    return this.cookies(req, res, this.auth.refresh(token));
   }
   @Post('logout') logout(
     @Req() req: Request,
@@ -75,6 +79,7 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ) {
     return this.cookies(
+      request,
       res,
       await this.auth.changePassword(
         request.authUser!,
@@ -85,10 +90,19 @@ export class AuthController {
   }
 
   private cookies(
+    req: Request,
     res: Response,
     session: { access_token: string; refresh_token: string },
   ) {
-    const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+    const forwardedProtocol = req.headers['x-forwarded-proto'];
+    const protocol = (
+      Array.isArray(forwardedProtocol)
+        ? forwardedProtocol[0]
+        : forwardedProtocol?.split(',')[0]
+    )
+      ?.trim()
+      .toLowerCase();
+    const secure = req.secure || protocol === 'https' ? '; Secure' : '';
     res.setHeader('Set-Cookie', [
       `nest_access=${session.access_token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=900${secure}`,
       `nest_refresh=${session.refresh_token}; HttpOnly; SameSite=Strict; Path=/api/auth; Max-Age=2592000${secure}`,
