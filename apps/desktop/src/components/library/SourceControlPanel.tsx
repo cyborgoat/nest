@@ -1,5 +1,6 @@
 import type { FileStatus, InstalledPack } from "@nest/shared";
 import {
+  CircleAlert,
   CloudUpload,
   FileText,
   GitBranch,
@@ -28,6 +29,7 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { EmptyState } from "@/components/ui/empty-state";
+import { RefreshButton } from "@/components/ui/refresh-button";
 import { SectionLabel } from "@/components/ui/section-label";
 import { SidebarPaneHeader } from "@/components/ui/sidebar-pane-header";
 import {
@@ -51,10 +53,12 @@ function PackChanges({
   pack,
   statuses,
   authenticated,
+  recentlyRejected,
 }: {
   pack: InstalledPack;
   statuses: FileStatus[];
   authenticated: boolean;
+  recentlyRejected: boolean;
 }) {
   const queryClient = useQueryClient();
   const [publishDialogOpen, setPublishDialogOpen] = useState(false);
@@ -66,6 +70,7 @@ function PackChanges({
   const openAccountSettingsTab = useUiStore(
     (s) => s.openAccountSettingsTab,
   );
+  const openMessagesTab = useUiStore((s) => s.openMessagesTab);
   const setEditing = useEditorStore((s) => s.setEditing);
   const setDirty = useEditorStore((s) => s.setDirty);
 
@@ -126,6 +131,24 @@ function PackChanges({
           >
             v{pack.pending_version} under review
           </Badge>
+        )}
+        {recentlyRejected && !pack.pending_version && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button type="button" onClick={openMessagesTab}>
+                <Badge
+                  variant="destructive"
+                  className="shrink-0 normal-case tracking-normal"
+                >
+                  <CircleAlert className="size-3" />
+                  Rejected
+                </Badge>
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">
+              Recent publish rejected. Open Messages for details.
+            </TooltipContent>
+          </Tooltip>
         )}
         <Tooltip>
           <TooltipTrigger asChild>
@@ -295,12 +318,32 @@ export function SourceControlPanel({
     queryFn: api.hubAuthState,
   });
   const hubUser = hubAuthQuery.data?.user ?? null;
+  const authenticated = hubAuthQuery.data?.authenticated === true;
 
   // Get fresh "under review" state as soon as this view is opened, rather
   // than waiting for the background poll.
   useEffect(() => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.publishReconcile });
   }, [queryClient]);
+
+  const rejectionQuery = useQuery({
+    queryKey: queryKeys.sourceControlRejections,
+    queryFn: () => api.hubListMessages("unread"),
+    enabled: authenticated,
+    refetchInterval: 30_000,
+  });
+  const recentlyRejectedPackIds = useMemo(
+    () =>
+      new Set(
+        (rejectionQuery.data?.items ?? [])
+          .filter(
+            (message) =>
+              message.kind === "publish_rejected" && Boolean(message.pack_id),
+          )
+          .map((message) => message.pack_id!),
+      ),
+    [rejectionQuery.data],
+  );
 
   const editablePacks = useMemo(
     () => installed.filter((p) => canEditPack(p, hubUser)),
@@ -318,9 +361,31 @@ export function SourceControlPanel({
     .map((pack, i) => ({ pack, statuses: statusQueries[i]?.data ?? [] }))
     .filter((s) => s.statuses.length > 0);
 
+  const refreshCloudStatus = async () => {
+    const refreshedPacks = await api.hubReconcilePublishRequests();
+    queryClient.setQueryData(queryKeys.installedPacks, refreshedPacks);
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["pack-status"] }),
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.sourceControlRejections,
+      }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.messageCount }),
+    ]);
+  };
+
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <SidebarPaneHeader title="Source Control" />
+      <SidebarPaneHeader
+        title="Source Control"
+        actions={
+          <RefreshButton
+            size="icon-xs"
+            label="Sync cloud status"
+            refreshing={rejectionQuery.isFetching}
+            onRefresh={refreshCloudStatus}
+          />
+        }
+      />
       {sections.length === 0 ? (
         <div className="p-3">
           <EmptyState
@@ -337,7 +402,8 @@ export function SourceControlPanel({
               key={pack.pack_id}
               pack={pack}
               statuses={statuses}
-              authenticated={hubAuthQuery.data?.authenticated === true}
+              authenticated={authenticated}
+              recentlyRejected={recentlyRejectedPackIds.has(pack.pack_id)}
             />
           ))}
         </div>

@@ -12,13 +12,6 @@ examples/knowledge-packs/     # or REGISTRY_PATH (pack registry root)
     1.0.0/
       pack.json
       …
-    1.1.0/
-      pack.json
-      …
-  software-engineering/
-    1.0.0/
-      pack.json
-      …
 ```
 
 Rules:
@@ -71,7 +64,8 @@ Download zip layout: top-level folder `{id}/` including `pack.json` (vault paths
 - `sync_state.origin` records `local`, `registry`, `bundled`, or `unknown`; legacy rows migrate to `unknown`, and only `local` packs may be submitted for publishing.
 - Local zip import still installs from embedded `pack.json`.
 - Importing or creating a local pack whose ID is already installed requires confirmation and atomically replaces the single installed version.
-- Example Import zip: `examples/zip-files/healthy-diet-1.0.0.zip`.
+- The repository example registry contains only the canonical
+  `getting-started@1.0.0` tutorial.
 
 Bundled default pack notes:
 
@@ -93,7 +87,7 @@ Bundled default pack notes:
 1. A user creates an account from **Settings → Account**. The account ID is immutable; name and password can be maintained there.
 2. Only a pack with local origin (created from a folder or imported by the user) exposes **Publish** in the installed-pack action menu. Registry downloads, bundled packs, and legacy unknown-origin packs cannot be republished.
 3. Desktop exports the installed tree as a ZIP and submits it to Hub. Hub validates the archive size, safe paths, `pack.json`, SemVer, and Markdown content before storing a pending artifact.
-4. An admin or the superuser approves the exact staged artifact or rejects it with a required note. Hub creates a durable submitted/approved/rejected message for the author.
+4. An admin or the superuser approves the exact staged artifact with an optional comment or rejects it with a required comment. Hub creates a durable submitted/approved/rejected message for the author and retains review metadata for administrator history.
 5. Approved releases are immutable. Administrators can edit project metadata, yank a release, archive or delete a project, upload an immediate release, and change visibility.
 6. Every project is `public` by default. A `restricted` project is visible only to its owner, explicitly granted users, admins, and the superuser. Authentication is therefore optional for all local work and public browsing.
 

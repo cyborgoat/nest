@@ -55,7 +55,7 @@ The desktop app uses the configured Hub URL from Settings. The Hub service liste
 
 Authentication is optional. Public catalog and download behavior stays anonymous; the desktop stores an authenticated refresh credential in the operating-system credential store only when a user signs in to publish or access restricted packs. Previously downloaded restricted content remains ordinary local vault content offline.
 
-Hub sign-in and registration live in **Settings** so browsing local and public content never looks gated. The top-level **Messages** page shows durable publish-submitted, approved, and rejected notices as a compact list with unread and deletion controls; it polls every 30 seconds while signed in and also has a manual refresh button, as does the Hub tab.
+Hub sign-in and registration live in **Settings** so browsing local and public content never looks gated. The top-level **Messages** page shows durable publish-submitted, approved, and rejected notices as a compact list with unread and deletion controls; it polls every 30 seconds while signed in and also has a manual refresh button, as does the Hub tab. The browser administration console keeps pending reviews separate from cursor-paginated approval/rejection history, including identity snapshots, validation metadata, and reviewer comments.
 
 The Hub has three authorization levels: regular users, admins, and one environment-managed superuser. Admins and the superuser share registry review and pack-management permissions. Admins may promote users and delete regular accounts; the superuser may also delete admins. The adopted superuser identity is persistently locked against profile, password, role, and deletion changes.
 

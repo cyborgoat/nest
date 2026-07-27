@@ -419,7 +419,7 @@ function NavButton({
       <span className="relative inline-flex">
         {icon}
         {dot ? (
-          <span className="absolute -right-1 -top-1 block size-2.5 rounded-full bg-primary ring-2 ring-background" />
+          <span className="absolute -right-0.5 -top-0.5 block size-1.5 rounded-full bg-amber-500 ring-1 ring-background" />
         ) : null}
       </span>
       {label}

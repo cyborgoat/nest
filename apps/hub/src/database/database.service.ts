@@ -124,6 +124,10 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
         validation_json TEXT NOT NULL DEFAULT '{}',
         review_note TEXT,
         reviewer_uuid TEXT REFERENCES users(uuid) ON DELETE SET NULL,
+        submitter_id_snapshot TEXT,
+        submitter_name_snapshot TEXT,
+        reviewer_id_snapshot TEXT,
+        reviewer_name_snapshot TEXT,
         created_at TEXT NOT NULL,
         reviewed_at TEXT
       );
@@ -162,6 +166,54 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
     this.database.exec(`
       INSERT OR IGNORE INTO pack_maintainers(pack_id, user_uuid, created_at)
       SELECT id, owner_uuid, created_at FROM packs WHERE owner_uuid IS NOT NULL;
+    `);
+    this.ensurePublishRequestHistoryColumns();
+  }
+
+  private ensurePublishRequestHistoryColumns() {
+    const columns = new Set(
+      (
+        this.database.prepare('PRAGMA table_info(publish_requests)').all() as {
+          name: string;
+        }[]
+      ).map((column) => column.name),
+    );
+    const additions = [
+      ['submitter_id_snapshot', 'TEXT'],
+      ['submitter_name_snapshot', 'TEXT'],
+      ['reviewer_id_snapshot', 'TEXT'],
+      ['reviewer_name_snapshot', 'TEXT'],
+    ] as const;
+    for (const [name, type] of additions) {
+      if (!columns.has(name)) {
+        this.database.exec(
+          `ALTER TABLE publish_requests ADD COLUMN ${name} ${type}`,
+        );
+      }
+    }
+    this.database.exec(`
+      UPDATE publish_requests
+      SET submitter_id_snapshot = COALESCE(
+            submitter_id_snapshot,
+            (SELECT login_id FROM users WHERE uuid = submitter_uuid)
+          ),
+          submitter_name_snapshot = COALESCE(
+            submitter_name_snapshot,
+            (SELECT name FROM users WHERE uuid = submitter_uuid)
+          )
+      WHERE submitter_id_snapshot IS NULL OR submitter_name_snapshot IS NULL;
+
+      UPDATE publish_requests
+      SET reviewer_id_snapshot = COALESCE(
+            reviewer_id_snapshot,
+            (SELECT login_id FROM users WHERE uuid = reviewer_uuid)
+          ),
+          reviewer_name_snapshot = COALESCE(
+            reviewer_name_snapshot,
+            (SELECT name FROM users WHERE uuid = reviewer_uuid)
+          )
+      WHERE reviewer_uuid IS NOT NULL
+        AND (reviewer_id_snapshot IS NULL OR reviewer_name_snapshot IS NULL);
     `);
   }
 }

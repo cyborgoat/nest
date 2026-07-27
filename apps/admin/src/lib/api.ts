@@ -3,6 +3,8 @@ export type AdminApi = <T>(url: string, init?: RequestInit) => Promise<T>;
 export const adminQueryKeys = {
   users: ["users"] as const,
   reviews: ["reviews"] as const,
+  reviewHistory: ["review-history"] as const,
+  reviewHistoryFor: (status: string) => ["review-history", status] as const,
   packs: ["packs"] as const,
 };
 

@@ -60,6 +60,20 @@ export type PendingPublishRequest = PublishRequest & {
   validation_json: string;
 };
 
+export type AdminPublishRequest = PublishRequest & {
+  checksum: string;
+  validation_json: string;
+  submitter_id: string | null;
+  submitter_name: string | null;
+  reviewer_id: string | null;
+  reviewer_name: string | null;
+};
+
+export type AdminPublishHistoryPage = {
+  items: AdminPublishRequest[];
+  next_cursor: string | null;
+};
+
 export type PackPendingStatus = { pending: PublishRequest | null };
 
 export type HubMessageKind =

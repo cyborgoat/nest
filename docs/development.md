@@ -90,7 +90,9 @@ Notes:
 node scripts/validate-pack-registry.mjs
 ```
 
-The desktop app does not use Hub examples as an offline fallback for Hub connectivity. Instead, it ships an embedded first-run `getting-started` pack from `apps/desktop/src-tauri/resources/default-packs/getting-started/1.0.0/`.
+The canonical `examples/knowledge-packs/getting-started/1.0.0/` tutorial is
+compiled into the desktop binary as its first-run pack. Hub can serve the same
+content when the example registry is configured.
 
 Bundled pack behavior:
 

@@ -58,7 +58,8 @@ Every `/api/admin/*` route requires role `admin` or `superuser`.
 | `PATCH` | `/api/admin/users/:uuid` | Set `role` to `user` or `admin` |
 | `DELETE` | `/api/admin/users/:uuid` | Delete an account according to role hierarchy |
 | `GET` | `/api/admin/publish-requests` | List pending submissions |
-| `POST` | `/api/admin/publish-requests/:id/approve` | Publish the staged artifact |
+| `GET` | `/api/admin/publish-requests/history` | Cursor-paginated approved/rejected history; filter with `status=all|approved|rejected` |
+| `POST` | `/api/admin/publish-requests/:id/approve` | Publish the staged artifact with optional `{ "note": "…" }` |
 | `POST` | `/api/admin/publish-requests/:id/reject` | Reject with required `note` |
 | `GET` | `/api/admin/packs` | List projects, releases, and access grants |
 | `PATCH` | `/api/admin/packs/:id` | Edit name, description, owner, visibility, or archive state |
@@ -70,3 +71,8 @@ Every `/api/admin/*` route requires role `admin` or `superuser`.
 Admins and the superuser have identical registry-management privileges. An admin can promote regular users and delete regular users, but cannot change or delete an existing admin. The superuser can demote or delete admins. The environment-managed superuser cannot be edited, demoted, have its password changed, or be deleted by any route.
 
 The React operations console at `/admin` consumes these endpoints and requires an admin or superuser session.
+
+Reviewed request history retains request metadata, checksum, validation file
+list, submitter/reviewer identity snapshots, timestamps, and reviewer comments.
+Completed staging ZIPs are not retained; approved releases remain available
+through their normal release download route.

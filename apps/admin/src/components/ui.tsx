@@ -65,7 +65,7 @@ export function Badge({
   tone = "green",
 }: {
   children: ReactNode;
-  tone?: "green" | "amber" | "stone";
+  tone?: "green" | "amber" | "stone" | "red";
 }) {
   return (
     <span
@@ -73,6 +73,7 @@ export function Badge({
         "inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-semibold capitalize [&>svg]:size-3",
         tone === "green" && "bg-primary/10 text-primary",
         tone === "amber" && "bg-amber-50 text-amber-800",
+        tone === "red" && "bg-destructive/10 text-destructive",
         tone === "stone" && "bg-muted text-muted-foreground",
       )}
     >

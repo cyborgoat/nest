@@ -9,15 +9,10 @@ use std::path::{Path, PathBuf};
 
 const DEFAULT_PACK_ID: &str = "getting-started";
 const DEFAULT_PACK_NAME: &str = "Getting Started";
-const DEFAULT_PACK_ZH_ID: &str = "getting-started-zh";
-const DEFAULT_PACK_ZH_NAME: &str = "Getting Started (Chinese)";
 const DEFAULT_PACK_MARKER: &str = ".default-pack-seeded-v1";
-const DEFAULT_PACK_ZH_MARKER: &str = ".default-pack-zh-seeded-v1";
 
 static DEFAULT_PACK_DIR: Dir<'_> =
-    include_dir!("$CARGO_MANIFEST_DIR/resources/default-packs/getting-started/1.0.0");
-static DEFAULT_PACK_ZH_DIR: Dir<'_> =
-    include_dir!("$CARGO_MANIFEST_DIR/resources/default-packs/getting-started-zh/1.0.0");
+    include_dir!("$CARGO_MANIFEST_DIR/../../../examples/knowledge-packs/getting-started/1.0.0");
 
 #[derive(Debug, Deserialize)]
 struct EmbeddedPackMeta {
@@ -35,15 +30,6 @@ pub fn ensure_seeded(conn: &Connection, app_data_dir: &Path, vault_root: &Path) 
         DEFAULT_PACK_NAME,
         &DEFAULT_PACK_DIR,
         DEFAULT_PACK_MARKER,
-    )?;
-    ensure_pack_seeded_once(
-        conn,
-        app_data_dir,
-        vault_root,
-        DEFAULT_PACK_ZH_ID,
-        DEFAULT_PACK_ZH_NAME,
-        &DEFAULT_PACK_ZH_DIR,
-        DEFAULT_PACK_ZH_MARKER,
     )
 }
 
@@ -166,4 +152,27 @@ fn read_pack_meta(
 fn write_marker(marker_path: &Path) -> AppResult<()> {
     fs::write(marker_path, b"1")?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn canonical_default_pack_has_expected_metadata_and_tutorial() {
+        let metadata = DEFAULT_PACK_DIR
+            .get_file("pack.json")
+            .expect("embedded pack.json");
+        let meta: EmbeddedPackMeta =
+            serde_json::from_slice(metadata.contents()).expect("valid pack metadata");
+        assert_eq!(meta.id, DEFAULT_PACK_ID);
+        assert_eq!(meta.name, DEFAULT_PACK_NAME);
+        assert_eq!(meta.version, "1.0.0");
+        assert!(DEFAULT_PACK_DIR
+            .get_file("guides/editing-and-source-control.md")
+            .is_some());
+        assert!(DEFAULT_PACK_DIR
+            .get_file("guides/publishing-and-messages.md")
+            .is_some());
+    }
 }

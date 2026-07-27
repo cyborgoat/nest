@@ -6,6 +6,9 @@ describe("query keys", () => {
     expect(queryKeys.messagesFor("unread").slice(0, 1)).toEqual(
       queryKeys.messages,
     );
+    expect(queryKeys.sourceControlRejections.slice(0, 1)).toEqual(
+      queryKeys.messages,
+    );
     expect(queryKeys.chatMessages("session-1").slice(0, 1)).toEqual(
       queryKeys.allChatMessages,
     );

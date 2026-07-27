@@ -7,6 +7,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Req,
   Res,
   StreamableFile,
@@ -54,11 +55,23 @@ export class AdminController {
   @Get('publish-requests') requests() {
     return this.publishing.listPending();
   }
+  @Get('publish-requests/history') history(
+    @Query('status') status?: string,
+    @Query('limit') limit?: string,
+    @Query('cursor') cursor?: string,
+  ) {
+    return this.publishing.listHistory(
+      status ?? 'all',
+      Number(limit ?? 50),
+      cursor,
+    );
+  }
   @Post('publish-requests/:id/approve') approve(
     @Req() req: Request,
     @Param('id') id: string,
+    @Body() body?: { note?: string },
   ) {
-    return this.publishing.approve(id, req.authUser!);
+    return this.publishing.approve(id, req.authUser!, body?.note);
   }
   @Post('publish-requests/:id/reject') reject(
     @Req() req: Request,

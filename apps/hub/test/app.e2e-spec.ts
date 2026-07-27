@@ -87,26 +87,26 @@ describe('Hub (e2e)', () => {
     const res = await request(app.getHttpServer()).get('/packs').expect(200);
     const packs = res.body as PackProject[];
     expect(Array.isArray(packs)).toBe(true);
-    expect(packs.length).toBeGreaterThan(0);
-    const cs = packs.find((p) => p.id === 'customer-support');
-    expect(cs).toBeDefined();
-    expect(cs!.latest_version).toBe('1.1.0');
-    expect(cs!.versions).toEqual(expect.arrayContaining(['1.0.0', '1.1.0']));
+    expect(packs).toHaveLength(1);
+    const gettingStarted = packs.find((p) => p.id === 'getting-started');
+    expect(gettingStarted).toBeDefined();
+    expect(gettingStarted!.latest_version).toBe('1.0.0');
+    expect(gettingStarted!.versions).toEqual(['1.0.0']);
   });
 
   it('/packs/:id/:version (GET)', async () => {
     const res = await request(app.getHttpServer())
-      .get('/packs/customer-support/1.0.0')
+      .get('/packs/getting-started/1.0.0')
       .expect(200);
     const release = res.body as PackRelease;
-    expect(release.id).toBe('customer-support');
+    expect(release.id).toBe('getting-started');
     expect(release.version).toBe('1.0.0');
-    expect(release.path).toBe('customer-support');
+    expect(release.path).toBe('getting-started');
   });
 
   it('/packs/:id/download (GET) latest', async () => {
     const res = await request(app.getHttpServer())
-      .get('/packs/customer-support/download')
+      .get('/packs/getting-started/download')
       .buffer(true)
       .parse((response, callback) => {
         const chunks: Buffer[] = [];
@@ -128,7 +128,7 @@ describe('Hub (e2e)', () => {
 
   it('/packs/:id/:version/download (GET)', async () => {
     const res = await request(app.getHttpServer())
-      .get('/packs/customer-support/1.0.0/download')
+      .get('/packs/getting-started/1.0.0/download')
       .buffer(true)
       .parse((response, callback) => {
         const chunks: Buffer[] = [];
@@ -139,7 +139,7 @@ describe('Hub (e2e)', () => {
       })
       .expect(200);
     expect(res.headers['content-disposition']).toContain(
-      'customer-support-1.0.0.zip',
+      'getting-started-1.0.0.zip',
     );
     expect(res.headers['content-length']).toMatch(/^\d+$/);
     expect(res.headers['x-content-sha256']).toMatch(/^[a-f0-9]{64}$/);
@@ -391,6 +391,7 @@ describe('Hub (e2e)', () => {
     await request(app.getHttpServer())
       .post(`/api/admin/publish-requests/${submission.body.id}/approve`)
       .set('Authorization', `Bearer ${adminLogin.body.access_token}`)
+      .send({ note: 'Documentation and validation checks passed.' })
       .expect(201);
     const reviewedMessages = await request(app.getHttpServer())
       .get('/api/messages?filter=unread')
@@ -941,6 +942,94 @@ describe('Hub (e2e)', () => {
         )
         .get('disposable-pack'),
     ).toBeDefined();
+  });
+
+  it('lists filtered review history with comments, identities, and cursors', async () => {
+    const rootLogin = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ id: 'root-admin', password: 'test-superuser-password' })
+      .expect(201);
+    const firstPage = await request(app.getHttpServer())
+      .get('/api/admin/publish-requests/history?status=all&limit=1')
+      .set('Authorization', `Bearer ${rootLogin.body.access_token}`)
+      .expect(200);
+    expect(firstPage.body.items).toHaveLength(1);
+    expect(firstPage.body.next_cursor).toEqual(expect.any(String));
+    const historyCursor = String(firstPage.body.next_cursor);
+    const secondPage = await request(app.getHttpServer())
+      .get(
+        `/api/admin/publish-requests/history?status=all&limit=1&cursor=${encodeURIComponent(historyCursor)}`,
+      )
+      .set('Authorization', `Bearer ${rootLogin.body.access_token}`)
+      .expect(200);
+    expect(secondPage.body.items[0].id).not.toBe(firstPage.body.items[0].id);
+
+    const approved = await request(app.getHttpServer())
+      .get('/api/admin/publish-requests/history?status=approved')
+      .set('Authorization', `Bearer ${rootLogin.body.access_token}`)
+      .expect(200);
+    expect(approved.body.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          pack_id: 'authored-pack',
+          status: 'approved',
+          submitter_id: 'pack-author',
+          reviewer_id: 'role-admin',
+          review_note: 'Documentation and validation checks passed.',
+        }),
+      ]),
+    );
+
+    const rejected = await request(app.getHttpServer())
+      .get('/api/admin/publish-requests/history?status=rejected')
+      .set('Authorization', `Bearer ${rootLogin.body.access_token}`)
+      .expect(200);
+    expect(rejected.body.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          pack_id: 'rejected-pack',
+          status: 'rejected',
+          submitter_id: 'pack-author',
+          reviewer_id: 'root-admin',
+          review_note: 'Add usage examples before publishing.',
+        }),
+      ]),
+    );
+    await request(app.getHttpServer())
+      .get('/api/admin/publish-requests/history?status=unknown')
+      .set('Authorization', `Bearer ${rootLogin.body.access_token}`)
+      .expect(400);
+  });
+
+  it('retains submitter identity snapshots after account deletion', async () => {
+    const rootLogin = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ id: 'root-admin', password: 'test-superuser-password' })
+      .expect(201);
+    const users = await request(app.getHttpServer())
+      .get('/api/admin/users')
+      .set('Authorization', `Bearer ${rootLogin.body.access_token}`)
+      .expect(200);
+    const author = users.body.find(
+      (user: { id: string }) => user.id === 'pack-author',
+    );
+    await request(app.getHttpServer())
+      .delete(`/api/admin/users/${author.uuid}`)
+      .set('Authorization', `Bearer ${rootLogin.body.access_token}`)
+      .expect(200);
+    const history = await request(app.getHttpServer())
+      .get('/api/admin/publish-requests/history?status=rejected')
+      .set('Authorization', `Bearer ${rootLogin.body.access_token}`)
+      .expect(200);
+    expect(history.body.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          pack_id: 'rejected-pack',
+          submitter_id: 'pack-author',
+          submitter_name: 'Pack Author',
+        }),
+      ]),
+    );
   });
 
   it('refreshes the managed superuser password from the environment', async () => {

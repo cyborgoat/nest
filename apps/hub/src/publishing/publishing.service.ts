@@ -16,7 +16,12 @@ import { AuditService } from '../database/audit.service';
 import { HubRuntimeConfig } from '../hub.config';
 import { MessagesService } from '../messages/messages.service';
 import { isValidSemVer } from '../packs/semver';
-import type { PendingPublishRequest, PublishRequestStatus } from '@nest/shared';
+import type {
+  AdminPublishHistoryPage,
+  AdminPublishRequest,
+  PendingPublishRequest,
+  PublishRequestStatus,
+} from '@nest/shared';
 
 const PACK_ID_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const now = () => new Date().toISOString();
@@ -46,12 +51,21 @@ type PublishRequestRow = {
   validation_json: string;
   review_note: string | null;
   reviewer_uuid: string | null;
+  submitter_id_snapshot: string | null;
+  submitter_name_snapshot: string | null;
+  reviewer_id_snapshot: string | null;
+  reviewer_name_snapshot: string | null;
   created_at: string;
   reviewed_at: string | null;
 };
 export type PublishRequestView = Omit<
   PublishRequestRow,
-  'staging_path' | 'submitter_uuid'
+  | 'staging_path'
+  | 'submitter_uuid'
+  | 'submitter_id_snapshot'
+  | 'submitter_name_snapshot'
+  | 'reviewer_id_snapshot'
+  | 'reviewer_name_snapshot'
 >;
 export type PendingRequestView = PendingPublishRequest;
 
@@ -120,8 +134,12 @@ export class PublishingService {
     const timestamp = now();
     db.transaction(() => {
       db.prepare(
-        `INSERT INTO publish_requests(id, pack_id, version, name, description, submitter_uuid, staging_path, checksum, status, validation_json, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+        `INSERT INTO publish_requests(
+          id, pack_id, version, name, description, submitter_uuid,
+          submitter_id_snapshot, submitter_name_snapshot, staging_path,
+          checksum, status, validation_json, created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
       ).run(
         requestId,
         pack.id,
@@ -129,6 +147,8 @@ export class PublishingService {
         pack.name,
         pack.description,
         user.uuid,
+        user.id,
+        user.name,
         stagingPath,
         checksum,
         JSON.stringify({ files: pack.files }),
@@ -168,9 +188,71 @@ export class PublishingService {
       .all() as PendingRequestView[];
   }
 
+  listHistory(
+    status = 'all',
+    requestedLimit = 50,
+    encodedCursor?: string,
+  ): AdminPublishHistoryPage {
+    if (!['all', 'approved', 'rejected'].includes(status))
+      throw new BadRequestException(
+        'status must be all, approved, or rejected',
+      );
+    const normalizedLimit =
+      Number.isSafeInteger(requestedLimit) && requestedLimit > 0
+        ? requestedLimit
+        : 50;
+    const limit = Math.min(normalizedLimit, 100);
+    const cursor = encodedCursor
+      ? this.decodeHistoryCursor(encodedCursor)
+      : null;
+    const conditions = ["r.status IN ('approved', 'rejected')"];
+    const params: (string | number)[] = [];
+    if (status !== 'all') {
+      conditions.push('r.status = ?');
+      params.push(status);
+    }
+    if (cursor) {
+      conditions.push(
+        '(r.reviewed_at < ? OR (r.reviewed_at = ? AND r.id < ?))',
+      );
+      params.push(cursor.reviewed_at, cursor.reviewed_at, cursor.id);
+    }
+    const rows = this.database.db
+      .prepare(
+        `SELECT
+          r.id, r.pack_id, r.version, r.name, r.description, r.status,
+          r.checksum, r.validation_json, r.review_note, r.created_at,
+          r.reviewed_at,
+          COALESCE(r.submitter_id_snapshot, submitter.login_id) AS submitter_id,
+          COALESCE(r.submitter_name_snapshot, submitter.name) AS submitter_name,
+          COALESCE(r.reviewer_id_snapshot, reviewer.login_id) AS reviewer_id,
+          COALESCE(r.reviewer_name_snapshot, reviewer.name) AS reviewer_name
+        FROM publish_requests r
+        LEFT JOIN users submitter ON submitter.uuid = r.submitter_uuid
+        LEFT JOIN users reviewer ON reviewer.uuid = r.reviewer_uuid
+        WHERE ${conditions.join(' AND ')}
+        ORDER BY r.reviewed_at DESC, r.id DESC
+        LIMIT ?`,
+      )
+      .all(...params, limit + 1) as AdminPublishRequest[];
+    const hasMore = rows.length > limit;
+    const items = rows.slice(0, limit);
+    const last = items.at(-1);
+    return {
+      items,
+      next_cursor:
+        hasMore && last?.reviewed_at
+          ? Buffer.from(
+              JSON.stringify({ reviewed_at: last.reviewed_at, id: last.id }),
+            ).toString('base64url')
+          : null,
+    };
+  }
+
   async approve(
     requestId: string,
     reviewer: AuthUser,
+    note?: string,
   ): Promise<PublishRequestView> {
     const request = this.requestRow(requestId);
     if (request.status !== 'pending')
@@ -239,9 +321,20 @@ export class PublishingService {
           );
         this.database.db
           .prepare(
-            "UPDATE publish_requests SET status = 'approved', reviewer_uuid = ?, reviewed_at = ? WHERE id = ?",
+            `UPDATE publish_requests
+             SET status = 'approved', review_note = ?, reviewer_uuid = ?,
+                 reviewer_id_snapshot = ?, reviewer_name_snapshot = ?,
+                 reviewed_at = ?
+             WHERE id = ?`,
           )
-          .run(reviewer.uuid, timestamp, requestId);
+          .run(
+            note?.trim() || null,
+            reviewer.uuid,
+            reviewer.id,
+            reviewer.name,
+            timestamp,
+            requestId,
+          );
         this.audit_log.record(
           reviewer,
           'publish.approve',
@@ -250,6 +343,7 @@ export class PublishingService {
           {
             pack_id: validated.id,
             version: validated.version,
+            note: note?.trim() || null,
           },
         );
         if (request.submitter_uuid) {
@@ -260,7 +354,9 @@ export class PublishingService {
             userUuid: request.submitter_uuid,
             kind: 'publish_approved',
             title: 'Knowledge pack published',
-            body: `${validated.name} ${validated.version} was approved and released to the Hub.`,
+            body: `${validated.name} ${validated.version} was approved and released to the Hub.${
+              note?.trim() ? ` Reviewer comment: ${note.trim()}` : ''
+            }`,
             packId: validated.id,
             publishRequestId: requestId,
             eventKey: `publish:${requestId}:approved`,
@@ -290,9 +386,20 @@ export class PublishingService {
     this.database.db.transaction(() => {
       this.database.db
         .prepare(
-          "UPDATE publish_requests SET status = 'rejected', review_note = ?, reviewer_uuid = ?, reviewed_at = ? WHERE id = ?",
+          `UPDATE publish_requests
+           SET status = 'rejected', review_note = ?, reviewer_uuid = ?,
+               reviewer_id_snapshot = ?, reviewer_name_snapshot = ?,
+               reviewed_at = ?
+           WHERE id = ?`,
         )
-        .run(note.trim(), reviewer.uuid, timestamp, requestId);
+        .run(
+          note.trim(),
+          reviewer.uuid,
+          reviewer.id,
+          reviewer.name,
+          timestamp,
+          requestId,
+        );
       this.audit_log.record(
         reviewer,
         'publish.reject',
@@ -367,6 +474,27 @@ export class PublishingService {
       created_at: row.created_at,
       reviewed_at: row.reviewed_at,
     };
+  }
+
+  private decodeHistoryCursor(encoded: string): {
+    reviewed_at: string;
+    id: string;
+  } {
+    try {
+      const parsed = JSON.parse(
+        Buffer.from(encoded, 'base64url').toString('utf8'),
+      ) as { reviewed_at?: unknown; id?: unknown };
+      if (
+        typeof parsed.reviewed_at !== 'string' ||
+        !parsed.reviewed_at ||
+        typeof parsed.id !== 'string' ||
+        !parsed.id
+      )
+        throw new Error('invalid cursor');
+      return { reviewed_at: parsed.reviewed_at, id: parsed.id };
+    } catch {
+      throw new BadRequestException('Invalid history cursor');
+    }
   }
 
   async getStagingZip(

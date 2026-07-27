@@ -10,6 +10,10 @@ export const queryKeys = {
   messages: ["hub-messages"] as const,
   messagesFor: (filter: "all" | "unread") =>
     ["hub-messages", filter] as const,
+  sourceControlRejections: [
+    "hub-messages",
+    "source-control-rejections",
+  ] as const,
   messageCount: ["hub-message-count"] as const,
   chatSessions: ["chat-sessions"] as const,
   chatMessages: (session_id: string) =>
