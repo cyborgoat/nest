@@ -128,6 +128,8 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
         submitter_name_snapshot TEXT,
         reviewer_id_snapshot TEXT,
         reviewer_name_snapshot TEXT,
+        base_version TEXT,
+        review_artifact_path TEXT,
         created_at TEXT NOT NULL,
         reviewed_at TEXT
       );
@@ -183,6 +185,8 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
       ['submitter_name_snapshot', 'TEXT'],
       ['reviewer_id_snapshot', 'TEXT'],
       ['reviewer_name_snapshot', 'TEXT'],
+      ['base_version', 'TEXT'],
+      ['review_artifact_path', 'TEXT'],
     ] as const;
     for (const [name, type] of additions) {
       if (!columns.has(name)) {

@@ -43,7 +43,7 @@ type PackRow = {
 type ReleaseRow = Omit<AdminRelease, 'yanked'> & { yanked: number };
 type GrantRow = AdminGrant;
 type MaintainerRow = AdminMaintainer & { pack_id: string };
-export type AdminPackView = AdminPack;
+type AdminPackView = AdminPack;
 
 export function latestInstallableVersion(
   releases: Pick<AdminRelease, 'version' | 'yanked'>[],

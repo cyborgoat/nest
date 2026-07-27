@@ -1,11 +1,7 @@
 import { useState } from "react";
-import {
-  useInfiniteQuery,
-  useMutation,
-  useQueryClient,
-} from "@tanstack/react-query";
-import * as DialogPrimitive from "@radix-ui/react-dialog";
-import { Check, Download, Eye, X } from "lucide-react";
+import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
+import { Download, FileDiff, MoreHorizontal } from "lucide-react";
 import type {
   AdminPublishHistoryPage,
   AdminPublishRequest,
@@ -14,12 +10,9 @@ import type {
 import {
   Badge,
   Button,
-  buttonClass,
   Card,
-  Dialog,
   Empty,
   ErrorBox,
-  InfoRow,
   RefreshButton,
   Select,
   Skeleton,
@@ -39,11 +32,6 @@ export function ReviewsPage() {
   const { reviews } = useAdminData();
   const [tab, setTab] = useState<ReviewTab>("queue");
   const [historyStatus, setHistoryStatus] = useState<HistoryStatus>("all");
-  const [historyDetail, setHistoryDetail] =
-    useState<AdminPublishRequest | null>(null);
-  const [reject, setReject] = useState<RequestItem | null>(null);
-  const [approveTarget, setApproveTarget] = useState<RequestItem | null>(null);
-  const [note, setNote] = useState("");
   const history = useInfiniteQuery({
     queryKey: adminQueryKeys.reviewHistoryFor(historyStatus),
     initialPageParam: "",
@@ -60,30 +48,7 @@ export function ReviewsPage() {
     getNextPageParam: (page) => page.next_cursor ?? undefined,
     enabled: tab === "history",
   });
-  const historyItems =
-    history.data?.pages.flatMap((page) => page.items) ?? [];
-
-  const review = useMutation({
-    mutationFn: ({
-      item,
-      action,
-    }: {
-      item: RequestItem;
-      action: "approve" | "reject";
-    }) =>
-      api(`/api/admin/publish-requests/${item.id}/${action}`, {
-        method: "POST",
-        body: JSON.stringify({ note: note.trim() || undefined }),
-      }),
-    onSuccess: () => {
-      setReject(null);
-      setApproveTarget(null);
-      setNote("");
-      void qc.invalidateQueries({ queryKey: adminQueryKeys.reviews });
-      void qc.invalidateQueries({ queryKey: adminQueryKeys.reviewHistory });
-      void qc.invalidateQueries({ queryKey: adminQueryKeys.packs });
-    },
-  });
+  const historyItems = history.data?.pages.flatMap((page) => page.items) ?? [];
 
   const refresh = () =>
     tab === "queue"
@@ -97,7 +62,7 @@ export function ReviewsPage() {
       <PageHeader
         eyebrow="Publishing"
         title="Publishing reviews"
-        description="Review incoming releases and inspect completed decisions."
+        description="Inspect every changed file before releasing knowledge to the Hub."
         actions={
           <RefreshButton
             onClick={() => void refresh()}
@@ -119,23 +84,11 @@ export function ReviewsPage() {
         </TabButton>
       </div>
 
-      {(reviews.error || history.error || review.error) && (
-        <ErrorBox error={reviews.error || history.error || review.error} />
+      {(reviews.error || history.error) && (
+        <ErrorBox error={reviews.error || history.error} />
       )}
       {tab === "queue" ? (
-        <Queue
-          reviews={reviews.data}
-          loading={reviews.isLoading}
-          reviewing={review.isPending}
-          onApprove={(item) => {
-            setNote("");
-            setApproveTarget(item);
-          }}
-          onReject={(item) => {
-            setNote("");
-            setReject(item);
-          }}
-        />
+        <Queue reviews={reviews.data} loading={reviews.isLoading} />
       ) : (
         <History
           items={historyItems}
@@ -143,89 +96,10 @@ export function ReviewsPage() {
           loading={history.isLoading}
           hasNextPage={history.hasNextPage}
           loadingMore={history.isFetchingNextPage}
-          onStatusChange={(value) =>
-            setHistoryStatus(value as HistoryStatus)
-          }
-          onView={setHistoryDetail}
+          onStatusChange={(value) => setHistoryStatus(value as HistoryStatus)}
           onLoadMore={() => void history.fetchNextPage()}
         />
       )}
-
-      <Dialog
-        open={Boolean(approveTarget)}
-        onOpenChange={(open) => {
-          if (!open) {
-            setApproveTarget(null);
-            setNote("");
-          }
-        }}
-        title="Approve and release"
-        description={`Release ${approveTarget?.pack_id ?? "this pack"}@${approveTarget?.version ?? ""} to every Hub user.`}
-      >
-        <label className="text-sm font-medium">
-          Reviewer comment <span className="font-normal text-muted-foreground">(optional)</span>
-        </label>
-        <textarea
-          className="input mt-2 min-h-24 resize-y"
-          value={note}
-          onChange={(event) => setNote(event.target.value)}
-          placeholder="Add context for this approval."
-        />
-        <div className="mt-5 flex justify-end gap-2">
-          <DialogPrimitive.Close asChild>
-            <Button variant="outline">Cancel</Button>
-          </DialogPrimitive.Close>
-          <Button
-            disabled={!approveTarget || review.isPending}
-            onClick={() =>
-              approveTarget &&
-              review.mutate({ item: approveTarget, action: "approve" })
-            }
-          >
-            <Check />
-            Approve & release
-          </Button>
-        </div>
-      </Dialog>
-
-      <Dialog
-        open={Boolean(reject)}
-        onOpenChange={(open) => {
-          if (!open) {
-            setReject(null);
-            setNote("");
-          }
-        }}
-        title="Reject publish request"
-        description={`Explain what ${reject?.submitter_name ?? "the publisher"} should change before resubmitting.`}
-      >
-        <label className="text-sm font-medium">Review comment</label>
-        <textarea
-          className="input mt-2 min-h-28 resize-y"
-          value={note}
-          onChange={(event) => setNote(event.target.value)}
-          autoFocus
-        />
-        <div className="mt-5 flex justify-end gap-2">
-          <DialogPrimitive.Close asChild>
-            <Button variant="outline">Cancel</Button>
-          </DialogPrimitive.Close>
-          <Button
-            variant="danger"
-            disabled={!note.trim() || review.isPending}
-            onClick={() =>
-              reject && review.mutate({ item: reject, action: "reject" })
-            }
-          >
-            Send rejection
-          </Button>
-        </div>
-      </Dialog>
-
-      <HistoryDetail
-        item={historyDetail}
-        onOpenChange={(open) => !open && setHistoryDetail(null)}
-      />
     </>
   );
 }
@@ -257,15 +131,9 @@ function TabButton({
 function Queue({
   reviews,
   loading,
-  reviewing,
-  onApprove,
-  onReject,
 }: {
   reviews: RequestItem[] | undefined;
   loading: boolean;
-  reviewing: boolean;
-  onApprove: (item: RequestItem) => void;
-  onReject: (item: RequestItem) => void;
 }) {
   if (loading)
     return (
@@ -291,32 +159,31 @@ function Queue({
             className="flex flex-col gap-3 px-5 py-4 lg:flex-row lg:items-center lg:justify-between"
           >
             <RequestSummary item={item} />
-            <div className="flex shrink-0 flex-wrap gap-2">
-              <a
-                className={buttonClass("outline", "sm")}
-                href={`/api/admin/publish-requests/${item.id}/download`}
-                download
+            <div className="flex shrink-0 items-center gap-2">
+              <Link
+                to="/reviews/$requestId"
+                params={{ requestId: item.id }}
+                className="inline-flex items-center gap-2 rounded-lg bg-primary px-3.5 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90"
               >
-                <Download />
-                Download
-              </a>
-              <Button
-                variant="danger"
-                size="sm"
-                disabled={reviewing}
-                onClick={() => onReject(item)}
-              >
-                <X />
-                Reject
-              </Button>
-              <Button
-                size="sm"
-                disabled={reviewing}
-                onClick={() => onApprove(item)}
-              >
-                <Check />
-                Approve & release
-              </Button>
+                <FileDiff className="size-4" />
+                Review changes
+              </Link>
+              <details className="group relative">
+                <summary className="grid size-9 list-none place-items-center rounded-lg border border-border bg-card text-muted-foreground shadow-sm hover:bg-muted">
+                  <MoreHorizontal className="size-4" />
+                  <span className="sr-only">More actions</span>
+                </summary>
+                <div className="absolute right-0 z-20 mt-1 min-w-44 rounded-lg border border-border bg-card p-1 shadow-xl">
+                  <a
+                    className="flex items-center gap-2 rounded-md px-3 py-2 text-sm hover:bg-muted"
+                    href={`/api/admin/publish-requests/${item.id}/download`}
+                    download
+                  >
+                    <Download className="size-4" />
+                    Download artifact
+                  </a>
+                </div>
+              </details>
             </div>
           </div>
         ))}
@@ -334,8 +201,9 @@ function RequestSummary({ item }: { item: RequestItem }) {
         <span className="text-sm text-muted-foreground">v{item.version}</span>
       </div>
       <p className="mt-1 text-xs text-muted-foreground">
-        Submitted by <strong className="text-foreground">{item.submitter_name}</strong>{" "}
-        · @{item.submitter_id} · {formatDate(item.created_at)} ·{" "}
+        Submitted by{" "}
+        <strong className="text-foreground">{item.submitter_name}</strong> · @
+        {item.submitter_id} · {formatDate(item.created_at)} ·{" "}
         <code className="rounded bg-muted px-1.5 py-0.5 text-[11px]">
           sha256 {item.checksum.slice(0, 14)}…
         </code>
@@ -354,7 +222,6 @@ function History({
   hasNextPage,
   loadingMore,
   onStatusChange,
-  onView,
   onLoadMore,
 }: {
   items: AdminPublishRequest[];
@@ -363,7 +230,6 @@ function History({
   hasNextPage: boolean;
   loadingMore: boolean;
   onStatusChange: (value: string) => void;
-  onView: (item: AdminPublishRequest) => void;
   onLoadMore: () => void;
 }) {
   return (
@@ -411,16 +277,23 @@ function History({
                   </div>
                   <p className="mt-1 text-xs text-muted-foreground">
                     Reviewed by {identity(item.reviewer_name, item.reviewer_id)}{" "}
-                    · {item.reviewed_at ? formatDate(item.reviewed_at) : "Unknown time"}
+                    ·{" "}
+                    {item.reviewed_at
+                      ? formatDate(item.reviewed_at)
+                      : "Unknown time"}
                   </p>
                   <p className="mt-1 line-clamp-1 text-sm text-muted-foreground">
                     {item.review_note || "No reviewer comment provided."}
                   </p>
                 </div>
-                <Button variant="outline" size="sm" onClick={() => onView(item)}>
-                  <Eye />
-                  View details
-                </Button>
+                <Link
+                  to="/reviews/$requestId"
+                  params={{ requestId: item.id }}
+                  className="inline-flex items-center gap-2 self-start rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs font-medium shadow-sm hover:bg-muted lg:self-auto"
+                >
+                  <FileDiff className="size-4" />
+                  View review
+                </Link>
               </div>
             ))}
           </div>
@@ -437,99 +310,8 @@ function History({
   );
 }
 
-function HistoryDetail({
-  item,
-  onOpenChange,
-}: {
-  item: AdminPublishRequest | null;
-  onOpenChange: (open: boolean) => void;
-}) {
-  const validation = parseValidation(item?.validation_json);
-  return (
-    <Dialog
-      open={Boolean(item)}
-      onOpenChange={onOpenChange}
-      title={item ? `${item.name} ${item.version}` : "Review details"}
-      description="Immutable metadata recorded for this publishing decision."
-    >
-      {item && (
-        <div className="space-y-5">
-          <div className="space-y-2 text-sm">
-            <InfoRow label="Decision">
-              <Badge tone={item.status === "approved" ? "green" : "red"}>
-                {item.status}
-              </Badge>
-            </InfoRow>
-            <InfoRow label="Pack ID">
-              <code>{item.pack_id}</code>
-            </InfoRow>
-            <InfoRow label="Request ID">
-              <code className="max-w-64 truncate">{item.id}</code>
-            </InfoRow>
-            <InfoRow label="Submitted by">
-              <span>{identity(item.submitter_name, item.submitter_id)}</span>
-            </InfoRow>
-            <InfoRow label="Reviewed by">
-              <span>{identity(item.reviewer_name, item.reviewer_id)}</span>
-            </InfoRow>
-            <InfoRow label="Submitted">
-              <span>{formatDate(item.created_at)}</span>
-            </InfoRow>
-            <InfoRow label="Reviewed">
-              <span>
-                {item.reviewed_at ? formatDate(item.reviewed_at) : "Unknown"}
-              </span>
-            </InfoRow>
-          </div>
-          <div>
-            <p className="text-sm font-medium">Reviewer comment</p>
-            <p className="mt-1 rounded-lg bg-muted p-3 text-sm text-muted-foreground">
-              {item.review_note || "No comment provided."}
-            </p>
-          </div>
-          <div>
-            <p className="text-sm font-medium">Description</p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {item.description || "No description provided."}
-            </p>
-          </div>
-          <div>
-            <p className="text-sm font-medium">Artifact checksum</p>
-            <code className="mt-1 block break-all rounded-lg bg-muted p-3 text-xs">
-              {item.checksum}
-            </code>
-          </div>
-          <div>
-            <p className="text-sm font-medium">
-              Validated files ({validation.files.length})
-            </p>
-            <div className="mt-1 max-h-40 overflow-auto rounded-lg bg-muted p-3 text-xs">
-              {validation.files.length
-                ? validation.files.map((file) => <div key={file}>{file}</div>)
-                : "No file list recorded."}
-            </div>
-          </div>
-        </div>
-      )}
-    </Dialog>
-  );
-}
-
 function identity(name: string | null, id: string | null) {
   if (!name && !id) return "Deleted user";
   if (!id) return name;
   return `${name ?? "Unknown user"} · @${id}`;
-}
-
-function parseValidation(raw: string | undefined): { files: string[] } {
-  try {
-    const parsed = JSON.parse(raw ?? "{}") as { files?: unknown };
-    return {
-      files: Array.isArray(parsed.files)
-        ? parsed.files.filter((file): file is string => typeof file === "string")
-        : [],
-    };
-  } catch {
-    return { files: [] };
-  }
 }

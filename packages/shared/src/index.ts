@@ -74,6 +74,69 @@ export type AdminPublishHistoryPage = {
   next_cursor: string | null;
 };
 
+export type PublishReviewFileStatus = "added" | "modified" | "deleted";
+export type PublishReviewFileKind = "text" | "image" | "binary";
+
+export type PublishReviewFile = {
+  path: string;
+  status: PublishReviewFileStatus;
+  kind: PublishReviewFileKind;
+  old_size: number | null;
+  new_size: number | null;
+  old_sha256: string | null;
+  new_sha256: string | null;
+  additions: number | null;
+  deletions: number | null;
+  inline_available: boolean;
+  inline_unavailable_reason: string | null;
+};
+
+export type PublishReviewSummary = {
+  changed_files: number;
+  added_files: number;
+  modified_files: number;
+  deleted_files: number;
+  additions: number;
+  deletions: number;
+};
+
+export type AdminPublishReviewDetail = AdminPublishRequest & {
+  base_version: string | null;
+  diff_available: boolean;
+  diff_unavailable_reason: string | null;
+  summary: PublishReviewSummary;
+  files: PublishReviewFile[];
+};
+
+export type PublishReviewDiffLine = {
+  type: "context" | "added" | "deleted";
+  old_line: number | null;
+  new_line: number | null;
+  content: string;
+};
+
+export type PublishReviewTextDiff = {
+  kind: "text";
+  path: string;
+  lines: PublishReviewDiffLine[];
+};
+
+export type PublishReviewImageDiff = {
+  kind: "image";
+  path: string;
+  old_available: boolean;
+  new_available: boolean;
+};
+
+export type PublishReviewBinaryDiff = {
+  kind: "binary";
+  path: string;
+  reason: string;
+};
+
+export type PublishReviewFileDetail =
+  PublishReviewTextDiff | PublishReviewImageDiff | PublishReviewBinaryDiff;
+
 export type PackPendingStatus = { pending: PublishRequest | null };
 
 export type HubMessageKind =

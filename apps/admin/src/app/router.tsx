@@ -7,6 +7,7 @@ import { AdminLayout } from "../layout/AdminLayout";
 import { DashboardPage } from "../pages/DashboardPage";
 import { PackDetailPage } from "../pages/PackDetailPage";
 import { PacksPage } from "../pages/PacksPage";
+import { ReviewDetailPage } from "../pages/ReviewDetailPage";
 import { ReviewsPage } from "../pages/ReviewsPage";
 import { UsersPage } from "../pages/UsersPage";
 
@@ -20,6 +21,11 @@ const reviewsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/reviews",
   component: ReviewsPage,
+});
+const reviewDetailRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/reviews/$requestId",
+  component: ReviewDetailPage,
 });
 const packsRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -41,6 +47,7 @@ export const router = createRouter({
   routeTree: rootRoute.addChildren([
     dashboardRoute,
     reviewsRoute,
+    reviewDetailRoute,
     packsRoute,
     packRoute,
     usersRoute,

@@ -5,6 +5,9 @@ export const adminQueryKeys = {
   reviews: ["reviews"] as const,
   reviewHistory: ["review-history"] as const,
   reviewHistoryFor: (status: string) => ["review-history", status] as const,
+  reviewDetail: (requestId: string) => ["review-detail", requestId] as const,
+  reviewFile: (requestId: string, path: string) =>
+    ["review-file", requestId, path] as const,
   packs: ["packs"] as const,
 };
 

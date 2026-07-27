@@ -2,10 +2,9 @@ import { ConfigService } from '@nestjs/config';
 import { Injectable } from '@nestjs/common';
 import * as path from 'path';
 
-export type HubCorsConfig =
-  { mode: 'all' } | { mode: 'origins'; origins: string[] };
+type HubCorsConfig = { mode: 'all' } | { mode: 'origins'; origins: string[] };
 
-export type HubConfig = {
+type HubConfig = {
   host: string;
   port: number;
   /** Absolute path to the pack registry root on disk. */

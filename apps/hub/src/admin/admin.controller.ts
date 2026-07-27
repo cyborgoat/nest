@@ -80,6 +80,37 @@ export class AdminController {
   ) {
     return this.publishing.reject(id, req.authUser!, body.note ?? '');
   }
+  @Get('publish-requests/:id/review') reviewDetail(@Param('id') id: string) {
+    return this.publishing.getAdminReviewDetail(id);
+  }
+  @Get('publish-requests/:id/review/file') reviewFile(
+    @Param('id') id: string,
+    @Query('path') filePath = '',
+  ) {
+    return this.publishing.getAdminReviewFile(id, filePath);
+  }
+  @Get('publish-requests/:id/review/image') async reviewImage(
+    @Param('id') id: string,
+    @Query('path') filePath: string,
+    @Query('side') side: string,
+    @Res() res: Response,
+  ) {
+    const image = await this.publishing.getAdminReviewImage(
+      id,
+      filePath ?? '',
+      side ?? '',
+    );
+    res.setHeader('Content-Type', image.contentType);
+    res.setHeader('Content-Length', String(image.buffer.length));
+    const filename = image.filename.replaceAll(/["\r\n]/g, '_');
+    res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader(
+      'Content-Security-Policy',
+      "sandbox; default-src 'none'; style-src 'unsafe-inline'",
+    );
+    res.send(image.buffer);
+  }
   @Get('publish-requests/:id/download') async download(
     @Param('id') id: string,
     @Res() res: Response,

@@ -59,6 +59,9 @@ Every `/api/admin/*` route requires role `admin` or `superuser`.
 | `DELETE` | `/api/admin/users/:uuid` | Delete an account according to role hierarchy |
 | `GET` | `/api/admin/publish-requests` | List pending submissions |
 | `GET` | `/api/admin/publish-requests/history` | Cursor-paginated approved/rejected history; filter with `status=all|approved|rejected` |
+| `GET` | `/api/admin/publish-requests/:id/review` | Review metadata, frozen base version, change totals, and changed-file list |
+| `GET` | `/api/admin/publish-requests/:id/review/file?path=…` | Unified text diff or image/binary review metadata for one changed file |
+| `GET` | `/api/admin/publish-requests/:id/review/image?path=…&side=old\|new` | Safely stream one side of a changed image |
 | `POST` | `/api/admin/publish-requests/:id/approve` | Publish the staged artifact with optional `{ "note": "…" }` |
 | `POST` | `/api/admin/publish-requests/:id/reject` | Reject with required `note` |
 | `GET` | `/api/admin/packs` | List projects, releases, and access grants |
@@ -73,6 +76,10 @@ Admins and the superuser have identical registry-management privileges. An admin
 The React operations console at `/admin` consumes these endpoints and requires an admin or superuser session.
 
 Reviewed request history retains request metadata, checksum, validation file
-list, submitter/reviewer identity snapshots, timestamps, and reviewer comments.
-Completed staging ZIPs are not retained; approved releases remain available
-through their normal release download route.
+list, submitter/reviewer identity snapshots, timestamps, reviewer comments, and
+derived browser-review artifacts. These artifacts contain compressed text sides,
+changed-image sides, and binary hashes relative to the base release frozen at
+submission. Completed staging ZIPs are not retained; approved releases remain
+available through their normal release download route. Reviews completed before
+browser diffs were introduced retain their metadata but report their diff as
+unavailable.

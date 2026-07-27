@@ -17,11 +17,14 @@ import { HubRuntimeConfig } from '../hub.config';
 import { MessagesService } from '../messages/messages.service';
 import { isValidSemVer } from '../packs/semver';
 import type {
+  AdminPublishReviewDetail,
   AdminPublishHistoryPage,
   AdminPublishRequest,
   PendingPublishRequest,
+  PublishReviewFileDetail,
   PublishRequestStatus,
 } from '@nest/shared';
+import { PublishReviewService } from './publish-review.service';
 
 const PACK_ID_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const now = () => new Date().toISOString();
@@ -55,10 +58,12 @@ type PublishRequestRow = {
   submitter_name_snapshot: string | null;
   reviewer_id_snapshot: string | null;
   reviewer_name_snapshot: string | null;
+  base_version: string | null;
+  review_artifact_path: string | null;
   created_at: string;
   reviewed_at: string | null;
 };
-export type PublishRequestView = Omit<
+type PublishRequestView = Omit<
   PublishRequestRow,
   | 'staging_path'
   | 'submitter_uuid'
@@ -66,8 +71,10 @@ export type PublishRequestView = Omit<
   | 'submitter_name_snapshot'
   | 'reviewer_id_snapshot'
   | 'reviewer_name_snapshot'
+  | 'base_version'
+  | 'review_artifact_path'
 >;
-export type PendingRequestView = PendingPublishRequest;
+type PendingRequestView = PendingPublishRequest;
 
 @Injectable()
 export class PublishingService {
@@ -76,6 +83,7 @@ export class PublishingService {
     private readonly config: HubRuntimeConfig,
     private readonly messages: MessagesService,
     private readonly audit_log: AuditService,
+    private readonly publishReview: PublishReviewService,
   ) {}
 
   async submit(
@@ -130,41 +138,65 @@ export class PublishingService {
     const requestId = randomUUID();
     const stagingPath = path.join(stagingRoot, `${requestId}.zip`);
     await fs.writeFile(stagingPath, file.buffer);
-    const checksum = createHash('sha256').update(file.buffer).digest('hex');
-    const timestamp = now();
-    db.transaction(() => {
-      db.prepare(
-        `INSERT INTO publish_requests(
-          id, pack_id, version, name, description, submitter_uuid,
-          submitter_id_snapshot, submitter_name_snapshot, staging_path,
-          checksum, status, validation_json, created_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
-      ).run(
+    let reviewArtifact: Awaited<ReturnType<PublishReviewService['build']>>;
+    try {
+      reviewArtifact = await this.publishReview.build(
         requestId,
         pack.id,
-        pack.version,
-        pack.name,
-        pack.description,
-        user.uuid,
-        user.id,
-        user.name,
-        stagingPath,
-        checksum,
-        JSON.stringify({ files: pack.files }),
-        timestamp,
+        file.buffer,
       );
-      this.messages.create({
-        userUuid: user.uuid,
-        kind: 'publish_submitted',
-        title: 'Publish request submitted',
-        body: `${pack.name} ${pack.version} is waiting for review.`,
-        packId: pack.id,
-        publishRequestId: requestId,
-        eventKey: `publish:${requestId}:submitted`,
-        createdAt: timestamp,
-      });
-    })();
+    } catch (error) {
+      await fs.unlink(stagingPath).catch(() => undefined);
+      throw error;
+    }
+    const checksum = createHash('sha256').update(file.buffer).digest('hex');
+    const timestamp = now();
+    try {
+      db.transaction(() => {
+        db.prepare(
+          `INSERT INTO publish_requests(
+            id, pack_id, version, name, description, submitter_uuid,
+            submitter_id_snapshot, submitter_name_snapshot, staging_path,
+            checksum, status, validation_json, base_version,
+            review_artifact_path, created_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)`,
+        ).run(
+          requestId,
+          pack.id,
+          pack.version,
+          pack.name,
+          pack.description,
+          user.uuid,
+          user.id,
+          user.name,
+          stagingPath,
+          checksum,
+          JSON.stringify({ files: pack.files }),
+          reviewArtifact.baseVersion,
+          reviewArtifact.artifactPath,
+          timestamp,
+        );
+        this.messages.create({
+          userUuid: user.uuid,
+          kind: 'publish_submitted',
+          title: 'Publish request submitted',
+          body: `${pack.name} ${pack.version} is waiting for review.`,
+          packId: pack.id,
+          publishRequestId: requestId,
+          eventKey: `publish:${requestId}:submitted`,
+          createdAt: timestamp,
+        });
+      })();
+    } catch (error) {
+      await Promise.all([
+        fs.unlink(stagingPath).catch(() => undefined),
+        fs
+          .rm(reviewArtifact.artifactPath, { recursive: true, force: true })
+          .catch(() => undefined),
+      ]);
+      throw error;
+    }
     return this.getRequest(requestId, user);
   }
 
@@ -507,6 +539,81 @@ export class PublishingService {
     return { buffer, filename: `${request.pack_id}-${request.version}.zip` };
   }
 
+  async getAdminReviewDetail(
+    requestId: string,
+  ): Promise<AdminPublishReviewDetail> {
+    const request = this.adminRequest(requestId);
+    let artifactPath = this.requestRow(requestId).review_artifact_path;
+    if (!artifactPath && request.status === 'pending') {
+      const row = this.requestRow(requestId);
+      const zipBytes = await fs.readFile(row.staging_path);
+      const built = await this.publishReview.build(
+        row.id,
+        row.pack_id,
+        zipBytes,
+        row.base_version ?? undefined,
+      );
+      this.database.db
+        .prepare(
+          `UPDATE publish_requests
+           SET base_version = ?, review_artifact_path = ?
+           WHERE id = ?`,
+        )
+        .run(built.baseVersion, built.artifactPath, requestId);
+      artifactPath = built.artifactPath;
+    }
+    if (!artifactPath) {
+      return {
+        ...request,
+        base_version: null,
+        diff_available: false,
+        diff_unavailable_reason:
+          'Diff unavailable for reviews completed before browser review was enabled.',
+        summary: emptyReviewSummary(),
+        files: [],
+      };
+    }
+    try {
+      const view = await this.publishReview.view(artifactPath);
+      return {
+        ...request,
+        base_version: view.baseVersion,
+        diff_available: true,
+        diff_unavailable_reason: null,
+        summary: view.summary,
+        files: view.files,
+      };
+    } catch {
+      return {
+        ...request,
+        base_version: this.requestRow(requestId).base_version,
+        diff_available: false,
+        diff_unavailable_reason: 'The stored review diff is unavailable.',
+        summary: emptyReviewSummary(),
+        files: [],
+      };
+    }
+  }
+
+  async getAdminReviewFile(
+    requestId: string,
+    filePath: string,
+  ): Promise<PublishReviewFileDetail> {
+    await this.getAdminReviewDetail(requestId);
+    const artifactPath = this.requestRow(requestId).review_artifact_path;
+    if (!artifactPath)
+      throw new NotFoundException('Review diff is unavailable');
+    return this.publishReview.fileDetail(artifactPath, filePath);
+  }
+
+  async getAdminReviewImage(requestId: string, filePath: string, side: string) {
+    await this.getAdminReviewDetail(requestId);
+    const artifactPath = this.requestRow(requestId).review_artifact_path;
+    if (!artifactPath)
+      throw new NotFoundException('Review diff is unavailable');
+    return this.publishReview.image(artifactPath, filePath, side);
+  }
+
   private validateZip(buffer: Buffer): ValidatedPack {
     let zip: AdmZip;
     try {
@@ -580,4 +687,36 @@ export class PublishingService {
     if (!row) throw new NotFoundException('Publish request not found');
     return row;
   }
+
+  private adminRequest(id: string): AdminPublishRequest {
+    const row = this.database.db
+      .prepare(
+        `SELECT
+          r.id, r.pack_id, r.version, r.name, r.description, r.status,
+          r.checksum, r.validation_json, r.review_note, r.created_at,
+          r.reviewed_at,
+          COALESCE(r.submitter_id_snapshot, submitter.login_id) AS submitter_id,
+          COALESCE(r.submitter_name_snapshot, submitter.name) AS submitter_name,
+          COALESCE(r.reviewer_id_snapshot, reviewer.login_id) AS reviewer_id,
+          COALESCE(r.reviewer_name_snapshot, reviewer.name) AS reviewer_name
+        FROM publish_requests r
+        LEFT JOIN users submitter ON submitter.uuid = r.submitter_uuid
+        LEFT JOIN users reviewer ON reviewer.uuid = r.reviewer_uuid
+        WHERE r.id = ?`,
+      )
+      .get(id) as AdminPublishRequest | undefined;
+    if (!row) throw new NotFoundException('Publish request not found');
+    return row;
+  }
+}
+
+function emptyReviewSummary() {
+  return {
+    changed_files: 0,
+    added_files: 0,
+    modified_files: 0,
+    deleted_files: 0,
+    additions: 0,
+    deletions: 0,
+  };
 }

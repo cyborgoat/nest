@@ -17,9 +17,15 @@ describe('Hub (e2e)', () => {
     process.env.HOST = process.env.HOST || '127.0.0.1';
     process.env.PORT = process.env.PORT || '8787';
     await fs.rm(registryPath, { recursive: true, force: true });
+    await fs.mkdir(path.join(registryPath, 'getting-started'), {
+      recursive: true,
+    });
     await fs.cp(
-      path.resolve(__dirname, '../../../examples/knowledge-packs'),
-      registryPath,
+      path.resolve(
+        __dirname,
+        '../../../examples/knowledge-packs/getting-started/1.0.0',
+      ),
+      path.join(registryPath, 'getting-started', '1.0.0'),
       { recursive: true },
     );
     process.env.REGISTRY_PATH = registryPath;
@@ -426,6 +432,122 @@ describe('Hub (e2e)', () => {
       .get('/packs/authored-pack')
       .set('Authorization', `Bearer ${authorLogin.body.access_token}`)
       .expect(200);
+  });
+
+  it('serves durable browser diffs for text, images, and rejected requests', async () => {
+    const adminLogin = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ id: 'root-admin', password: 'test-superuser-password' })
+      .expect(201);
+    const zip = new AdmZip();
+    zip.addFile(
+      'getting-started/pack.json',
+      Buffer.from(
+        JSON.stringify({
+          id: 'getting-started',
+          name: 'Getting Started',
+          description: 'Browser review fixture',
+          version: '1.0.1',
+        }),
+      ),
+    );
+    zip.addFile(
+      'getting-started/README.md',
+      Buffer.from('# Getting Started\n\nUpdated review content.\n'),
+    );
+    zip.addFile(
+      'getting-started/guides/new-review-guide.md',
+      Buffer.from('# New review guide\n'),
+    );
+    zip.addFile(
+      'getting-started/images/review.png',
+      Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    );
+    const submission = await request(app.getHttpServer())
+      .post('/api/publish-requests')
+      .set('Authorization', `Bearer ${adminLogin.body.access_token}`)
+      .attach('file', zip.toBuffer(), 'getting-started-1.0.1.zip')
+      .expect(201);
+
+    const reviewUrl = `/api/admin/publish-requests/${submission.body.id}/review`;
+    const detail = await request(app.getHttpServer())
+      .get(reviewUrl)
+      .set('Authorization', `Bearer ${adminLogin.body.access_token}`)
+      .expect(200);
+    expect(detail.body).toMatchObject({
+      base_version: '1.0.0',
+      diff_available: true,
+      status: 'pending',
+      summary: {
+        added_files: 2,
+        modified_files: 2,
+      },
+    });
+    expect(detail.body.summary.deleted_files).toBeGreaterThan(0);
+    expect(detail.body.files).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: 'README.md',
+          status: 'modified',
+          kind: 'text',
+        }),
+        expect.objectContaining({
+          path: 'guides/new-review-guide.md',
+          status: 'added',
+          kind: 'text',
+        }),
+        expect.objectContaining({
+          path: 'images/review.png',
+          status: 'added',
+          kind: 'image',
+        }),
+      ]),
+    );
+
+    const text = await request(app.getHttpServer())
+      .get(`${reviewUrl}/file`)
+      .query({ path: 'README.md' })
+      .set('Authorization', `Bearer ${adminLogin.body.access_token}`)
+      .expect(200);
+    expect(text.body.kind).toBe('text');
+    expect(text.body.lines).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'added',
+          content: 'Updated review content.',
+        }),
+      ]),
+    );
+    await request(app.getHttpServer())
+      .get(`${reviewUrl}/image`)
+      .query({ path: 'images/review.png', side: 'new' })
+      .set('Authorization', `Bearer ${adminLogin.body.access_token}`)
+      .expect('Content-Type', /image\/png/)
+      .expect(200);
+    await request(app.getHttpServer())
+      .get(`${reviewUrl}/file`)
+      .query({ path: '../pack.json' })
+      .set('Authorization', `Bearer ${adminLogin.body.access_token}`)
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .post(`/api/admin/publish-requests/${submission.body.id}/reject`)
+      .set('Authorization', `Bearer ${adminLogin.body.access_token}`)
+      .send({ note: 'Please revise the new guide.' })
+      .expect(201);
+    await request(app.getHttpServer())
+      .get(`/api/admin/publish-requests/${submission.body.id}/download`)
+      .set('Authorization', `Bearer ${adminLogin.body.access_token}`)
+      .expect(404);
+    await request(app.getHttpServer())
+      .get(reviewUrl)
+      .set('Authorization', `Bearer ${adminLogin.body.access_token}`)
+      .expect(200)
+      .expect(({ body }) => {
+        expect(body.status).toBe('rejected');
+        expect(body.diff_available).toBe(true);
+        expect(body.files.length).toBeGreaterThan(0);
+      });
   });
 
   it('notifies an author when a publish request is rejected', async () => {

@@ -19,14 +19,14 @@ import { isValidSemVer, sortSemVerDesc } from './semver';
 
 const PACK_ID_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
-export type PackZipArtifact = {
+type PackZipArtifact = {
   filePath: string;
   filename: string;
   sha256: string;
   byteLength: number;
 };
 
-export type CreatePackZipOptions = {
+type CreatePackZipOptions = {
   /** Administrative archive retrieval may include releases hidden from users. */
   allowYanked?: boolean;
 };
