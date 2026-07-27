@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { TreeNode } from "@nest/shared";
 import { Bell, Cloud, MessageSquare, Settings2 } from "lucide-react";
 import { useEffect, useRef, type ReactNode } from "react";
@@ -21,6 +21,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
+import { canEditPack } from "@/lib/pack-permissions";
 import { queryKeys } from "@/lib/query-keys";
 import { I18nProvider } from "@/lib/i18n";
 import { animatePanelSize, cancelPanelAnimation } from "@/lib/panel-animation";
@@ -95,6 +96,18 @@ export default function App() {
     queryKey: queryKeys.hubAuth,
     queryFn: api.hubAuthState,
   });
+  const editablePacks = (installedQuery.data ?? []).filter((pack) =>
+    canEditPack(pack, hubAuthQuery.data?.user ?? null),
+  );
+  const packStatusQueries = useQueries({
+    queries: editablePacks.map((pack) => ({
+      queryKey: queryKeys.packStatus(pack.pack_id),
+      queryFn: () => api.hubPackChangeStatus(pack.pack_id),
+    })),
+  });
+  const hasSourceControlChanges = packStatusQueries.some(
+    (query) => (query.data?.length ?? 0) > 0,
+  );
   const messageCountQuery = useQuery({
     queryKey: queryKeys.messageCount,
     queryFn: api.hubUnreadMessageCount,
@@ -277,7 +290,7 @@ export default function App() {
         </header>
 
         <div className="flex min-h-0 flex-1">
-          <ActivityBar />
+          <ActivityBar hasSourceControlChanges={hasSourceControlChanges} />
           <ResizablePanelGroup orientation="horizontal" className="h-full flex-1">
             <ResizablePanel
               id="library"

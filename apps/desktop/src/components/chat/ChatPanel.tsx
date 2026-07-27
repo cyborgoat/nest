@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ChatMessage, ChatSession, Citation } from "@nest/shared";
+import { MessageScroller } from "@shadcn/react/message-scroller";
 import { AlertCircle, ChevronDown, Lightbulb, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
@@ -17,7 +18,6 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { api, listenChatStream, type ChatStreamEvent } from "@/lib/api";
 import { appErrorMessage } from "@/lib/errors";
 import { queryKeys } from "@/lib/query-keys";
@@ -42,7 +42,6 @@ export function ChatPanel() {
   const [isSending, setIsSending] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
   const [isStopping, setIsStopping] = useState(false);
-  const bottomRef = useRef<HTMLDivElement>(null);
   const bootstrapped = useRef(false);
 
   const treeQuery = useQuery({
@@ -184,13 +183,6 @@ export function ChatPanel() {
   });
 
   useEffect(() => {
-    const id = requestAnimationFrame(() => {
-      bottomRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
-    });
-    return () => cancelAnimationFrame(id);
-  }, [messagesQuery.data, pendingUser, streaming, chatError, agentActivity]);
-
-  useEffect(() => {
     return () => {
       if (streamRaf.current != null) cancelAnimationFrame(streamRaf.current);
     };
@@ -308,10 +300,25 @@ export function ChatPanel() {
     <div className="flex h-full flex-col">
       <ChatSessionBar sessions={sessions} onResetChatUi={resetChatUi} />
 
-      <ScrollArea className="flex-1 min-h-0">
-        <div className="min-w-0 max-w-full space-y-4 overflow-x-hidden px-3 pt-3 pb-8">
+      <MessageScroller.Provider
+        key={sessionId ?? "no-session"}
+        autoScroll
+        defaultScrollPosition="last-anchor"
+        scrollPreviousItemPeek={48}
+      >
+        <MessageScroller.Root className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+          <MessageScroller.Viewport className="min-h-0 flex-1 overflow-y-auto outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-primary/20">
+            <MessageScroller.Content
+              aria-busy={isSending}
+              className="flex min-w-0 max-w-full flex-col gap-4 overflow-x-hidden px-3 pt-3 pb-8"
+            >
           {(messagesQuery.data ?? []).map((msg: ChatMessage) => (
-            <div key={msg.id} className="min-w-0 space-y-2">
+            <MessageScroller.Item
+              key={msg.id}
+              messageId={msg.id}
+              scrollAnchor={msg.role === "user"}
+              className="min-w-0 space-y-2 [content-visibility:auto] [contain-intrinsic-size:auto_80px]"
+            >
               {msg.role === "user" ? (
                 <UserBubble content={msg.content} mentions={mentionByName} />
               ) : (
@@ -333,65 +340,85 @@ export function ChatPanel() {
                   )}
                 </AssistantBubble>
               )}
-            </div>
+            </MessageScroller.Item>
           ))}
 
           {showOptimisticUser && (
-            <UserBubble content={pendingUser ?? ""} mentions={mentionByName} />
+            <MessageScroller.Item
+              messageId="pending-user"
+              scrollAnchor
+              className="min-w-0"
+            >
+              <UserBubble content={pendingUser ?? ""} mentions={mentionByName} />
+            </MessageScroller.Item>
           )}
 
           {isSending && (
-            <AssistantBubble>
-              {streaming ? (
-                <>
-                  {agentActivity?.kind === "reading" && (
-                    <AgentStatusIndicator activity={agentActivity} />
-                  )}
-                  <p className={cn(bubble, "text-sm leading-relaxed whitespace-pre-wrap")}>
-                    {streaming}
-                    <span
-                      aria-hidden
-                      className="ml-0.5 inline-block h-[1em] w-1.5 translate-y-[0.1em] animate-pulse rounded-sm bg-foreground/50 align-baseline"
+            <MessageScroller.Item
+              messageId="streaming-assistant"
+              className="min-w-0"
+            >
+              <AssistantBubble>
+                {streaming ? (
+                  <>
+                    {agentActivity?.kind === "reading" && (
+                      <AgentStatusIndicator activity={agentActivity} />
+                    )}
+                    <p className={cn(bubble, "text-sm leading-relaxed whitespace-pre-wrap")}>
+                      {streaming}
+                      <span
+                        aria-hidden
+                        className="ml-0.5 inline-block h-[1em] w-1.5 translate-y-[0.1em] animate-pulse rounded-sm bg-foreground/50 align-baseline"
+                      />
+                    </p>
+                    {streamThinking && (
+                      <ThinkingDisclosure content={streamThinking} isStreaming />
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <AgentStatusIndicator
+                      activity={agentActivity ?? { kind: "generating" }}
                     />
-                  </p>
-                  {streamThinking && (
-                    <ThinkingDisclosure content={streamThinking} isStreaming />
-                  )}
-                </>
-              ) : (
-                <>
-                  <AgentStatusIndicator
-                    activity={agentActivity ?? { kind: "generating" }}
-                  />
-                  {streamThinking && (
-                    <ThinkingDisclosure content={streamThinking} isStreaming />
-                  )}
-                </>
-              )}
-            </AssistantBubble>
+                    {streamThinking && (
+                      <ThinkingDisclosure content={streamThinking} isStreaming />
+                    )}
+                  </>
+                )}
+              </AssistantBubble>
+            </MessageScroller.Item>
           )}
 
           {chatError && (
-            <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-              <AlertCircle className="mt-0.5 size-4 shrink-0" />
-              <div className="min-w-0 flex-1">
-                <p className="font-medium">Chat failed</p>
-                <p className="mt-0.5 break-words text-xs opacity-90">{chatError}</p>
+            <MessageScroller.Item messageId="chat-error" className="min-w-0">
+              <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                <AlertCircle className="mt-0.5 size-4 shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <p className="font-medium">Chat failed</p>
+                  <p className="mt-0.5 break-words text-xs opacity-90">{chatError}</p>
+                </div>
+                <button
+                  type="button"
+                  className="shrink-0 text-destructive/70 hover:text-destructive"
+                  onClick={() => setChatError(null)}
+                  aria-label="Dismiss error"
+                >
+                  <X className="size-3.5" />
+                </button>
               </div>
-              <button
-                type="button"
-                className="shrink-0 text-destructive/70 hover:text-destructive"
-                onClick={() => setChatError(null)}
-                aria-label="Dismiss error"
-              >
-                <X className="size-3.5" />
-              </button>
-            </div>
+            </MessageScroller.Item>
           )}
-
-          <div ref={bottomRef} className="h-4" />
-        </div>
-      </ScrollArea>
+            </MessageScroller.Content>
+          </MessageScroller.Viewport>
+          <MessageScroller.Button
+            direction="end"
+            className="absolute bottom-3 left-1/2 z-10 inline-flex -translate-x-1/2 items-center gap-1 rounded-full border border-border bg-card/95 px-2.5 py-1 text-xs font-medium text-muted-foreground shadow-md backdrop-blur transition-[opacity,color] hover:text-foreground data-[active=false]:pointer-events-none data-[active=false]:opacity-0"
+          >
+            <ChevronDown className="size-3.5" />
+            Latest
+          </MessageScroller.Button>
+        </MessageScroller.Root>
+      </MessageScroller.Provider>
 
       <div className="shrink-0 px-3 pb-3 pt-4">
         <MentionComposer

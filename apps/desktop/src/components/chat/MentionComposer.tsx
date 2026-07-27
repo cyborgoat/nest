@@ -1,4 +1,4 @@
-import { FileText, Folder, Send, Square } from "lucide-react";
+import { FileText, Folder, Send, Square, X } from "lucide-react";
 import {
   useEffect,
   useMemo,
@@ -7,7 +7,6 @@ import {
   type KeyboardEvent,
 } from "react";
 import { Button } from "@/components/ui/button";
-import { renderWithMentions } from "@/components/chat/mention-pill";
 import { cn } from "@/lib/utils";
 
 export type MentionRef = {
@@ -40,16 +39,6 @@ export function MentionComposer({
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [highlight, setHighlight] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const mirrorRef = useRef<HTMLDivElement>(null);
-
-  // Only mentions the user actually accepted from the dropdown render as live
-  // pills — mirrors trySend's own matching semantics below, so a coincidental
-  // "@word" that happens to match an unrelated vault filename never renders
-  // as a pill while still typing.
-  const mentionMap = useMemo(
-    () => new Map(refs.map((r) => [r.name, r])),
-    [refs],
-  );
 
   const filtered = useMemo(() => {
     if (mentionQuery == null) return [];
@@ -94,8 +83,12 @@ export function MentionComposer({
     const before = value.slice(0, cursor);
     const at = before.lastIndexOf("@");
     if (at < 0) return;
-    const token = `@${c.name} `;
-    const nextText = before.slice(0, at) + token + value.slice(cursor);
+    const prefix = before.slice(0, at);
+    const suffix = value.slice(cursor);
+    const nextText =
+      prefix.endsWith(" ") && suffix.startsWith(" ")
+        ? prefix + suffix.slice(1)
+        : prefix + suffix;
     setText(nextText);
     setRefs((prev) =>
       prev.some((r) => r.path === c.path) ? prev : [...prev, c],
@@ -103,24 +96,26 @@ export function MentionComposer({
     setMentionQuery(null);
     requestAnimationFrame(() => {
       el?.focus();
-      const pos = at + token.length;
+      const pos = prefix.length;
       el?.setSelectionRange(pos, pos);
     });
   };
 
   const trySend = () => {
-    const trimmed = text.trim();
-    if (!trimmed || !canSend || isGenerating) return;
-    const focusPaths = refs
-      .filter((r) => trimmed.includes(`@${r.name}`))
-      .map((r) => r.path);
-    onSend(trimmed, focusPaths);
+    const body = text.trim();
+    if ((!body && refs.length === 0) || !canSend || isGenerating) return;
+    const mentionText = refs.map((ref) => `@${ref.name}`).join(" ");
+    const message = [mentionText, body].filter(Boolean).join(" ");
+    onSend(
+      message,
+      refs.map((ref) => ref.path),
+    );
     setText("");
     setRefs([]);
     setMentionQuery(null);
   };
 
-  const hasContent = text.trim().length > 0;
+  const hasContent = text.trim().length > 0 || refs.length > 0;
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.nativeEvent.isComposing || e.keyCode === 229) return;
@@ -165,27 +160,49 @@ export function MentionComposer({
     <div className="relative">
       <div
         className={cn(
-          "relative min-h-[72px] rounded-md border border-border bg-card px-2 pt-2 pb-9",
+          "relative min-h-[76px] rounded-lg border border-border bg-card px-2.5 pt-2.5 pb-10 shadow-sm transition-colors focus-within:border-primary/50 focus-within:ring-1 focus-within:ring-primary/15",
         )}
       >
-        <div
-          ref={mirrorRef}
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words px-2 pt-2 pb-9 pr-8 text-sm"
-        >
-          {renderWithMentions(text, mentionMap)}
-        </div>
+        {refs.length > 0 && (
+          <div className="mb-1.5 flex flex-wrap gap-1.5 pr-8">
+            {refs.map((ref) => (
+              <span
+                key={ref.path}
+                className="inline-flex h-6 max-w-full items-center gap-1 rounded-md border border-primary/15 bg-primary/[0.06] pl-2 pr-1 text-xs font-medium text-foreground"
+                title={ref.path}
+              >
+                {ref.kind === "folder" ? (
+                  <Folder className="size-3 shrink-0 text-accent-text" />
+                ) : (
+                  <FileText className="size-3 shrink-0 text-accent-text" />
+                )}
+                <span className="max-w-40 truncate">{ref.name}</span>
+                <button
+                  type="button"
+                  className="ml-0.5 rounded-sm p-0.5 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-foreground"
+                  aria-label={`Remove ${ref.name}`}
+                  onClick={() =>
+                    setRefs((current) =>
+                      current.filter((item) => item.path !== ref.path),
+                    )
+                  }
+                >
+                  <X className="size-3" />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
         <textarea
           ref={textareaRef}
           value={text}
           disabled={isGenerating}
           placeholder={placeholder}
           rows={2}
-          className="relative w-full resize-none bg-transparent pr-8 text-sm text-transparent caret-foreground outline-none placeholder:text-muted-foreground"
+          className="block w-full resize-none bg-transparent pr-8 text-sm leading-5 text-foreground outline-none placeholder:text-muted-foreground"
           onChange={(e) => {
             const value = e.target.value;
             setText(value);
-            setRefs((prev) => prev.filter((r) => value.includes(`@${r.name}`)));
             updateMentionFromText(value, e.target.selectionStart);
           }}
           onClick={(e) => {
@@ -201,12 +218,6 @@ export function MentionComposer({
             );
           }}
           onKeyDown={onKeyDown}
-          onScroll={(e) => {
-            if (mirrorRef.current) {
-              mirrorRef.current.scrollTop = e.currentTarget.scrollTop;
-              mirrorRef.current.scrollLeft = e.currentTarget.scrollLeft;
-            }
-          }}
         />
         {isGenerating ? (
           <Button

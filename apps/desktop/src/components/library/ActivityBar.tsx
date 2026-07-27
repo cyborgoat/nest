@@ -17,7 +17,11 @@ const ITEMS: {
   { view: "source-control", icon: GitBranch, label: "Source Control" },
 ];
 
-export function ActivityBar() {
+export function ActivityBar({
+  hasSourceControlChanges,
+}: {
+  hasSourceControlChanges: boolean;
+}) {
   const activeView = useUiStore((s) => s.activitySidebarView);
   const setActiveView = useUiStore((s) => s.setActivitySidebarView);
   const sidebarOpen = useUiStore((s) => s.sidebarOpen);
@@ -27,6 +31,7 @@ export function ActivityBar() {
     <nav className="flex w-11 shrink-0 flex-col items-center gap-1 border-r border-border bg-sidebar/60 py-2">
       {ITEMS.map(({ view, icon: Icon, label }) => {
         const isOpenAndActive = sidebarOpen && activeView === view;
+        const showDot = view === "source-control" && hasSourceControlChanges;
         return (
           <Tooltip key={view}>
             <TooltipTrigger asChild>
@@ -49,7 +54,12 @@ export function ActivityBar() {
                   isOpenAndActive && "bg-muted text-foreground",
                 )}
               >
-                <Icon className="size-4" />
+                <span className="relative inline-flex">
+                  <Icon className="size-4" />
+                  {showDot ? (
+                    <span className="absolute -right-0.5 -top-0.5 block size-1.5 rounded-full bg-amber-500 ring-1 ring-background" />
+                  ) : null}
+                </span>
               </Button>
             </TooltipTrigger>
             <TooltipContent side="right">{label}</TooltipContent>

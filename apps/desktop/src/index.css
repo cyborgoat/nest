@@ -206,6 +206,23 @@
     "Noto Color Emoji";
 }
 
+/* Source and rich editing share one surface size so switching modes does not
+   resize the document window. Milkdown adds two wrappers around ProseMirror,
+   so carry the same minimum height through those wrappers as well. */
+.markdown-editor-surface {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  min-height: 60vh;
+}
+
+.markdown-editor-surface .milkdown,
+.markdown-editor-surface .ProseMirror {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: inherit;
+}
+
 /* WKWebView/WebKit draws a default blue focus ring on any contenteditable
    element — Milkdown's ProseMirror root is one, so editing showed a stray
    blue outline around the whole document. */

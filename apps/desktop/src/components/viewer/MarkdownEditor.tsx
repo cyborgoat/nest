@@ -44,7 +44,7 @@ function MilkdownEditorCore({
       .use(listener),
   );
   return (
-    <div className="markdown-body">
+    <div className="markdown-body markdown-editor-surface">
       <Milkdown />
     </div>
   );
@@ -71,11 +71,22 @@ export function MarkdownEditor({ path }: { path: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (fileQuery.data != null && markdown === null) {
+    if (fileQuery.data == null) return;
+
+    if (markdown === null) {
+      setMarkdown(fileQuery.data);
+      savedRef.current = fileQuery.data;
+      return;
+    }
+
+    // File mutations such as a Source Control discard refresh this query.
+    // Adopt the new persisted content when the buffer is clean, but never
+    // overwrite unsaved typing during an incidental query refetch.
+    if (!dirty && fileQuery.data !== savedRef.current) {
       setMarkdown(fileQuery.data);
       savedRef.current = fileQuery.data;
     }
-  }, [fileQuery.data, markdown]);
+  }, [fileQuery.data, markdown, dirty]);
 
   // Folder name and pack_id are the same string by convention, but resolve
   // through the installed-packs registry rather than assuming it (matching
@@ -213,7 +224,7 @@ export function MarkdownEditor({ path }: { path: string }) {
               value={markdown}
               onChange={(e) => updateMarkdown(e.target.value)}
               spellCheck={false}
-              className="min-h-[60vh] w-full resize-none border-none bg-transparent font-mono text-sm outline-none"
+              className="markdown-editor-surface block resize-none border-none bg-transparent font-mono text-sm outline-none"
             />
           )}
         </div>

@@ -85,10 +85,10 @@ function PackChanges({
     mutationFn: (change: FileStatus) =>
       api.hubPackDiscardFile(pack.pack_id, change.path),
     onSuccess: (_data, change) => {
+      setDirty(change.path, false);
       if (change.status === "new") {
         clearPathsUnder(change.path);
         setEditing(change.path, false);
-        setDirty(change.path, false);
       } else {
         closeMainTab(diffTabId(pack.pack_id, change.path));
       }
