@@ -66,7 +66,9 @@ export function DashboardPage() {
         <Card>
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="font-serif text-xl">Review queue</h2>
+              <h2 className="text-xl font-semibold tracking-tight">
+                Review queue
+              </h2>
               <p className="text-sm text-muted-foreground">
                 Pending community submissions.
               </p>
@@ -103,7 +105,9 @@ export function DashboardPage() {
           </div>
         </Card>
         <Card>
-          <h2 className="font-serif text-xl">Access posture</h2>
+          <h2 className="text-xl font-semibold tracking-tight">
+            Access posture
+          </h2>
           <p className="mt-1 text-sm text-muted-foreground">
             {users.data?.length ?? 0} registered users
           </p>

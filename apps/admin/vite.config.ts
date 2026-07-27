@@ -17,11 +17,7 @@ export default defineConfig({
             "@tanstack/react-router",
             "@tanstack/react-table",
           ],
-          radix: [
-            "@radix-ui/react-dialog",
-            "@radix-ui/react-dropdown-menu",
-            "@radix-ui/react-select",
-          ],
+          radix: ["@radix-ui/react-dialog", "@radix-ui/react-select"],
         },
       },
     },

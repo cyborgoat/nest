@@ -33,9 +33,12 @@
 }
 
 @theme inline {
-  --font-sans: "Source Sans 3", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
-  --font-serif: "Source Serif 4", "Georgia", serif;
-  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --font-sans:
+    "Inter Variable", "Inter", "Helvetica Neue", Helvetica, Arial,
+    ui-sans-serif, system-ui, sans-serif;
+  --font-mono:
+    ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono",
+    monospace;
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);

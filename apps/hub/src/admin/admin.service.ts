@@ -23,6 +23,7 @@ import {
   isAssignableRole,
 } from '../auth/access-policy';
 import { HubRuntimeConfig } from '../hub.config';
+import { sortSemVerDesc } from '../packs/semver';
 
 const now = () => new Date().toISOString();
 export type PackPatch = {
@@ -43,6 +44,18 @@ type ReleaseRow = Omit<AdminRelease, 'yanked'> & { yanked: number };
 type GrantRow = AdminGrant;
 type MaintainerRow = AdminMaintainer & { pack_id: string };
 export type AdminPackView = AdminPack;
+
+export function latestInstallableVersion(
+  releases: Pick<AdminRelease, 'version' | 'yanked'>[],
+): string | null {
+  return (
+    sortSemVerDesc(
+      releases
+        .filter((release) => !release.yanked)
+        .map((release) => release.version),
+    )[0] ?? null
+  );
+}
 
 @Injectable()
 export class AdminService {
@@ -152,17 +165,21 @@ export class AdminService {
         `SELECT m.pack_id, u.uuid, u.login_id AS id, u.name FROM pack_maintainers m JOIN users u ON u.uuid = m.user_uuid`,
       )
       .all() as MaintainerRow[];
-    return packs.map((pack) => ({
-      ...pack,
-      archived: pack.archived === 1,
-      releases: releases
+    return packs.map((pack) => {
+      const packReleases = releases
         .filter((r) => r.pack_id === pack.id)
-        .map((r) => ({ ...r, yanked: r.yanked === 1 })),
-      grants: grants.filter((g) => g.pack_id === pack.id),
-      maintainers: maintainers
-        .filter((m) => m.pack_id === pack.id)
-        .map(({ uuid, id, name }) => ({ uuid, id, name })),
-    }));
+        .map((r) => ({ ...r, yanked: r.yanked === 1 }));
+      return {
+        ...pack,
+        archived: pack.archived === 1,
+        latest_version: latestInstallableVersion(packReleases),
+        releases: packReleases,
+        grants: grants.filter((g) => g.pack_id === pack.id),
+        maintainers: maintainers
+          .filter((m) => m.pack_id === pack.id)
+          .map(({ uuid, id, name }) => ({ uuid, id, name })),
+      };
+    });
   }
 
   updatePack(actor: AuthUser, id: string, patch: PackPatch): AdminPackView {

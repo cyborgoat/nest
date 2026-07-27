@@ -103,6 +103,8 @@ export type AdminPack = {
   id: string;
   name: string;
   description: string;
+  /** Highest non-yanked SemVer release, or null when none is installable. */
+  latest_version: string | null;
   visibility: PackVisibility;
   archived: boolean;
   created_at: string;

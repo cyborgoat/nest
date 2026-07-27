@@ -26,6 +26,11 @@ export type PackZipArtifact = {
   byteLength: number;
 };
 
+export type CreatePackZipOptions = {
+  /** Administrative archive retrieval may include releases hidden from users. */
+  allowYanked?: boolean;
+};
+
 type RawPackJson = {
   id?: string;
   name?: string;
@@ -323,12 +328,13 @@ export class PacksService implements OnModuleInit {
     packId: string,
     version?: string,
     user?: AuthUser,
+    options: CreatePackZipOptions = {},
   ): Promise<PackZipArtifact> {
     const started = Date.now();
     let release: PackRelease;
     if (version) {
       release = await this.getRelease(packId, version, user);
-      if (release.yanked) {
+      if (release.yanked && !options.allowYanked) {
         throw new NotFoundException(
           `Pack version yanked: ${packId}@${version}`,
         );

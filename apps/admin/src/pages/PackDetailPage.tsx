@@ -1,11 +1,10 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { Archive, Check, Eye, EyeOff, Trash2 } from "lucide-react";
+import { Archive, Check, Download, Eye, EyeOff, Trash2 } from "lucide-react";
 import type { PackVisibility } from "@nest/shared";
 import { Breadcrumbs } from "../components/Breadcrumbs";
 import { DeleteReleaseDialog } from "../components/DeleteReleaseDialog";
-import { PackActionsMenu } from "../components/PackActionsMenu";
 import { UserMultiPicker } from "../components/UserMultiPicker";
 import {
   Badge,
@@ -17,6 +16,7 @@ import {
   RefreshButton,
   Select,
   Skeleton,
+  buttonClass,
   formatDate,
 } from "../components/ui";
 import { useApi } from "../app/contexts";
@@ -41,15 +41,17 @@ export function PackDetailPage() {
   const releaseAndAccess = useMutation({
     mutationFn: ({ url, body }: { url: string; body: unknown }) =>
       api(url, { method: "POST", body: JSON.stringify(body) }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: adminQueryKeys.packs }),
+    onSuccess: () =>
+      void qc.invalidateQueries({ queryKey: adminQueryKeys.packs }),
   });
   const update = useMutation({
-    mutationFn: (body: { visibility?: PackVisibility }) =>
+    mutationFn: (body: { visibility?: PackVisibility; archived?: boolean }) =>
       api(`/api/admin/packs/${packId}`, {
         method: "PATCH",
         body: JSON.stringify(body),
       }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: adminQueryKeys.packs }),
+    onSuccess: () =>
+      void qc.invalidateQueries({ queryKey: adminQueryKeys.packs }),
   });
   const removeRelease = useMutation({
     mutationFn: (target: { version: string; isLast: boolean }) =>
@@ -70,7 +72,10 @@ export function PackDetailPage() {
     return (
       <>
         <Breadcrumbs
-          items={[{ label: "Knowledge packs", to: "/packs" }, { label: packId }]}
+          items={[
+            { label: "Knowledge packs", to: "/packs" },
+            { label: packId },
+          ]}
         />
         {packs.error && <ErrorBox error={packs.error} />}
         {packs.isLoading ? (
@@ -98,25 +103,41 @@ export function PackDetailPage() {
   return (
     <>
       <Breadcrumbs
-        items={[{ label: "Knowledge packs", to: "/packs" }, { label: pack.name }]}
+        items={[
+          { label: "Knowledge packs", to: "/packs" },
+          { label: pack.name },
+        ]}
       />
       <PageHeader
         eyebrow="Knowledge pack"
         title={pack.name}
         description={`${pack.id} · ${pack.releases.length} published release${pack.releases.length === 1 ? "" : "s"}`}
         actions={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
             <RefreshButton
               onClick={() =>
                 qc.invalidateQueries({ queryKey: adminQueryKeys.packs })
               }
               busy={packs.isFetching}
             />
-            <PackActionsMenu
-              pack={pack}
-              hideViewDetails
-              triggerLabel="Pack actions"
-            />
+            {pack.latest_version && (
+              <a
+                href={`/api/admin/packs/${encodeURIComponent(pack.id)}/releases/${encodeURIComponent(pack.latest_version)}/download`}
+                download
+                className={buttonClass("outline")}
+              >
+                <Download />
+                Download v{pack.latest_version}
+              </a>
+            )}
+            <Button
+              variant="outline"
+              disabled={update.isPending}
+              onClick={() => update.mutate({ archived: !pack.archived })}
+            >
+              <Archive />
+              {pack.archived ? "Restore pack" : "Archive pack"}
+            </Button>
           </div>
         }
       />
@@ -130,7 +151,9 @@ export function PackDetailPage() {
           <Card>
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <h2 className="font-serif text-xl">Published versions</h2>
+                <h2 className="text-xl font-semibold tracking-tight">
+                  Published versions
+                </h2>
                 <p className="text-sm text-muted-foreground">
                   Yank a release to remove it from discovery without deleting
                   its history.
@@ -145,17 +168,34 @@ export function PackDetailPage() {
               {pack.releases.map((release) => (
                 <div
                   key={release.version}
-                  className="flex items-center justify-between gap-4 py-3"
+                  className="flex flex-wrap items-center justify-between gap-4 py-3"
                 >
-                  <div>
-                    <p className="font-mono text-sm font-medium">
-                      v{release.version}
-                    </p>
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="font-mono text-sm font-medium">
+                        v{release.version}
+                      </p>
+                      {release.version === pack.latest_version ? (
+                        <Badge tone="green">Latest</Badge>
+                      ) : release.yanked ? (
+                        <Badge tone="amber">Yanked</Badge>
+                      ) : (
+                        <Badge tone="stone">Available</Badge>
+                      )}
+                    </div>
                     <p className="text-xs text-muted-foreground">
                       Published {formatDate(release.published_at)}
                     </p>
                   </div>
-                  <div className="flex shrink-0 gap-2">
+                  <div className="flex shrink-0 flex-wrap justify-end gap-2">
+                    <a
+                      href={`/api/admin/packs/${encodeURIComponent(pack.id)}/releases/${encodeURIComponent(release.version)}/download`}
+                      download
+                      className={buttonClass("outline", "sm")}
+                    >
+                      <Download />
+                      Download
+                    </a>
                     <Button
                       variant="outline"
                       size="sm"
@@ -191,7 +231,9 @@ export function PackDetailPage() {
             </div>
           </Card>
           <Card>
-            <h2 className="font-serif text-xl">Description</h2>
+            <h2 className="text-xl font-semibold tracking-tight">
+              Description
+            </h2>
             <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
               {pack.description || "No description provided."}
             </p>
@@ -199,7 +241,9 @@ export function PackDetailPage() {
         </div>
         <div className="space-y-5">
           <Card>
-            <h2 className="font-serif text-xl">Access &amp; permissions</h2>
+            <h2 className="text-xl font-semibold tracking-tight">
+              Access &amp; permissions
+            </h2>
             <div className="mt-4 space-y-4">
               <Field label="Visibility">
                 <Select
@@ -242,17 +286,18 @@ export function PackDetailPage() {
             </div>
           </Card>
           <Card>
-            <h2 className="font-serif text-xl">Allowed users</h2>
+            <h2 className="text-xl font-semibold tracking-tight">
+              Allowed users
+            </h2>
             <p className="mt-1 text-xs text-muted-foreground">
               Only selected users and administrators can access a restricted
               pack.
             </p>
             {pack.visibility === "public" ? (
               <div className="mt-4 rounded-lg border border-dashed border-border bg-muted p-4 text-sm text-muted-foreground">
-                This pack is{" "}
-                <strong className="text-foreground">public</strong> — every
-                signed-in user can already access it, so individual grants
-                don't apply. Set Visibility above to{" "}
+                This pack is <strong className="text-foreground">public</strong>{" "}
+                — every signed-in user can already access it, so individual
+                grants don't apply. Set Visibility above to{" "}
                 <strong className="text-foreground">Restricted</strong> to
                 manage per-user access.
               </div>

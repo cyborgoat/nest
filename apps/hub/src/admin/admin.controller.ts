@@ -3,11 +3,13 @@ import {
   Controller,
   Delete,
   Get,
+  Logger,
   Param,
   Patch,
   Post,
   Req,
   Res,
+  StreamableFile,
   UploadedFile,
   UseGuards,
   UseInterceptors,
@@ -16,6 +18,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import type { Request, Response } from 'express';
 import { RegistryAdminGuard } from '../auth/auth.guard';
 import type { UserRole } from '../auth/auth.types';
+import { PacksService } from '../packs/packs.service';
 import {
   PublishingService,
   type UploadedPackFile,
@@ -25,9 +28,12 @@ import { AdminService, type PackPatch } from './admin.service';
 @Controller('api/admin')
 @UseGuards(RegistryAdminGuard)
 export class AdminController {
+  private readonly logger = new Logger(AdminController.name);
+
   constructor(
     private readonly admin: AdminService,
     private readonly publishing: PublishingService,
+    private readonly packsService: PacksService,
   ) {}
   @Get('users') users() {
     return this.admin.listUsers();
@@ -109,6 +115,42 @@ export class AdminController {
     @Body() body: { yanked: boolean },
   ) {
     return this.admin.setYanked(req.authUser!, id, version, body.yanked);
+  }
+  @Get('packs/:id/releases/:version/download')
+  async downloadRelease(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Param('version') version: string,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const artifact = await this.packsService.createPackZip(
+      id,
+      version,
+      req.authUser,
+      { allowYanked: true },
+    );
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${artifact.filename}"`,
+    );
+    res.setHeader('Content-Length', String(artifact.byteLength));
+    res.setHeader('X-Content-SHA256', artifact.sha256);
+
+    const stream = this.packsService.openZipStream(artifact.filePath);
+    const cleanup = () => {
+      void this.packsService.cleanupZipFile(artifact.filePath);
+    };
+    stream.on('close', cleanup);
+    stream.on('error', (error) => {
+      this.logger.error(
+        `Admin ZIP stream error for ${artifact.filename}: ${error.message}`,
+      );
+      cleanup();
+    });
+    res.on('close', cleanup);
+
+    return new StreamableFile(stream);
   }
   @Delete('packs/:id/releases/:version') removeRelease(
     @Req() req: Request,

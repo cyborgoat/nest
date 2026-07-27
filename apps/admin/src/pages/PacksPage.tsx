@@ -1,34 +1,52 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import type { ColumnDef } from "@tanstack/react-table";
 import {
-  Archive,
-  Check,
+  ChevronRight,
   Eye,
   EyeOff,
   Package,
   Search,
   Upload,
 } from "lucide-react";
-import type { AdminPack as Pack } from "@nest/shared";
-import { Metric } from "../components/Metric";
-import { PackActionsMenu } from "../components/PackActionsMenu";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "../components/InputGroup";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "../components/Item";
 import { UploadPackDialog } from "../components/UploadPackDialog";
 import {
   Badge,
   Button,
   Card,
-  DataTable,
+  Empty,
   ErrorBox,
   RefreshButton,
+  Skeleton,
 } from "../components/ui";
 import { useApi } from "../app/contexts";
 import { adminQueryKeys } from "../lib/api";
 import { useAdminData } from "../lib/hooks";
+import { cn } from "../lib/cn";
 import { PageHeader } from "../layout/PageHeader";
 
 type StatusFilter = "all" | "active" | "archived" | "restricted";
+
+const FILTER_LABELS: Record<StatusFilter, string> = {
+  all: "All",
+  active: "Active",
+  restricted: "Restricted",
+  archived: "Archived",
+};
 
 export function PacksPage() {
   const api = useApi();
@@ -54,105 +72,35 @@ export function PacksPage() {
     const all = packs.data ?? [];
     return {
       all: all.length,
-      active: all.filter((p) => !p.archived).length,
-      archived: all.filter((p) => p.archived).length,
-      restricted: all.filter((p) => p.visibility === "restricted").length,
+      active: all.filter((pack) => !pack.archived).length,
+      archived: all.filter((pack) => pack.archived).length,
+      restricted: all.filter((pack) => pack.visibility === "restricted").length,
     };
   }, [packs.data]);
 
+  const normalizedSearch = search.trim().toLowerCase();
   const shown = (packs.data ?? [])
     .filter((pack) =>
-      `${pack.id} ${pack.name} ${pack.description}`
+      `${pack.id} ${pack.name} ${pack.description} ${pack.maintainers
+        .map((maintainer) => maintainer.name)
+        .join(" ")}`
         .toLowerCase()
-        .includes(search.toLowerCase()),
+        .includes(normalizedSearch),
     )
     .filter((pack) => {
       if (statusFilter === "active") return !pack.archived;
       if (statusFilter === "archived") return pack.archived;
-      if (statusFilter === "restricted") return pack.visibility === "restricted";
+      if (statusFilter === "restricted")
+        return pack.visibility === "restricted";
       return true;
     });
 
-  const columns = useMemo<ColumnDef<Pack>[]>(
-    () => [
-      {
-        accessorKey: "name",
-        header: "Pack",
-        cell: ({ row }) => (
-          <div>
-            <Link
-              to="/packs/$packId"
-              params={{ packId: row.original.id }}
-              className="font-medium text-primary hover:underline"
-            >
-              {row.original.name}
-            </Link>
-            <p className="text-xs text-muted-foreground">{row.original.id}</p>
-          </div>
-        ),
-      },
-      {
-        id: "maintainers",
-        header: "Maintainer",
-        cell: ({ row }) => {
-          const [first, ...rest] = row.original.maintainers;
-          return (
-            <span className="text-sm">
-              {first
-                ? rest.length > 0
-                  ? `${first.name} +${rest.length}`
-                  : first.name
-                : "Unassigned"}
-            </span>
-          );
-        },
-      },
-      {
-        accessorKey: "visibility",
-        header: "Visibility",
-        cell: ({ row }) => (
-          <Badge
-            tone={row.original.visibility === "restricted" ? "amber" : "green"}
-          >
-            {row.original.visibility === "restricted" ? <EyeOff /> : <Eye />}
-            {row.original.visibility}
-          </Badge>
-        ),
-      },
-      {
-        id: "releases",
-        header: "Releases",
-        cell: ({ row }) => (
-          <span className="tabular-nums">{row.original.releases.length}</span>
-        ),
-      },
-      {
-        accessorKey: "archived",
-        header: "Status",
-        cell: ({ row }) => (
-          <span
-            className={
-              row.original.archived ? "text-muted-foreground" : "text-primary"
-            }
-          >
-            {row.original.archived ? "Archived" : "Active"}
-          </span>
-        ),
-      },
-      {
-        id: "actions",
-        header: "",
-        cell: ({ row }) => <PackActionsMenu pack={row.original} />,
-      },
-    ],
-    [],
-  );
   return (
     <>
       <PageHeader
         eyebrow="Catalog"
         title="Knowledge packs"
-        description="Browse published packs and their versions. Open a pack to manage its maintainer, visibility, and access."
+        description="Find a pack, then open its details to manage versions, access, maintainers, and lifecycle."
         actions={
           <div className="flex items-center gap-2">
             <RefreshButton
@@ -169,53 +117,135 @@ export function PacksPage() {
         }
       />
       {packs.error && <ErrorBox error={packs.error} />}
-      <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Metric
-          label="Total packs"
-          value={counts.all}
-          icon={<Package />}
-          loading={packs.isLoading}
-          onClick={() => setStatusFilter("all")}
-          active={statusFilter === "all"}
-        />
-        <Metric
-          label="Active"
-          value={counts.active}
-          icon={<Check />}
-          loading={packs.isLoading}
-          onClick={() => setStatusFilter("active")}
-          active={statusFilter === "active"}
-        />
-        <Metric
-          label="Restricted"
-          value={counts.restricted}
-          icon={<EyeOff />}
-          tone="amber"
-          loading={packs.isLoading}
-          onClick={() => setStatusFilter("restricted")}
-          active={statusFilter === "restricted"}
-        />
-        <Metric
-          label="Archived"
-          value={counts.archived}
-          icon={<Archive />}
-          tone="stone"
-          loading={packs.isLoading}
-          onClick={() => setStatusFilter("archived")}
-          active={statusFilter === "archived"}
-        />
-      </div>
-      <Card className="p-0">
-        <div className="flex items-center border-b border-border p-4">
-          <Search className="mr-2 size-4 text-muted-foreground" />
-          <input
-            className="w-full bg-transparent text-sm outline-none"
-            placeholder="Search packs…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
+      <Card className="overflow-hidden p-0">
+        <div className="flex flex-col gap-3 border-b border-border p-4 lg:flex-row lg:items-center lg:justify-between">
+          <InputGroup className="w-full lg:max-w-md">
+            <InputGroupAddon>
+              <Search />
+            </InputGroupAddon>
+            <InputGroupInput
+              type="search"
+              aria-label="Search packs"
+              placeholder="Search by name, ID, description, or maintainer…"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+          </InputGroup>
+          <div
+            className="flex w-full gap-1 overflow-x-auto rounded-lg bg-muted p-1 lg:w-auto"
+            aria-label="Filter packs"
+          >
+            {(Object.keys(FILTER_LABELS) as StatusFilter[]).map((filter) => (
+              <button
+                key={filter}
+                type="button"
+                aria-pressed={statusFilter === filter}
+                onClick={() => setStatusFilter(filter)}
+                className={cn(
+                  "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition-colors",
+                  statusFilter === filter
+                    ? "bg-card text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {FILTER_LABELS[filter]}
+                <span className="tabular-nums opacity-60">
+                  {counts[filter]}
+                </span>
+              </button>
+            ))}
+          </div>
         </div>
-        <DataTable data={shown} columns={columns} loading={packs.isLoading} />
+
+        {packs.isLoading && !packs.data ? (
+          <div className="space-y-1 p-2">
+            {Array.from({ length: 5 }, (_, index) => (
+              <div key={index} className="flex items-center gap-4 px-3 py-4">
+                <Skeleton className="size-10 shrink-0" />
+                <div className="min-w-0 flex-1 space-y-2">
+                  <Skeleton className="h-4 w-48" />
+                  <Skeleton className="h-3 w-3/4" />
+                </div>
+                <Skeleton className="h-7 w-24" />
+              </div>
+            ))}
+          </div>
+        ) : shown.length === 0 ? (
+          <Empty
+            compact
+            title="No packs found"
+            body={
+              search || statusFilter !== "all"
+                ? "Try a different search or filter."
+                : "Upload a pack to start building the catalog."
+            }
+          />
+        ) : (
+          <ItemGroup className="divide-y divide-border p-2">
+            {shown.map((pack) => {
+              const [firstMaintainer, ...otherMaintainers] = pack.maintainers;
+              const maintainer = firstMaintainer
+                ? otherMaintainers.length > 0
+                  ? `${firstMaintainer.name} +${otherMaintainers.length}`
+                  : firstMaintainer.name
+                : "Unassigned";
+              return (
+                <Link
+                  key={pack.id}
+                  to="/packs/$packId"
+                  params={{ packId: pack.id }}
+                  className="group rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+                >
+                  <Item className="group-hover:bg-muted/70">
+                    <ItemMedia className="group-hover:bg-card group-hover:text-primary">
+                      <Package />
+                    </ItemMedia>
+                    <ItemContent>
+                      <ItemTitle className="flex flex-wrap items-center gap-2">
+                        <span className="truncate">{pack.name}</span>
+                        <Badge
+                          tone={
+                            pack.visibility === "restricted" ? "amber" : "green"
+                          }
+                        >
+                          {pack.visibility === "restricted" ? (
+                            <EyeOff />
+                          ) : (
+                            <Eye />
+                          )}
+                          {pack.visibility}
+                        </Badge>
+                        {pack.archived && <Badge tone="stone">Archived</Badge>}
+                      </ItemTitle>
+                      <ItemDescription className="mt-1 line-clamp-1">
+                        {pack.description || "No description provided."}
+                      </ItemDescription>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        <span className="font-mono">{pack.id}</span>
+                        <span aria-hidden="true"> · </span>
+                        Maintainer: {maintainer}
+                      </p>
+                    </ItemContent>
+                    <ItemActions>
+                      <div className="hidden min-w-24 text-right sm:block">
+                        <p className="font-mono text-xs font-medium text-foreground">
+                          {pack.latest_version
+                            ? `v${pack.latest_version}`
+                            : "No version"}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {pack.releases.length} release
+                          {pack.releases.length === 1 ? "" : "s"}
+                        </p>
+                      </div>
+                      <ChevronRight className="size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-foreground" />
+                    </ItemActions>
+                  </Item>
+                </Link>
+              );
+            })}
+          </ItemGroup>
+        )}
       </Card>
       <UploadPackDialog
         open={uploadOpen}

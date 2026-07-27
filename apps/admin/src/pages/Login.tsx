@@ -22,8 +22,7 @@ export function Login({ onAuth }: { onAuth: (auth: Auth) => void }) {
         }),
       });
       const json = (await response.json()) as
-        | HubSession
-        | { message?: string | string[] };
+        HubSession | { message?: string | string[] };
       if (!response.ok || !("user" in json)) {
         const rawMessage = "message" in json ? json.message : undefined;
         const message = Array.isArray(rawMessage)
@@ -62,7 +61,7 @@ export function Login({ onAuth }: { onAuth: (auth: Auth) => void }) {
           <p className="mt-12 text-xs font-bold uppercase tracking-[.2em] text-sidebar-muted">
             Nest Hub operations
           </p>
-          <h1 className="mt-4 font-serif text-6xl leading-[1.03] tracking-tight">
+          <h1 className="mt-4 text-6xl font-semibold leading-[1.03] tracking-tight">
             Guard the quality of shared knowledge.
           </h1>
           <p className="mt-6 max-w-lg text-lg leading-8 text-sidebar-muted">
@@ -76,7 +75,9 @@ export function Login({ onAuth }: { onAuth: (auth: Auth) => void }) {
           <p className="text-xs font-bold uppercase tracking-[.18em] text-primary">
             Secure administration
           </p>
-          <h2 className="mt-3 font-serif text-4xl">Administrator sign in</h2>
+          <h2 className="mt-3 text-4xl font-semibold tracking-tight">
+            Administrator sign in
+          </h2>
           <p className="mt-2 text-sm text-muted-foreground">
             Use your Nest Hub administrator credentials.
           </p>

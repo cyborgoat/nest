@@ -21,7 +21,7 @@ export function AdminLayout() {
               draggable={false}
             />
             <div>
-              <p className="font-serif text-lg leading-none">Nest Hub</p>
+              <p className="text-lg font-semibold leading-none">Nest Hub</p>
               <p className="mt-1 text-xs text-sidebar-muted">
                 Operations console
               </p>

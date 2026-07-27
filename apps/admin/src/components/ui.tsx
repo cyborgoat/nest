@@ -35,7 +35,8 @@ export function buttonClass(
       : size === "icon"
         ? "size-9 justify-center"
         : "px-3.5 py-2",
-    variant === "primary" && "bg-primary text-primary-foreground hover:bg-primary/90",
+    variant === "primary" &&
+      "bg-primary text-primary-foreground hover:bg-primary/90",
     variant === "outline" &&
       "border border-border bg-card text-foreground shadow-sm hover:bg-muted",
     variant === "danger" &&
@@ -101,7 +102,7 @@ export function Empty({
       <div className="mx-auto grid size-10 place-items-center rounded-full bg-primary/10 text-primary">
         <Check className="size-5" />
       </div>
-      <h3 className="mt-3 font-serif text-xl">{title}</h3>
+      <h3 className="mt-3 text-xl font-semibold tracking-tight">{title}</h3>
       <p className="mt-1 text-sm text-muted-foreground">{body}</p>
     </div>
   );
@@ -193,7 +194,7 @@ export function Dialog({
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-overlay backdrop-blur-sm" />
         <DialogPrimitive.Content className="fixed left-1/2 top-1/2 z-50 max-h-[85vh] w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 overflow-auto rounded-xl border border-border bg-card p-6 shadow-2xl">
-          <DialogPrimitive.Title className="font-serif text-2xl">
+          <DialogPrimitive.Title className="text-2xl font-semibold tracking-tight">
             {title}
           </DialogPrimitive.Title>
           <DialogPrimitive.Description className="mb-5 mt-1 text-sm text-muted-foreground">
@@ -298,7 +299,10 @@ export function DataTable<T>({
                 <tr key={row.id} className="hover:bg-muted/60">
                   {row.getVisibleCells().map((cell) => (
                     <td key={cell.id} className="px-5 py-3.5 text-sm">
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      {flexRender(
+                        cell.column.columnDef.cell,
+                        cell.getContext(),
+                      )}
                     </td>
                   ))}
                 </tr>
