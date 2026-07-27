@@ -57,7 +57,7 @@ Internal single-host deploy: build Hub, supervise with [PM2](https://pm2.keymetr
 
 ### First-time setup
 
-1. Install Node LTS and PM2 on the host: `npm i -g pm2`
+1. Install Node.js 24 or newer and PM2 on the host: `npm i -g pm2`
 2. Copy `apps/hub` onto the host (or clone the repo).
 3. Seed the registry (e.g. from [examples/knowledge-packs](../../examples/knowledge-packs)) into an absolute path such as `/var/lib/nest-hub/registry`.
 4. Install both application workspaces, configure env, and build:

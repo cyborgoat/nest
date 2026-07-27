@@ -4,29 +4,51 @@ import {
   OnModuleDestroy,
   OnModuleInit,
 } from '@nestjs/common';
-import Database from 'better-sqlite3';
 import { mkdirSync } from 'fs';
+import { DatabaseSync } from 'node:sqlite';
 import * as path from 'path';
 import { HubRuntimeConfig } from '../hub.config';
+
+class HubDatabase extends DatabaseSync {
+  transaction<Arguments extends unknown[], Result>(
+    callback: (...args: Arguments) => Result,
+  ): (...args: Arguments) => Result {
+    return (...args) => {
+      this.exec('BEGIN IMMEDIATE');
+      try {
+        const result = callback(...args);
+        this.exec('COMMIT');
+        return result;
+      } catch (error) {
+        try {
+          this.exec('ROLLBACK');
+        } catch {
+          // Preserve the original transaction error if rollback also fails.
+        }
+        throw error;
+      }
+    };
+  }
+}
 
 @Injectable()
 export class DatabaseService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(DatabaseService.name);
-  private database!: Database.Database;
+  private database!: HubDatabase;
 
   constructor(private readonly config: HubRuntimeConfig) {}
 
   onModuleInit() {
     const file = this.config.value.databasePath;
     mkdirSync(path.dirname(file), { recursive: true });
-    this.database = new Database(file);
-    this.database.pragma('journal_mode = WAL');
-    this.database.pragma('foreign_keys = ON');
+    this.database = new HubDatabase(file);
+    this.database.exec('PRAGMA journal_mode = WAL');
+    this.database.exec('PRAGMA foreign_keys = ON');
     this.migrate();
     this.logger.log(`Database path: ${file}`);
   }
 
-  get db(): Database.Database {
+  get db(): HubDatabase {
     return this.database;
   }
 

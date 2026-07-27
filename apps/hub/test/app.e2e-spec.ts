@@ -871,10 +871,11 @@ describe('Hub (e2e)', () => {
       .attach('file', nextVersion.toBuffer(), 'disposable-pack-1.1.0.zip')
       .expect(201);
     expect(pending.body.status).toBe('pending');
+    const pendingId = String(pending.body.id);
     const database = app.get(DatabaseService).db;
     const staged = database
       .prepare('SELECT staging_path FROM publish_requests WHERE id = ?')
-      .get(pending.body.id) as { staging_path: string };
+      .get(pendingId) as { staging_path: string };
     const projectPath = path.join(registryPath, 'disposable-pack');
     await expect(fs.stat(projectPath)).resolves.toBeDefined();
 
@@ -912,7 +913,7 @@ describe('Hub (e2e)', () => {
     expect(
       database
         .prepare('SELECT 1 FROM messages WHERE publish_request_id = ?')
-        .get(pending.body.id),
+        .get(pendingId),
     ).toBeUndefined();
     expect(
       database
@@ -921,6 +922,32 @@ describe('Hub (e2e)', () => {
         )
         .get('disposable-pack'),
     ).toBeDefined();
+  });
+
+  it('refreshes the managed superuser password from the environment', async () => {
+    const database = app.get(DatabaseService).db;
+    database
+      .prepare(
+        "UPDATE users SET password_hash = '$argon2id$legacy-development-hash' WHERE managed_by_env = 1",
+      )
+      .run();
+    await app.close();
+
+    const moduleFixture = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
+    app = moduleFixture.createNestApplication();
+    await app.init();
+
+    await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ id: 'root-admin', password: 'test-superuser-password' })
+      .expect(201);
+    const refreshed = app
+      .get(DatabaseService)
+      .db.prepare('SELECT password_hash FROM users WHERE managed_by_env = 1')
+      .get() as { password_hash: string };
+    expect(refreshed.password_hash).toMatch(/^scrypt:v1:/);
   });
 
   it('keeps the managed superuser locked after bootstrap variables are removed', async () => {

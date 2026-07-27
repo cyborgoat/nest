@@ -6,13 +6,13 @@ import {
   OnModuleInit,
   UnauthorizedException,
 } from '@nestjs/common';
-import * as argon2 from 'argon2';
 import { createHash, randomBytes, randomUUID } from 'crypto';
 import * as jwt from 'jsonwebtoken';
 import { DatabaseService } from '../database/database.service';
 import type { AuthUser, UserRole } from './auth.types';
 import { HubRuntimeConfig } from '../hub.config';
 import { assertMutableAccount } from './access-policy';
+import { hashPassword, verifyPassword } from './password';
 
 const LOGIN_ID_RE = /^[a-z0-9](?:[a-z0-9_-]{1,30}[a-z0-9])?$/;
 const now = () => new Date().toISOString();
@@ -47,16 +47,33 @@ export class AuthService implements OnModuleInit {
       .prepare('SELECT * FROM users WHERE managed_by_env = 1 LIMIT 1')
       .get() as UserRow | undefined;
     if (managed) {
-      this.database.db
-        .prepare(
-          "UPDATE users SET role = 'superuser', updated_at = ? WHERE uuid = ?",
-        )
-        .run(now(), managed.uuid);
-      if (id && id !== managed.login_id) {
+      const configuredIdMatches = !id || id === managed.login_id;
+      if (!configuredIdMatches) {
         this.logger.warn(
           `SUPERUSER_ID=${id} does not match locked superuser ${managed.login_id}; keeping the locked account`,
         );
       }
+      const passwordChanged =
+        configuredIdMatches &&
+        Boolean(password) &&
+        !(await verifyPassword(managed.password_hash, password));
+      const passwordHash = passwordChanged
+        ? await hashPassword(password)
+        : managed.password_hash;
+      this.database.db.transaction(() => {
+        this.database.db
+          .prepare(
+            "UPDATE users SET role = 'superuser', password_hash = ?, updated_at = ? WHERE uuid = ?",
+          )
+          .run(passwordHash, now(), managed.uuid);
+        if (passwordChanged) {
+          this.database.db
+            .prepare(
+              'UPDATE auth_sessions SET revoked_at = ? WHERE user_uuid = ? AND revoked_at IS NULL',
+            )
+            .run(now(), managed.uuid);
+        }
+      })();
       return;
     }
 
@@ -91,7 +108,7 @@ export class AuthService implements OnModuleInit {
 
     const configuredName = this.config.value.superuserName;
     const passwordHash = password
-      ? await argon2.hash(password, { type: argon2.argon2id })
+      ? await hashPassword(password)
       : target.password_hash;
     this.database.db.transaction(() => {
       this.database.db
@@ -118,7 +135,7 @@ export class AuthService implements OnModuleInit {
       throw new HttpException('Too many login attempts. Try again later.', 429);
     }
     const user = this.userByLogin(loginId);
-    if (!user || !(await argon2.verify(user.password_hash, password))) {
+    if (!user || !(await verifyPassword(user.password_hash, password))) {
       const active =
         attempt && attempt.resetAt > Date.now()
           ? attempt
@@ -152,16 +169,14 @@ export class AuthService implements OnModuleInit {
     const row = this.database.db
       .prepare('SELECT * FROM users WHERE uuid = ?')
       .get(user.uuid) as UserRow | undefined;
-    if (!row || !(await argon2.verify(row.password_hash, currentPassword)))
+    if (!row || !(await verifyPassword(row.password_hash, currentPassword)))
       throw new UnauthorizedException('Current password is incorrect');
     this.validatePassword(newPassword);
     if (currentPassword === newPassword)
       throw new ConflictException(
         'New password must be different from the current password',
       );
-    const passwordHash = await argon2.hash(newPassword, {
-      type: argon2.argon2id,
-    });
+    const passwordHash = await hashPassword(newPassword);
     this.database.db.transaction(() => {
       this.database.db
         .prepare(
@@ -244,7 +259,7 @@ export class AuthService implements OnModuleInit {
       managed: false,
     };
     const timestamp = now();
-    const passwordHash = await argon2.hash(password, { type: argon2.argon2id });
+    const passwordHash = await hashPassword(password);
     this.database.db
       .prepare(
         'INSERT INTO users(uuid, login_id, name, password_hash, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',

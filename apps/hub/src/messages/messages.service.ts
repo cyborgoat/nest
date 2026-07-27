@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { randomUUID } from 'crypto';
+import type { SQLInputValue } from 'node:sqlite';
 import type { AuthUser } from '../auth/auth.types';
 import { DatabaseService } from '../database/database.service';
 import type { HubMessage, MessageKind, MessagePage } from './messages.types';
@@ -54,7 +55,7 @@ export class MessagesService {
     const limit = Math.min(Math.max(requestedLimit || 30, 1), 100);
     const cursor = encodedCursor ? this.decodeCursor(encodedCursor) : null;
     const conditions = ['user_uuid = ?'];
-    const params: unknown[] = [user.uuid];
+    const params: SQLInputValue[] = [user.uuid];
     if (filter === 'unread') conditions.push('read_at IS NULL');
     if (cursor) {
       conditions.push('(created_at < ? OR (created_at = ? AND id < ?))');
