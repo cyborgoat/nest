@@ -113,3 +113,6 @@ uv.lock
 .serverless/
 .node_repl_history
 .yarn-integrity
+
+# Extra added examples
+/examples/
