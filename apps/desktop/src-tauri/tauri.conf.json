@@ -31,7 +31,7 @@
     },
     "windows": {
       "webviewInstallMode": {
-        "type": "offlineInstaller"
+        "type": "downloadBootstrapper"
       },
       "nsis": {
         "installerIcon": "icons/windows-icon.ico",
