@@ -63,6 +63,16 @@
   --syntax-comment: #8a8a93;
   --syntax-title: #27272a;
   --syntax-variable: #b42318;
+  /* markdown source tokens */
+  --source-heading: #2563a8;
+  --source-emphasis: #be385d;
+  --source-code: #a15c16;
+  --source-quote: #287566;
+  --source-list: #64748b;
+  --source-link: #24769b;
+  --source-property: #6d5a9c;
+  --source-comment: #8a8a93;
+  --source-separator: #94a3b8;
   /* agent-status shimmer */
   --shimmer-base: #a1a1aa;
 }
@@ -209,9 +219,20 @@
 /* Source and rich editing share one surface size so switching modes does not
    resize the document window. Milkdown adds two wrappers around ProseMirror,
    so carry the same minimum height through those wrappers as well. */
+.markdown-editor-scroll [data-radix-scroll-area-viewport] > div {
+  min-height: 100%;
+}
+
+.markdown-editor-layout {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+}
+
 .markdown-editor-surface {
   box-sizing: border-box;
   display: block;
+  flex: 1 0 auto;
   width: 100%;
   min-height: 60vh;
 }
@@ -221,6 +242,54 @@
   box-sizing: border-box;
   width: 100%;
   min-height: inherit;
+}
+
+.markdown-source-marker {
+  color: var(--syntax-keyword);
+}
+
+.markdown-source-heading {
+  color: var(--source-heading);
+}
+
+.markdown-source-emphasis {
+  color: var(--source-emphasis);
+}
+
+.markdown-source-link {
+  color: var(--source-link);
+}
+
+.markdown-source-code {
+  color: var(--source-code);
+}
+
+.markdown-source-fence {
+  color: var(--source-code);
+}
+
+.markdown-source-quote {
+  color: var(--source-quote);
+}
+
+.markdown-source-list {
+  color: var(--source-list);
+}
+
+.markdown-source-comment {
+  color: var(--source-comment);
+}
+
+.markdown-source-frontmatter {
+  color: var(--source-property);
+}
+
+.markdown-source-property {
+  color: var(--source-property);
+}
+
+.markdown-source-separator {
+  color: var(--source-separator);
 }
 
 /* WKWebView/WebKit draws a default blue focus ring on any contenteditable

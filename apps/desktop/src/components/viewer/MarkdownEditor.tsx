@@ -6,7 +6,7 @@ import "@milkdown/kit/prose/view/style/prosemirror.css";
 import { Milkdown, MilkdownProvider, useEditor } from "@milkdown/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Code2, Eye, Save } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { PanelHeader } from "@/components/ui/panel-header";
@@ -50,6 +50,77 @@ function MilkdownEditorCore({
   );
 }
 
+function fitSourceHeight(source: HTMLTextAreaElement) {
+  source.style.height = "auto";
+  source.style.height = `${source.scrollHeight}px`;
+}
+
+function renderSourceLine(line: string) {
+  const tokenPattern =
+    /(`[^`\n]*`|!\[[^\]\n]*\]\([^)\n]*\)|\[[^\]\n]*\]\([^)\n]*\)|<!--.*?-->|^#{1,6}(?=\s)|^>\s?|^(?:[-+*]|\d+\.)\s|^[A-Za-z][\w-]*(?=\s*:)|\*\*|__|~~|\*|_|={3,}|-{3,})/g;
+  return line.split(tokenPattern).map((part, index) => {
+    if (!part) return null;
+    let className: string | undefined;
+    if (part.startsWith("<!--")) {
+      className = "markdown-source-comment";
+    } else if (part.startsWith("`")) {
+      className = "markdown-source-code";
+    } else if (/!?\[[^\]]*\]\(/.test(part)) {
+      className = "markdown-source-link";
+    } else if (/^[A-Za-z][\w-]*$/.test(part) && line.startsWith(part)) {
+      className = "markdown-source-property";
+    } else if (/^#{1,6}$/.test(part)) {
+      className = "markdown-source-heading";
+    } else if (/^>\s?$/.test(part)) {
+      className = "markdown-source-quote";
+    } else if (/^(?:[-+*]|\d+\.)\s$/.test(part)) {
+      className = "markdown-source-list";
+    } else if (/^(?:\*\*|__|~~|\*|_)$/.test(part)) {
+      className = "markdown-source-emphasis";
+    } else if (/^(?:={3,}|-{3,})$/.test(part)) {
+      className = "markdown-source-separator";
+    } else {
+      className = "markdown-source-marker";
+    }
+    return (
+      <span key={`${index}-${part}`} className={className}>
+        {part}
+      </span>
+    );
+  });
+}
+
+function renderSourceHighlight(markdown: string) {
+  let inFence = false;
+  let inFrontmatter = false;
+  return markdown.split("\n").map((line, index, lines) => {
+    const trimmed = line.trimStart();
+    const isFence = /^(```|~~~)/.test(trimmed);
+    const isFrontmatterBoundary =
+      (index === 0 || inFrontmatter) && trimmed === "---";
+    let content;
+
+    if (isFence) {
+      content = <span className="markdown-source-fence">{line}</span>;
+      inFence = !inFence;
+    } else if (inFence) {
+      content = <span className="markdown-source-code">{line}</span>;
+    } else if (isFrontmatterBoundary) {
+      content = <span className="markdown-source-frontmatter">{line}</span>;
+      inFrontmatter = !inFrontmatter;
+    } else {
+      content = renderSourceLine(line);
+    }
+
+    return (
+      <span key={index}>
+        {content}
+        {index < lines.length - 1 ? "\n" : null}
+      </span>
+    );
+  });
+}
+
 export function MarkdownEditor({ path }: { path: string }) {
   const fileQuery = useQuery({
     queryKey: queryKeys.file(path),
@@ -69,6 +140,7 @@ export function MarkdownEditor({ path }: { path: string }) {
   const [mode, setMode] = useState<"wysiwyg" | "source">("wysiwyg");
   const savedRef = useRef<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const sourceRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     if (fileQuery.data == null) return;
@@ -140,6 +212,25 @@ export function MarkdownEditor({ path }: { path: string }) {
     setDirty(path, next !== savedRef.current);
   };
 
+  useLayoutEffect(() => {
+    if (mode !== "source") return;
+    const source = sourceRef.current;
+    if (!source) return;
+    fitSourceHeight(source);
+  }, [markdown, mode]);
+
+  useEffect(() => {
+    if (mode !== "source") return;
+    const container = containerRef.current;
+    if (!container) return;
+    const observer = new ResizeObserver(() => {
+      const source = sourceRef.current;
+      if (source) fitSourceHeight(source);
+    });
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [mode]);
+
   return (
     <div ref={containerRef} className="flex h-full flex-col">
       <PanelHeader
@@ -201,8 +292,8 @@ export function MarkdownEditor({ path }: { path: string }) {
           {path.split("/").pop()}
         </span>
       </PanelHeader>
-      <ScrollArea className="flex-1">
-        <div className="max-w-3xl px-6 py-5">
+      <ScrollArea className="markdown-editor-scroll min-h-0 flex-1">
+        <div className="markdown-editor-layout max-w-3xl px-6 py-5">
           {markdown === null ? (
             fileQuery.isLoading ? (
               <p className="text-muted-foreground">Loading…</p>
@@ -219,13 +310,23 @@ export function MarkdownEditor({ path }: { path: string }) {
               />
             </MilkdownProvider>
           ) : (
-            <textarea
-              autoFocus
-              value={markdown}
-              onChange={(e) => updateMarkdown(e.target.value)}
-              spellCheck={false}
-              className="markdown-editor-surface block resize-none border-none bg-transparent font-mono text-sm outline-none"
-            />
+            <div className="relative flex flex-1">
+              <pre
+                aria-hidden
+                className="pointer-events-none absolute inset-0 m-0 whitespace-pre-wrap break-words font-sans text-sm leading-relaxed text-foreground"
+              >
+                {renderSourceHighlight(markdown)}
+              </pre>
+              <textarea
+                ref={sourceRef}
+                autoFocus
+                value={markdown}
+                onChange={(e) => updateMarkdown(e.target.value)}
+                spellCheck={false}
+                rows={1}
+                className="markdown-editor-surface relative z-10 m-0 block resize-none overflow-hidden border-none bg-transparent p-0 font-sans text-sm leading-relaxed text-transparent caret-foreground outline-none selection:bg-primary/20 selection:text-foreground"
+              />
+            </div>
           )}
         </div>
       </ScrollArea>
