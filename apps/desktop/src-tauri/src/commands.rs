@@ -432,8 +432,9 @@ pub async fn chat_send(
     let state_clone = state.inner().clone();
     let sid = session_id.clone();
     let settings_for_title = settings.clone();
+    let app_for_title = app.clone();
     tauri::async_runtime::spawn(async move {
-        let _ = crate::title::maybe_auto_title_after_reply(
+        let updated = crate::title::maybe_auto_title_after_reply(
             &settings_for_title,
             &sid,
             || {
@@ -446,6 +447,9 @@ pub async fn chat_send(
             },
         )
         .await;
+        if let Some(session) = updated {
+            let _ = app_for_title.emit("chat-session-updated", session);
+        }
     });
 
     Ok(message)

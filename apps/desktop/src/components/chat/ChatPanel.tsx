@@ -1,6 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ChatMessage, ChatSession, Citation } from "@nest/shared";
-import { MessageScroller } from "@shadcn/react/message-scroller";
+import {
+  MessageScroller,
+  useMessageScroller,
+} from "@shadcn/react/message-scroller";
 import { AlertCircle, ChevronDown, Lightbulb, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
@@ -18,7 +21,12 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
-import { api, listenChatStream, type ChatStreamEvent } from "@/lib/api";
+import {
+  api,
+  listenChatSessionUpdated,
+  listenChatStream,
+  type ChatStreamEvent,
+} from "@/lib/api";
 import { appErrorMessage } from "@/lib/errors";
 import { queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
@@ -42,6 +50,7 @@ export function ChatPanel() {
   const [isSending, setIsSending] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
   const [isStopping, setIsStopping] = useState(false);
+  const [completedTurn, setCompletedTurn] = useState(0);
   const bootstrapped = useRef(false);
 
   const treeQuery = useQuery({
@@ -183,6 +192,27 @@ export function ChatPanel() {
   });
 
   useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    void listenChatSessionUpdated((updated) => {
+      queryClient.setQueryData<ChatSession[]>(
+        queryKeys.chatSessions,
+        (current) =>
+          current?.map((session) =>
+            session.id === updated.id ? updated : session,
+          ),
+      );
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlisten = fn;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [queryClient]);
+
+  useEffect(() => {
     return () => {
       if (streamRaf.current != null) cancelAnimationFrame(streamRaf.current);
     };
@@ -263,6 +293,7 @@ export function ChatPanel() {
       setIsSending(false);
       setIsStopping(false);
       clearStream();
+      setCompletedTurn((current) => current + 1);
       void queryClient.invalidateQueries({ queryKey: queryKeys.chatSessions });
     },
     onError: (error: unknown) => {
@@ -306,6 +337,7 @@ export function ChatPanel() {
         defaultScrollPosition="last-anchor"
         scrollPreviousItemPeek={48}
       >
+        <ChatCompletionScroll completedTurn={completedTurn} />
         <MessageScroller.Root className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
           <MessageScroller.Viewport className="min-h-0 flex-1 overflow-y-auto outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-primary/20">
             <MessageScroller.Content
@@ -439,6 +471,26 @@ export function ChatPanel() {
       </div>
     </div>
   );
+}
+
+function ChatCompletionScroll({
+  completedTurn,
+}: {
+  completedTurn: number;
+}) {
+  const { scrollToEnd } = useMessageScroller();
+  const previousCompletedTurn = useRef(completedTurn);
+
+  useEffect(() => {
+    if (completedTurn === previousCompletedTurn.current) return;
+    previousCompletedTurn.current = completedTurn;
+    const frame = requestAnimationFrame(() => {
+      scrollToEnd({ behavior: "auto" });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [completedTurn, scrollToEnd]);
+
+  return null;
 }
 
 function UserBubble({

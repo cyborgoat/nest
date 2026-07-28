@@ -31,13 +31,13 @@ pub fn load_session_turns(
     let turns: Vec<(String, String)> = messages
         .into_iter()
         .filter(|m| m.role == "user" || m.role == "assistant")
-        .take(4)
+        .take(2)
         .map(|m| (m.role, m.content))
         .collect();
     Ok((session, turns))
 }
 
-/// Best-effort title after the first reply. Swallows LLM errors (keeps "New chat").
+/// Name a placeholder session after its first completed exchange.
 pub async fn maybe_auto_title_after_reply(
     settings: &AppSettings,
     session_id: &str,
@@ -56,7 +56,8 @@ pub async fn maybe_auto_title_after_reply(
         Ok(title) => save(&title).ok(),
         Err(e) => {
             crate::nest_debug!("title", "auto title failed for {session_id}: {e}");
-            None
+            let title = fallback_title(&turns);
+            save(&title).ok()
         }
     }
 }
@@ -73,7 +74,7 @@ async fn generate_title(settings: &AppSettings, turns: &[(String, String)]) -> A
     }
 
     let mut transcript = String::new();
-    for (role, content) in turns.iter().take(4) {
+    for (role, content) in turns.iter().take(2) {
         let clipped: String = content.chars().take(400).collect();
         transcript.push_str(&format!("{role}: {clipped}\n"));
     }
@@ -132,10 +133,47 @@ fn sanitize_title(raw: &str) -> String {
         .trim_matches(|c| c == '"' || c == '\'' || c == '`' || c == '.' || c == '!')
         .trim();
     let words: Vec<&str> = cleaned.split_whitespace().take(6).collect();
-    let title = words.join(" ");
+    let title = words
+        .join(" ")
+        .trim_end_matches(|c: char| c.is_ascii_punctuation())
+        .to_string();
     if title.is_empty() {
         "New chat".into()
     } else {
         title
+    }
+}
+
+fn fallback_title(turns: &[(String, String)]) -> String {
+    turns
+        .iter()
+        .find(|(role, _)| role == "user")
+        .map(|(_, content)| sanitize_title(content))
+        .unwrap_or_else(|| "New chat".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{fallback_title, sanitize_title};
+
+    #[test]
+    fn sanitizes_generated_titles() {
+        assert_eq!(
+            sanitize_title("\"Importing Knowledge Packs!\""),
+            "Importing Knowledge Packs"
+        );
+        assert_eq!(
+            sanitize_title("A title with more than six useful words here"),
+            "A title with more than six"
+        );
+    }
+
+    #[test]
+    fn falls_back_to_the_first_user_topic() {
+        let turns = vec![
+            ("user".into(), "How do I import a knowledge pack?".into()),
+            ("assistant".into(), "Use the import menu.".into()),
+        ];
+        assert_eq!(fallback_title(&turns), "How do I import a knowledge");
     }
 }

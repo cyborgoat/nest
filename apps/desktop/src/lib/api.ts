@@ -175,3 +175,9 @@ export function listenChatStream(
 ): Promise<UnlistenFn> {
   return listen<ChatStreamEvent>(eventName, (e) => handler(e.payload));
 }
+
+export function listenChatSessionUpdated(
+  handler: (session: ChatSession) => void,
+): Promise<UnlistenFn> {
+  return listen<ChatSession>("chat-session-updated", (e) => handler(e.payload));
+}
