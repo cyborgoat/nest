@@ -1,4 +1,4 @@
-# 从 ZIP 导入知识包
+# 从 ZIP 导入
 
 当他人共享可移植 Nest 知识包，或在电脑之间迁移知识包时使用 ZIP。
 
@@ -10,9 +10,9 @@ ZIP 导入不会显示元数据表单，因此知识包根目录必须包含有�
 ```text
 my-pack/
   pack.json
-  README.md
+  开始阅读.md
   guides/
-    first-topic.md
+    第一个主题.md
 ```
 
 `id` 必须与知识包文件夹名称一致，`version` 必须是 `1.0.0` 之类的语义化版本。

@@ -93,21 +93,22 @@ export function ChatSessionBar({ sessions, onResetChatUi }: Props) {
 
   const newChat = async () => {
     try {
-      if (await activeSessionIsUntouchedPlaceholder()) return;
       const session = await api.chatCreateSession("New chat");
+      // Make the session valid before activating it. Otherwise ChatPanel can
+      // see the new active id against stale query data and prune the tab.
+      queryClient.setQueryData<ChatSession[]>(
+        queryKeys.chatSessions,
+        (current) =>
+          current?.some((item) => item.id === session.id)
+            ? current
+            : [session, ...(current ?? [])],
+      );
       openChatTab(session.id);
       onResetChatUi();
-      invalidate();
+      void invalidate();
     } catch (e) {
       setStatusMessage(e instanceof Error ? e.message : String(e));
     }
-  };
-
-  const activeSessionIsUntouchedPlaceholder = async () => {
-    const active = chatSessionId ? byId.get(chatSessionId) : undefined;
-    if (!active || active.title !== "New chat") return false;
-    const messages = await api.chatListMessages(active.id);
-    return messages.length === 0;
   };
 
   const selectSession = (session: ChatSession) => {

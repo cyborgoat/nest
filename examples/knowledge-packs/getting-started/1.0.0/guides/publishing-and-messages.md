@@ -11,7 +11,7 @@ computer.
 Before submitting:
 
 1. Review every change in Source Control.
-2. Confirm `pack.json` matches the pack ID and intended version.
+2. Follow the [pack publishing rules](publishing-rules.md).
 3. Use semantic versioning: patch for fixes, minor for additive content, and
    major for incompatible structure changes.
 4. Check links, images, Markdown rendering, and the pack README.

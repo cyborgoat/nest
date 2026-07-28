@@ -15,7 +15,8 @@ chatting with Markdown knowledge packs.
 8. [Write Markdown and use Source Control](guides/editing-and-source-control.md)
 9. [Ask questions with Chat and `@` references](guides/chat-and-references.md)
 10. [Export and publish packs](guides/publishing-and-messages.md)
-11. [Troubleshoot common problems](guides/troubleshooting.md)
+11. [Follow the pack publishing rules](guides/publishing-rules.md)
+12. [Troubleshoot common problems](guides/troubleshooting.md)
 
 ## What you will learn
 

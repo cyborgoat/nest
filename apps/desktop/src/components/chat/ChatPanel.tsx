@@ -173,7 +173,6 @@ export function ChatPanel() {
       );
     });
   }, [
-    sessionId,
     sessionsQuery.data,
     pruneChatTabs,
     openChatTab,
