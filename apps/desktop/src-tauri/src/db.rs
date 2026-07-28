@@ -706,6 +706,23 @@ pub fn create_session(conn: &Connection, title: &str) -> AppResult<ChatSession> 
     })
 }
 
+pub fn get_or_create_initial_session(conn: &Connection) -> AppResult<ChatSession> {
+    let mut stmt = conn.prepare(
+        "SELECT id, title, pinned, archived, title_source, created_at, updated_at
+         FROM chat_sessions
+         WHERE archived = 0
+         ORDER BY pinned DESC, updated_at DESC
+         LIMIT 1",
+    )?;
+    let mut rows = stmt.query([])?;
+    if let Some(row) = rows.next()? {
+        return Ok(map_session_row(row)?);
+    }
+    drop(rows);
+    drop(stmt);
+    create_session(conn, "New chat")
+}
+
 pub fn get_session(conn: &Connection, session_id: &str) -> AppResult<Option<ChatSession>> {
     let mut stmt = conn.prepare(
         "SELECT id, title, pinned, archived, title_source, created_at, updated_at
@@ -1222,6 +1239,21 @@ mod sync_state_tests {
         )
         .unwrap();
         conn
+    }
+
+    #[test]
+    fn initial_chat_session_is_created_only_once() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+
+        let first = get_or_create_initial_session(&conn).unwrap();
+        let second = get_or_create_initial_session(&conn).unwrap();
+
+        assert_eq!(first.id, second.id);
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM chat_sessions", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
     }
 
     #[test]

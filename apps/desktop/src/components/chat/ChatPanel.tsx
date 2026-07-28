@@ -51,7 +51,6 @@ export function ChatPanel() {
   const [chatError, setChatError] = useState<string | null>(null);
   const [isStopping, setIsStopping] = useState(false);
   const [completedTurn, setCompletedTurn] = useState(0);
-  const bootstrapped = useRef(false);
 
   const treeQuery = useQuery({
     queryKey: queryKeys.tree,
@@ -141,8 +140,7 @@ export function ChatPanel() {
   };
 
   useEffect(() => {
-    if (!sessionsQuery.data || bootstrapped.current) return;
-    bootstrapped.current = true;
+    if (!sessionsQuery.data) return;
 
     const all = sessionsQuery.data;
     const valid = new Set(all.map((s: ChatSession) => s.id));
@@ -164,26 +162,23 @@ export function ChatPanel() {
       return;
     }
 
-    void api.chatCreateSession("New chat").then((s) => {
+    void api.chatGetOrCreateInitialSession().then((s) => {
       openChatTab(s.id);
-      queryClient.invalidateQueries({ queryKey: queryKeys.chatSessions });
+      queryClient.setQueryData<ChatSession[]>(
+        queryKeys.chatSessions,
+        (current) =>
+          current?.some((session) => session.id === s.id)
+            ? current
+            : [s, ...(current ?? [])],
+      );
     });
-  }, [sessionsQuery.data, pruneChatTabs, openChatTab, queryClient]);
-
-  useEffect(() => {
-    if (!sessionsQuery.data || !bootstrapped.current) return;
-    if (sessionId) return;
-
-    const preferred = sessionsQuery.data.find((s: ChatSession) => !s.archived);
-    if (preferred) {
-      openChatTab(preferred.id);
-      return;
-    }
-    void api.chatCreateSession("New chat").then((s) => {
-      openChatTab(s.id);
-      queryClient.invalidateQueries({ queryKey: queryKeys.chatSessions });
-    });
-  }, [sessionId, sessionsQuery.data, openChatTab, queryClient]);
+  }, [
+    sessionId,
+    sessionsQuery.data,
+    pruneChatTabs,
+    openChatTab,
+    queryClient,
+  ]);
 
   const messagesQuery = useQuery({
     queryKey: queryKeys.chatMessages(sessionId ?? ""),

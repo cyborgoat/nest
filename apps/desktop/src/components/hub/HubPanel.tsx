@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   InstalledPack,
   KnowledgePackMeta,
+  PackInstallConflict,
   PackProject,
 } from "@nest/shared";
 import { CloudOff, FolderInput, Info } from "lucide-react";
@@ -50,6 +51,14 @@ export function HubPanel() {
     version: string;
     previousVersion: string;
     ownerId?: string | null;
+  } | null>(null);
+  const [pendingHubOverwrite, setPendingHubOverwrite] = useState<{
+    packId: string;
+    packName: string;
+    version: string;
+    previousVersion?: string;
+    ownerId?: string | null;
+    conflict: PackInstallConflict;
   } | null>(null);
   const [pendingOverwrite, setPendingOverwrite] = useState<{
     kind: "zip" | "folder";
@@ -148,15 +157,28 @@ export function HubPanel() {
   const download = useMutation({
     mutationFn: ({
       packId,
+      packName,
       version,
       ownerId,
+      replaceLocalPackId,
     }: {
       packId: string;
+      packName: string;
       version: string;
       previousVersion?: string;
       ownerId?: string | null;
-    }) => api.hubDownloadPack(packId, version, ownerId),
+      replaceLocalPackId?: string;
+      replacedLocalPath?: string;
+    }) =>
+      api.hubDownloadPack(
+        packId,
+        packName,
+        version,
+        ownerId,
+        replaceLocalPackId,
+      ),
     onSuccess: (_status, vars) => {
+      if (vars.replacedLocalPath) clearPathsUnder(vars.replacedLocalPath);
       invalidateAfterPackChange();
       if (vars.previousVersion && vars.previousVersion !== vars.version) {
         toast.success(t("hub.packUpgraded"));
@@ -168,7 +190,7 @@ export function HubPanel() {
       toast.error(t("hub.downloadFailed"), { description: e.message }),
   });
 
-  const requestDownload = ({
+  const requestDownload = async ({
     packId,
     version,
     previousVersion,
@@ -179,13 +201,36 @@ export function HubPanel() {
     previousVersion?: string;
     ownerId?: string | null;
   }) => {
+    const packName = catalogById?.get(packId)?.name ?? packId;
+    try {
+      const conflict = await api.hubDownloadConflict(packId, packName);
+      if (conflict) {
+        setPendingHubOverwrite({
+          packId,
+          packName,
+          version,
+          previousVersion,
+          ownerId,
+          conflict,
+        });
+        return;
+      }
+    } catch (error) {
+      toast.error(t("hub.downloadFailed"), {
+        description: appErrorMessage(
+          error,
+          "Could not check for local pack conflicts",
+        ),
+      });
+      return;
+    }
     if (
       previousVersion &&
       compareSemVer(version, previousVersion) > 0
     ) {
       setPendingPackUpdate({
         packId,
-        packName: installedById.get(packId)?.name ?? packId,
+        packName,
         version,
         previousVersion,
         ownerId,
@@ -193,7 +238,13 @@ export function HubPanel() {
       return;
     }
 
-    download.mutate({ packId, version, previousVersion, ownerId });
+    download.mutate({
+      packId,
+      packName,
+      version,
+      previousVersion,
+      ownerId,
+    });
   };
 
   const importLocal = useMutation({
@@ -418,7 +469,7 @@ export function HubPanel() {
                 downloadPendingId={downloadPendingId}
                 removePendingId={removePendingId}
                 onInstall={(packId, version, previousVersion, ownerId) =>
-                  requestDownload({
+                  void requestDownload({
                     packId,
                     version,
                     previousVersion,
@@ -446,7 +497,7 @@ export function HubPanel() {
                 downloadPendingId={downloadPendingId}
                 removePendingId={removePendingId}
                 onUpgrade={(packId, version, previousVersion, ownerId) =>
-                  requestDownload({
+                  void requestDownload({
                     packId,
                     version,
                     previousVersion,
@@ -497,6 +548,38 @@ export function HubPanel() {
           }
         }}
       />
+      <AlertDialog
+        open={Boolean(pendingHubOverwrite)}
+        onOpenChange={(open) => !open && setPendingHubOverwrite(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Replace local knowledge pack?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingHubOverwrite
+                ? `The Hub pack “${pendingHubOverwrite.packName}” conflicts with your local pack “${pendingHubOverwrite.conflict.name}” ${pendingHubOverwrite.conflict.version}. Downloading it will replace the local files. This cannot be undone.`
+                : "This download will replace a local knowledge pack."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={!pendingHubOverwrite || download.isPending}
+              onClick={() => {
+                if (!pendingHubOverwrite) return;
+                download.mutate({
+                  ...pendingHubOverwrite,
+                  replaceLocalPackId: pendingHubOverwrite.conflict.pack_id,
+                  replacedLocalPath: pendingHubOverwrite.conflict.local_path,
+                });
+                setPendingHubOverwrite(null);
+              }}
+            >
+              Replace and download
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <AlertDialog
         open={Boolean(pendingPackUpdate)}
         onOpenChange={(open) => !open && setPendingPackUpdate(null)}

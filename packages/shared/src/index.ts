@@ -228,6 +228,26 @@ export type InstalledPack = {
   pending_request_id: string | null;
 };
 
+export type PackInstallConflict = {
+  pack_id: string;
+  name: string;
+  local_path: string;
+  version: string;
+};
+
+export type VaultChangeMode = "move" | "delete_and_seed_defaults";
+
+export type VaultChangePreview = {
+  current_path: string;
+  target_path: string;
+  managed_pack_count: number;
+};
+
+export type VaultChangeResult = {
+  settings: AppSettings;
+  cleanup_warning: string | null;
+};
+
 /** Editable metadata used when creating a knowledge pack from a local folder. */
 export type KnowledgePackMeta = {
   id: string;

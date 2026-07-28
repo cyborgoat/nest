@@ -45,7 +45,6 @@ type UiState = {
   setSidebarOpen: (open: boolean) => void;
   setChatOpen: (open: boolean) => void;
   setStatusMessage: (message: string | null) => void;
-  setChatSessionId: (id: string | null) => void;
   openChatTab: (id: string) => void;
   closeChatTab: (id: string) => void;
   pruneChatTabs: (validIds: Set<string>) => void;
@@ -156,7 +155,6 @@ export const useUiStore = create<UiState>()(
       setSidebarOpen: (open) => set({ sidebarOpen: open }),
       setChatOpen: (open) => set({ chatOpen: open }),
       setStatusMessage: (message) => set({ statusMessage: message }),
-      setChatSessionId: (id) => set({ chatSessionId: id }),
       openChatTab: (id) => {
         const { openChatTabs } = get();
         set({

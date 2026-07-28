@@ -123,3 +123,7 @@ uv.lock
 /examples/knowledge-packs/getting-started/*
 !/examples/knowledge-packs/getting-started/1.0.0/
 !/examples/knowledge-packs/getting-started/1.0.0/**
+!/examples/knowledge-packs/getting-started-zh-cn/
+/examples/knowledge-packs/getting-started-zh-cn/*
+!/examples/knowledge-packs/getting-started-zh-cn/1.0.0/
+!/examples/knowledge-packs/getting-started-zh-cn/1.0.0/**

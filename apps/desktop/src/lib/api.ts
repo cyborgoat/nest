@@ -15,9 +15,13 @@ import type {
   InstalledPack,
   KnowledgePackDefaults,
   KnowledgePackMeta,
+  PackInstallConflict,
   PackProject,
   PublishRequest,
   TreeNode,
+  VaultChangeMode,
+  VaultChangePreview,
+  VaultChangeResult,
 } from "@nest/shared";
 
 export const api = {
@@ -48,6 +52,18 @@ export const api = {
     invoke<void>("hub_pack_discard_file", { packId, path }),
 
   settingsGet: () => invoke<AppSettings>("settings_get"),
+  settingsPreviewKnowledgeDir: (knowledgeDir: string) =>
+    invoke<VaultChangePreview>("settings_preview_knowledge_dir", {
+      knowledgeDir,
+    }),
+  settingsChangeKnowledgeDir: (
+    knowledgeDir: string,
+    mode: VaultChangeMode,
+  ) =>
+    invoke<VaultChangeResult>("settings_change_knowledge_dir", {
+      knowledgeDir,
+      mode,
+    }),
   settingsSet: (settings: AppSettings) =>
     invoke<void>("settings_set", { settings }),
 
@@ -55,6 +71,8 @@ export const api = {
 
   chatCreateSession: (title?: string) =>
     invoke<ChatSession>("chat_create_session", { title: title ?? null }),
+  chatGetOrCreateInitialSession: () =>
+    invoke<ChatSession>("chat_get_or_create_initial_session"),
   chatListSessions: () => invoke<ChatSession[]>("chat_list_sessions"),
   chatUpdateSession: (
     sessionId: string,
@@ -90,11 +108,24 @@ export const api = {
     invoke<void>("hub_set_pack_active", { packId, active }),
   hubRemovePack: (packId: string) =>
     invoke<void>("hub_remove_pack", { packId }),
-  hubDownloadPack: (packId: string, version?: string, ownerId?: string | null) =>
+  hubDownloadConflict: (packId: string, packName: string) =>
+    invoke<PackInstallConflict | null>("hub_download_conflict", {
+      packId,
+      packName,
+    }),
+  hubDownloadPack: (
+    packId: string,
+    packName: string,
+    version?: string,
+    ownerId?: string | null,
+    replaceLocalPackId?: string | null,
+  ) =>
     invoke<InstalledPack>("hub_download_pack", {
       packId,
+      packName,
       version: version ?? null,
       ownerId: ownerId ?? null,
+      replaceLocalPackId: replaceLocalPackId ?? null,
     }),
   hubInspectLocalPack: (sourcePath: string) =>
     invoke<KnowledgePackMeta>("hub_inspect_local_pack", { sourcePath }),

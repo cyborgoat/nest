@@ -9,6 +9,9 @@ use crate::indexing;
 use crate::llm;
 use crate::state::SharedState;
 use crate::vault::{self, TreeNode};
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::{Component, Path, PathBuf};
 use tauri::{AppHandle, Emitter, State};
 
 #[tauri::command]
@@ -97,6 +100,62 @@ fn require_installed_pack(conn: &rusqlite::Connection, pack_id: &str) -> AppResu
         .ok_or_else(|| AppError::msg(format!("Pack not installed: {pack_id}")))
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct PackInstallConflict {
+    pack_id: String,
+    name: String,
+    local_path: String,
+    version: String,
+}
+
+fn normalized_pack_name(value: &str) -> String {
+    value.trim().to_lowercase()
+}
+
+fn local_download_conflict(
+    conn: &rusqlite::Connection,
+    remote_id: &str,
+    remote_name: &str,
+) -> AppResult<Option<InstalledPack>> {
+    let remote_id = normalized_pack_name(remote_id);
+    let remote_name = normalized_pack_name(remote_name);
+    let matches = db::list_sync_state(conn)?
+        .into_iter()
+        .filter(|pack| pack.origin == "local")
+        .filter(|pack| {
+            let id = normalized_pack_name(&pack.pack_id);
+            let name = normalized_pack_name(&pack.name);
+            let path = normalized_pack_name(&pack.local_path);
+            id == remote_id || path == remote_id || (!remote_name.is_empty() && name == remote_name)
+        })
+        .collect::<Vec<_>>();
+    match matches.as_slice() {
+        [] => Ok(None),
+        [pack] => Ok(Some(pack.clone())),
+        _ => Err(AppError::msg(
+            "More than one local pack conflicts with this Hub pack. Rename the local packs before downloading.",
+        )),
+    }
+}
+
+#[tauri::command]
+pub fn hub_download_conflict(
+    state: State<'_, SharedState>,
+    pack_id: String,
+    pack_name: String,
+) -> AppResult<Option<PackInstallConflict>> {
+    let conflict = {
+        let conn = state.db.lock();
+        local_download_conflict(&conn, &pack_id, &pack_name)?
+    };
+    Ok(conflict.map(|pack| PackInstallConflict {
+        pack_id: pack.pack_id,
+        name: pack.name,
+        local_path: pack.local_path,
+        version: pack.version,
+    }))
+}
+
 /// Resolve a pack's working directory and its current snapshot directory
 /// (baseline last written at download/sync or successful publish time), plus
 /// the pack's vault-relative prefix (its `local_path`).
@@ -178,6 +237,267 @@ pub fn settings_get(state: State<'_, SharedState>) -> AppResult<AppSettings> {
     Ok(settings)
 }
 
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VaultChangeMode {
+    Move,
+    DeleteAndSeedDefaults,
+}
+
+#[derive(Debug, Serialize)]
+pub struct VaultChangePreview {
+    current_path: String,
+    target_path: String,
+    managed_pack_count: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct VaultChangeResult {
+    settings: AppSettings,
+    cleanup_warning: Option<String>,
+}
+
+fn resolve_vault_change_target(state: &SharedState, knowledge_dir: &str) -> AppResult<PathBuf> {
+    let target = crate::state::resolve_knowledge_dir(&state.app_data_dir, knowledge_dir.trim());
+    if !target.is_absolute()
+        || target
+            .components()
+            .any(|part| matches!(part, Component::ParentDir))
+    {
+        return Err(AppError::msg(
+            "Knowledge directory must be an absolute path without parent traversal",
+        ));
+    }
+    Ok(target)
+}
+
+fn validate_vault_change(current: &Path, target: &Path) -> AppResult<()> {
+    if current == target {
+        return Err(AppError::msg(
+            "This is already the active knowledge directory",
+        ));
+    }
+    if target.starts_with(current) || current.starts_with(target) {
+        return Err(AppError::msg(
+            "The old and new knowledge directories cannot contain one another",
+        ));
+    }
+    if target.exists() {
+        if !target.is_dir() {
+            return Err(AppError::msg(
+                "The selected knowledge directory is not a folder",
+            ));
+        }
+        if fs::read_dir(target)?.next().is_some() {
+            return Err(AppError::msg("The new knowledge directory must be empty"));
+        }
+    }
+    Ok(())
+}
+
+fn managed_pack_directories(
+    state: &SharedState,
+    current: &Path,
+) -> AppResult<Vec<(InstalledPack, PathBuf)>> {
+    let installed = {
+        let conn = state.db.lock();
+        db::list_sync_state(&conn)?
+    };
+    let mut result = Vec::new();
+    for pack in installed {
+        let relative = Path::new(&pack.local_path);
+        if relative.components().count() != 1
+            || !matches!(relative.components().next(), Some(Component::Normal(_)))
+        {
+            return Err(AppError::msg(format!(
+                "Pack “{}” has an unsafe local path",
+                pack.name
+            )));
+        }
+        let source = current.join(relative);
+        if source.is_dir() {
+            result.push((pack, source));
+        }
+    }
+    Ok(result)
+}
+
+fn copy_directory_exact(source: &Path, destination: &Path) -> AppResult<()> {
+    fs::create_dir_all(destination)?;
+    for entry in walkdir::WalkDir::new(source) {
+        let entry = entry.map_err(|error| AppError::msg(error.to_string()))?;
+        let path = entry.path();
+        if path == source {
+            continue;
+        }
+        let metadata = fs::symlink_metadata(path)?;
+        if metadata.file_type().is_symlink() {
+            return Err(AppError::msg(format!(
+                "Cannot migrate a knowledge pack containing a symbolic link: {}",
+                path.display()
+            )));
+        }
+        let relative = path
+            .strip_prefix(source)
+            .map_err(|error| AppError::msg(error.to_string()))?;
+        let target = destination.join(relative);
+        if metadata.is_dir() {
+            fs::create_dir_all(&target)?;
+        } else if metadata.is_file() {
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::copy(path, &target)?;
+        }
+    }
+    Ok(())
+}
+
+fn verify_directory_copy(source: &Path, destination: &Path) -> AppResult<()> {
+    for entry in walkdir::WalkDir::new(source) {
+        let entry = entry.map_err(|error| AppError::msg(error.to_string()))?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let relative = path
+            .strip_prefix(source)
+            .map_err(|error| AppError::msg(error.to_string()))?;
+        let copied = destination.join(relative);
+        if !copied.is_file() || fs::read(path)? != fs::read(&copied)? {
+            return Err(AppError::msg(format!(
+                "Could not verify the migrated copy of {}",
+                relative.display()
+            )));
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn settings_preview_knowledge_dir(
+    state: State<'_, SharedState>,
+    knowledge_dir: String,
+) -> AppResult<VaultChangePreview> {
+    let current = state.vault_path();
+    let target = resolve_vault_change_target(state.inner(), &knowledge_dir)?;
+    validate_vault_change(&current, &target)?;
+    let managed_pack_count = managed_pack_directories(state.inner(), &current)?.len();
+    Ok(VaultChangePreview {
+        current_path: current.display().to_string(),
+        target_path: target.display().to_string(),
+        managed_pack_count,
+    })
+}
+
+#[tauri::command]
+pub fn settings_change_knowledge_dir(
+    state: State<'_, SharedState>,
+    knowledge_dir: String,
+    mode: VaultChangeMode,
+) -> AppResult<VaultChangeResult> {
+    let current = state.vault_path();
+    let target = resolve_vault_change_target(state.inner(), &knowledge_dir)?;
+    validate_vault_change(&current, &target)?;
+    let all_installed = {
+        let conn = state.db.lock();
+        db::list_sync_state(&conn)?
+    };
+    let managed = managed_pack_directories(state.inner(), &current)?;
+    let parent = target
+        .parent()
+        .ok_or_else(|| AppError::msg("The knowledge directory needs a parent folder"))?;
+    fs::create_dir_all(parent)?;
+    let staging = parent.join(format!(".nest-vault-migration-{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&staging)?;
+
+    let prepared = (|| -> AppResult<()> {
+        match mode {
+            VaultChangeMode::Move => {
+                for (pack, source) in &managed {
+                    let destination = staging.join(&pack.local_path);
+                    copy_directory_exact(source, &destination)?;
+                    verify_directory_copy(source, &destination)?;
+                }
+            }
+            VaultChangeMode::DeleteAndSeedDefaults => {
+                crate::default_pack::write_fresh_defaults(&staging)?;
+            }
+        }
+        Ok(())
+    })();
+    if let Err(error) = prepared {
+        let _ = fs::remove_dir_all(&staging);
+        return Err(error);
+    }
+
+    if target.exists() {
+        fs::remove_dir(&target)?;
+    }
+    if let Err(error) = fs::rename(&staging, &target) {
+        let _ = fs::remove_dir_all(&staging);
+        return Err(error.into());
+    }
+
+    let mut settings = {
+        let conn = state.db.lock();
+        db::get_settings(&conn)?
+    };
+    settings.knowledge_dir = knowledge_dir.trim().to_string();
+    settings.resolved_knowledge_dir = target.display().to_string();
+    let mut cleanup_failures = Vec::new();
+    if let Err(error) = (|| -> AppResult<()> {
+        {
+            let mut conn = state.db.lock();
+            let transaction = conn.transaction()?;
+            db::save_settings(&transaction, &settings)?;
+            if matches!(mode, VaultChangeMode::DeleteAndSeedDefaults) {
+                for pack in &all_installed {
+                    db::purge_path_data(&transaction, &pack.local_path)?;
+                }
+                crate::default_pack::seed_fresh_defaults(&transaction, &target)?;
+            }
+            transaction.commit()?;
+        }
+        state.set_vault_path(target.clone())?;
+        Ok(())
+    })() {
+        let _ = fs::remove_dir_all(&target);
+        return Err(error);
+    }
+
+    if matches!(mode, VaultChangeMode::DeleteAndSeedDefaults) {
+        let conn = state.db.lock();
+        if let Err(error) =
+            crate::default_pack::ensure_default_snapshots(&conn, &state.app_data_dir, &target)
+        {
+            cleanup_failures.push(format!("default-pack snapshots: {error}"));
+        }
+    }
+    for (pack, source) in &managed {
+        if let Err(error) = fs::remove_dir_all(source) {
+            cleanup_failures.push(format!("{}: {error}", pack.name));
+        }
+    }
+    if matches!(mode, VaultChangeMode::DeleteAndSeedDefaults) {
+        for pack in &all_installed {
+            let _ = fs::remove_dir_all(state.app_data_dir.join("snapshots").join(&pack.pack_id));
+        }
+    }
+    let _ = fs::remove_dir(&current);
+    indexing::schedule(state.inner())?;
+
+    Ok(VaultChangeResult {
+        settings,
+        cleanup_warning: (!cleanup_failures.is_empty()).then(|| {
+            format!(
+                "The new vault is active, but some old pack folders could not be removed: {}",
+                cleanup_failures.join("; ")
+            )
+        }),
+    })
+}
+
 #[tauri::command]
 pub async fn settings_set(
     state: State<'_, SharedState>,
@@ -211,20 +531,18 @@ pub async fn settings_set(
         ));
     }
 
-    // Detect a directory switch before overwriting the in-memory vault path,
-    // so we know whether to trigger the same auto-reindex pack actions get.
     let vault_changed = resolved != state.vault_path();
+    if vault_changed {
+        return Err(AppError::msg(
+            "Use the knowledge-directory migration prompt to change the vault location",
+        ));
+    }
 
-    state.set_vault_path(resolved.clone())?;
     settings.resolved_knowledge_dir = resolved.display().to_string();
 
     {
         let conn = state.db.lock();
         db::save_settings(&conn, &settings)?;
-    }
-
-    if vault_changed {
-        indexing::schedule(state.inner())?;
     }
 
     Ok(())
@@ -255,6 +573,12 @@ pub fn chat_create_session(
 ) -> AppResult<ChatSession> {
     let conn = state.db.lock();
     db::create_session(&conn, title.as_deref().unwrap_or("New chat"))
+}
+
+#[tauri::command]
+pub fn chat_get_or_create_initial_session(state: State<'_, SharedState>) -> AppResult<ChatSession> {
+    let conn = state.db.lock();
+    db::get_or_create_initial_session(&conn)
 }
 
 #[tauri::command]
@@ -585,8 +909,10 @@ fn finish_pack_install(
 pub async fn hub_download_pack(
     state: State<'_, SharedState>,
     pack_id: String,
+    pack_name: String,
     version: Option<String>,
     owner_id: Option<String>,
+    replace_local_pack_id: Option<String>,
 ) -> AppResult<InstalledPack> {
     let settings = {
         let conn = state.db.lock();
@@ -594,27 +920,166 @@ pub async fn hub_download_pack(
     };
 
     let vault = state.vault_path();
+    let conflict = {
+        let conn = state.db.lock();
+        local_download_conflict(&conn, &pack_id, &pack_name)?
+    };
+    match (&conflict, replace_local_pack_id.as_deref()) {
+        (Some(local), Some(confirmed)) if local.pack_id == confirmed => {}
+        (Some(local), _) => {
+            return Err(AppError::msg(format!(
+                "Downloading this pack would replace the local pack “{}”. Confirm the replacement first.",
+                local.name
+            )));
+        }
+        (None, Some(_)) => {
+            return Err(AppError::msg(
+                "The local pack changed before the download started. Please try again.",
+            ));
+        }
+        (None, None) => {}
+    }
+
+    let staging = vault.join(format!(".nest-download-{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&staging)?;
     let token = ensure_hub_access(state.inner(), &settings, false).await?;
-    let pack = hub::download_pack_remote(
+    let downloaded = hub::download_pack_remote(
         &settings.hub_base_url,
         settings.effective_proxy_url(),
         &pack_id,
         version.as_deref(),
-        &vault,
+        &staging,
         token.as_deref(),
     )
-    .await?;
+    .await;
+    let pack = match downloaded {
+        Ok(pack) => pack,
+        Err(error) => {
+            let _ = fs::remove_dir_all(&staging);
+            return Err(error);
+        }
+    };
+    if pack.id != pack_id {
+        let _ = fs::remove_dir_all(&staging);
+        return Err(AppError::msg(format!(
+            "Downloaded pack id mismatch: expected {pack_id}, found {}",
+            pack.id
+        )));
+    }
+    if Path::new(&pack.path).components().count() != 1
+        || !matches!(
+            Path::new(&pack.path).components().next(),
+            Some(Component::Normal(_))
+        )
+    {
+        let _ = fs::remove_dir_all(&staging);
+        return Err(AppError::msg("Downloaded pack has an unsafe local path"));
+    }
+
+    // Recheck immediately before changing files so a concurrently imported
+    // local pack cannot be overwritten without consent.
+    let current_conflict = {
+        let conn = state.db.lock();
+        local_download_conflict(&conn, &pack_id, &pack_name)?
+    };
+    if current_conflict.as_ref().map(|p| p.pack_id.as_str()) != replace_local_pack_id.as_deref() {
+        let _ = fs::remove_dir_all(&staging);
+        return Err(AppError::msg(
+            "The local packs changed while downloading. Review the conflict and try again.",
+        ));
+    }
+
+    let staged_pack = staging.join(&pack.path);
+    if !staged_pack.is_dir() {
+        let _ = fs::remove_dir_all(&staging);
+        return Err(AppError::msg(
+            "The downloaded archive did not contain the expected pack folder",
+        ));
+    }
+    let target = vault.join(&pack.path);
+    let backup_root = vault.join(format!(".nest-download-backup-{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&backup_root)?;
+    let mut backups: Vec<(PathBuf, PathBuf)> = Vec::new();
+    let mut old_paths = Vec::new();
+    if let Some(local) = &current_conflict {
+        old_paths.push(vault.join(&local.local_path));
+    }
+    if target.exists() && !old_paths.iter().any(|path| path == &target) {
+        old_paths.push(target.clone());
+    }
+    for (index, old_path) in old_paths.iter().enumerate() {
+        if old_path.exists() {
+            let backup = backup_root.join(index.to_string());
+            if let Err(error) = fs::rename(old_path, &backup) {
+                for (original, saved) in backups.iter().rev() {
+                    let _ = fs::rename(saved, original);
+                }
+                let _ = fs::remove_dir_all(&staging);
+                let _ = fs::remove_dir_all(&backup_root);
+                return Err(error.into());
+            }
+            backups.push((old_path.clone(), backup));
+        }
+    }
+    if let Err(error) = fs::rename(&staged_pack, &target) {
+        for (original, saved) in backups.iter().rev() {
+            let _ = fs::rename(saved, original);
+        }
+        let _ = fs::remove_dir_all(&staging);
+        let _ = fs::remove_dir_all(&backup_root);
+        return Err(error.into());
+    }
 
     // Baseline for local version control: "modified" is computed against
     // this snapshot until the next re-sync to a newer version.
-    crate::snapshot::write_snapshot(
-        &state.app_data_dir,
-        &pack.id,
-        &pack.version,
-        &vault.join(&pack.path),
-    )?;
+    if let Err(error) =
+        crate::snapshot::write_snapshot(&state.app_data_dir, &pack.id, &pack.version, &target)
+    {
+        let _ = fs::remove_dir_all(&target);
+        for (original, saved) in backups.iter().rev() {
+            let _ = fs::rename(saved, original);
+        }
+        let _ = fs::remove_dir_all(&staging);
+        let _ = fs::remove_dir_all(&backup_root);
+        return Err(error);
+    }
 
-    finish_pack_install(state.inner(), &pack, "registry", owner_id.as_deref())
+    let finalized = (|| -> AppResult<InstalledPack> {
+        let mut conn = state.db.lock();
+        let transaction = conn.transaction()?;
+        if let Some(local) = &current_conflict {
+            if local.pack_id != pack.id {
+                db::purge_path_data(&transaction, &local.local_path)?;
+            }
+        }
+        hub::record_sync(&transaction, &pack, "registry", owner_id.as_deref())?;
+        let installed = db::get_sync_state(&transaction, &pack.id)?.ok_or_else(|| {
+            AppError::msg(format!("Installed pack record was not saved: {}", pack.id))
+        })?;
+        transaction.commit()?;
+        Ok(installed)
+    })();
+    let installed = match finalized {
+        Ok(installed) => installed,
+        Err(error) => {
+            let _ = fs::remove_dir_all(&target);
+            for (original, saved) in backups.iter().rev() {
+                let _ = fs::rename(saved, original);
+            }
+            let _ = fs::remove_dir_all(&staging);
+            let _ = fs::remove_dir_all(&backup_root);
+            return Err(error);
+        }
+    };
+    if let Some(local) = &current_conflict {
+        if local.pack_id != pack.id {
+            let _ = fs::remove_dir_all(state.app_data_dir.join("snapshots").join(&local.pack_id));
+        }
+    }
+    indexing::schedule(state.inner())?;
+    let _ = fs::remove_dir_all(&staging);
+    let _ = fs::remove_dir_all(&backup_root);
+    Ok(installed)
 }
 
 #[tauri::command]
@@ -1347,5 +1812,93 @@ mod pack_prefix_tests {
         assert!(strip_pack_prefix("my-pack", "other-pack/docs/a.md").is_err());
         assert!(strip_pack_prefix("my-pack", "my-pack-extra/a.md").is_err());
         assert!(strip_pack_prefix("my-pack", "my-pack").is_err());
+    }
+}
+
+#[cfg(test)]
+mod pack_install_conflict_tests {
+    use super::*;
+
+    #[test]
+    fn local_pack_name_conflicts_but_registry_pack_does_not() {
+        let root =
+            std::env::temp_dir().join(format!("nest-conflict-test-{}", uuid::Uuid::new_v4()));
+        let conn = db::open_db(&root.join("test.db")).unwrap();
+        db::upsert_sync_state(
+            &conn,
+            db::SyncStateUpsert {
+                pack_id: "my-local-copy",
+                name: "Team Handbook",
+                version: "1.0.0",
+                local_path: "my-local-copy",
+                origin: "local",
+                owner_id: None,
+                description: "",
+            },
+        )
+        .unwrap();
+        db::upsert_sync_state(
+            &conn,
+            db::SyncStateUpsert {
+                pack_id: "downloaded",
+                name: "Downloaded",
+                version: "1.0.0",
+                local_path: "downloaded",
+                origin: "registry",
+                owner_id: None,
+                description: "",
+            },
+        )
+        .unwrap();
+
+        let conflict = local_download_conflict(&conn, "team-handbook", " Team Handbook ").unwrap();
+        assert_eq!(
+            conflict.as_ref().map(|pack| pack.pack_id.as_str()),
+            Some("my-local-copy")
+        );
+        assert!(local_download_conflict(&conn, "downloaded", "Downloaded")
+            .unwrap()
+            .is_none());
+        drop(conn);
+        let _ = fs::remove_dir_all(root);
+    }
+}
+
+#[cfg(test)]
+mod vault_change_helpers_tests {
+    use super::*;
+
+    #[test]
+    fn target_must_be_separate_and_empty() {
+        let root =
+            std::env::temp_dir().join(format!("nest-vault-change-test-{}", uuid::Uuid::new_v4()));
+        let current = root.join("current");
+        let target = root.join("target");
+        fs::create_dir_all(&current).unwrap();
+        fs::create_dir_all(&target).unwrap();
+        assert!(validate_vault_change(&current, &target).is_ok());
+        assert!(validate_vault_change(&current, &current.join("nested")).is_err());
+        fs::write(target.join("existing.txt"), b"occupied").unwrap();
+        assert!(validate_vault_change(&current, &target).is_err());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn migration_copy_preserves_and_verifies_all_regular_files() {
+        let root =
+            std::env::temp_dir().join(format!("nest-vault-copy-test-{}", uuid::Uuid::new_v4()));
+        let source = root.join("source");
+        let destination = root.join("destination");
+        fs::create_dir_all(source.join("assets")).unwrap();
+        fs::write(source.join("README.md"), b"# Pack").unwrap();
+        fs::write(source.join("assets").join("raw.bin"), [0_u8, 1, 2, 3]).unwrap();
+
+        copy_directory_exact(&source, &destination).unwrap();
+        verify_directory_copy(&source, &destination).unwrap();
+        assert_eq!(
+            fs::read(destination.join("assets").join("raw.bin")).unwrap(),
+            [0_u8, 1, 2, 3]
+        );
+        let _ = fs::remove_dir_all(root);
     }
 }

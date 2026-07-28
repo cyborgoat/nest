@@ -1,5 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { AppSettings } from "@nest/shared";
+import type {
+  AppSettings,
+  VaultChangeMode,
+  VaultChangePreview,
+} from "@nest/shared";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
   Bot,
@@ -16,6 +20,15 @@ import {
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PanelHeader } from "@/components/ui/panel-header";
@@ -88,6 +101,7 @@ export function SettingsPanel() {
   const queryClient = useQueryClient();
   const settingsSection = useUiStore((state) => state.settingsSection);
   const setSettingsSection = useUiStore((state) => state.setSettingsSection);
+  const clearPathsUnder = useUiStore((state) => state.clearPathsUnder);
   const [form, setForm] = useState<AppSettings>(EMPTY);
   const [fontSizeDraft, setFontSizeDraft] = useState(
     String(EMPTY.font_size_pt),
@@ -96,6 +110,9 @@ export function SettingsPanel() {
     online: boolean;
     message: string;
   } | null>(null);
+  const [pendingVaultChange, setPendingVaultChange] = useState<
+    (VaultChangePreview & { knowledgeDir: string }) | null
+  >(null);
   const hydrated = useRef(false);
   const lastSavedKey = useRef("");
 
@@ -230,6 +247,59 @@ export function SettingsPanel() {
     },
   });
 
+  const changeVault = useMutation({
+    mutationFn: ({
+      knowledgeDir,
+      mode,
+    }: {
+      knowledgeDir: string;
+      mode: VaultChangeMode;
+    }) => api.settingsChangeKnowledgeDir(knowledgeDir, mode),
+    onSuccess: (result) => {
+      const installed =
+        queryClient.getQueryData<
+          import("@nest/shared").InstalledPack[]
+        >(queryKeys.installedPacks) ?? [];
+      for (const pack of installed) clearPathsUnder(pack.local_path);
+      const refreshed = withFixedEmbedding(result.settings);
+      lastSavedKey.current = persistKey(refreshed);
+      setForm(refreshed);
+      setPendingVaultChange(null);
+      queryClient.setQueryData(queryKeys.settings, refreshed);
+      for (const key of [
+        queryKeys.tree,
+        queryKeys.index,
+        queryKeys.installedPacks,
+        queryKeys.allFiles,
+      ]) {
+        void queryClient.invalidateQueries({ queryKey: key });
+      }
+      if (result.cleanup_warning) {
+        toast.warning("Knowledge directory changed", {
+          description: result.cleanup_warning,
+        });
+      } else {
+        toast.success("Knowledge directory changed");
+      }
+    },
+    onError: (error) => {
+      toast.error("Could not change knowledge directory", {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    },
+  });
+
+  const prepareKnowledgeDirChange = async (knowledgeDir: string) => {
+    try {
+      const preview = await api.settingsPreviewKnowledgeDir(knowledgeDir);
+      setPendingVaultChange({ ...preview, knowledgeDir });
+    } catch (error) {
+      toast.error("Could not use this knowledge directory", {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
+
   const pickKnowledgeDir = async () => {
     try {
       const result = await openDialog({
@@ -238,7 +308,7 @@ export function SettingsPanel() {
         title: "Choose knowledge directory",
       });
       if (typeof result === "string" && result) {
-        update("knowledge_dir", result);
+        await prepareKnowledgeDirChange(result);
       }
     } catch (e) {
       toast.error(t("settings.couldNotOpenFolder"), {
@@ -316,7 +386,7 @@ export function SettingsPanel() {
                           type="button"
                           variant="ghost"
                           size="sm"
-                          onClick={() => update("knowledge_dir", "")}
+                          onClick={() => void prepareKnowledgeDirChange("")}
                         >
                           {t("settings.resetToDefault")}
                         </Button>
@@ -493,6 +563,74 @@ export function SettingsPanel() {
           </Tabs>
         </div>
       </ScrollArea>
+      <AlertDialog
+        open={Boolean(pendingVaultChange)}
+        onOpenChange={(open) => {
+          if (!open && !changeVault.isPending) setPendingVaultChange(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Change knowledge directory?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3">
+                <p>
+                  Nest found {pendingVaultChange?.managed_pack_count ?? 0}{" "}
+                  managed knowledge packs. The new directory must stay empty
+                  until this change finishes.
+                </p>
+                <div className="rounded-md border bg-muted/40 p-3 text-xs">
+                  <p className="truncate" title={pendingVaultChange?.current_path}>
+                    From: {pendingVaultChange?.current_path}
+                  </p>
+                  <p className="mt-1 truncate" title={pendingVaultChange?.target_path}>
+                    To: {pendingVaultChange?.target_path}
+                  </p>
+                </div>
+                <p>
+                  Migrate copies and verifies every managed pack before
+                  removing its old folder. Start fresh removes the old managed
+                  packs and installs new English and Simplified Chinese
+                  Getting Started packs. Unrelated files in the old directory
+                  are preserved.
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="sm:items-center">
+            <AlertDialogCancel disabled={changeVault.isPending}>
+              Cancel
+            </AlertDialogCancel>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={!pendingVaultChange || changeVault.isPending}
+              onClick={() => {
+                if (!pendingVaultChange) return;
+                changeVault.mutate({
+                  knowledgeDir: pendingVaultChange.knowledgeDir,
+                  mode: "delete_and_seed_defaults",
+                });
+              }}
+            >
+              Start fresh
+            </Button>
+            <Button
+              type="button"
+              disabled={!pendingVaultChange || changeVault.isPending}
+              onClick={() => {
+                if (!pendingVaultChange) return;
+                changeVault.mutate({
+                  knowledgeDir: pendingVaultChange.knowledgeDir,
+                  mode: "move",
+                });
+              }}
+            >
+              {changeVault.isPending ? "Changing…" : "Migrate packs"}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

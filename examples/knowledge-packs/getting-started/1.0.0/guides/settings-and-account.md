@@ -29,6 +29,7 @@ required for local editing, Chat over local packs, or public Hub downloads.
 
 ## Moving the knowledge directory
 
-Use an absolute path. After changing it, Nest reloads the Library from the new
-location. Existing files are not silently copied, so move them yourself first
-when you intend to preserve the same library.
+Use an absolute path. After choosing a new empty directory, Nest asks whether
+to migrate the current packs or delete them and start fresh with the default
+tutorial packs. Migration verifies the copy before removing old pack folders.
+Unrelated files in the old directory are left untouched.
