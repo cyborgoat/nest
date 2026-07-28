@@ -11,11 +11,6 @@ pub fn status(state: &SharedState) -> AppResult<IndexStatus> {
 }
 
 async fn rebuild(state: &SharedState) -> AppResult<IndexStatus> {
-    let settings = {
-        let conn = state.db.lock();
-        db::get_settings(&conn)?
-    };
-
     {
         let conn = state.db.lock();
         db::set_index_progress(&conn, 0, 0, Some("Collecting Markdown…"))?;
@@ -36,11 +31,11 @@ async fn rebuild(state: &SharedState) -> AppResult<IndexStatus> {
             &conn,
             file_count,
             pending.len() as u32,
-            Some("Loading FastEmbed model (may download on first run)…"),
+            Some("Loading embedding model…"),
         )?;
     }
 
-    let model = embeddings::load_embedding_model(&settings.embedding_model)?;
+    let model = embeddings::load_embedding_model()?;
     let chunks = pending
         .iter()
         .map(|chunk| KnowledgeChunk {

@@ -288,7 +288,6 @@ export type AppSettings = {
   llm_base_url: string;
   llm_api_key: string;
   chat_model: string;
-  embedding_model: string;
   hub_base_url: string;
   /** Optional HTTP(S)/SOCKS5 proxy for Hub and related outbound requests. Empty = direct. */
   proxy_url: string;

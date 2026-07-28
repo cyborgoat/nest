@@ -2,7 +2,6 @@ use crate::agent;
 use crate::db::{
     self, AppSettings, ChatMessage, ChatSession, IndexStatus, InstalledPack, PackMeta,
 };
-use crate::embeddings;
 use crate::error::{AppError, AppResult};
 use crate::hub::{self, PackProject};
 use crate::indexing;
@@ -503,8 +502,6 @@ pub async fn settings_set(
     state: State<'_, SharedState>,
     mut settings: AppSettings,
 ) -> AppResult<()> {
-    // Embedding model is fixed locally — not user-configurable.
-    settings.embedding_model = embeddings::DEFAULT_EMBEDDING_MODEL.into();
     settings.normalize_llm_configuration();
     settings.knowledge_dir = settings.knowledge_dir.trim().to_string();
     settings.hub_base_url = settings

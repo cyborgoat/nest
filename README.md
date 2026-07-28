@@ -76,7 +76,7 @@ Desktop installers (macOS `.dmg` for Apple Silicon + Intel, Windows `.msi`/`.exe
 ## Design notes
 
 - Markdown-only knowledge
-- Local vault + SQLite FTS **and** FastEmbed vector RAG via [Rig](https://github.com/0xPlaygrounds/rig) (`rig-fastembed` + `rig-sqlite`)
+- Local vault + SQLite FTS **and** FastEmbed vector RAG via [Rig](https://github.com/0xPlaygrounds/rig) (`rig-fastembed` + `rig-sqlite`); the embedding model ships bundled in the binary, so retrieval works fully offline with no first-run download
 - Chat performs local hybrid retrieval before one Rig streaming completion; completions go to your OpenAI-compatible LLM
 - Active packs define the default RAG domain; `@` focus paths narrow retrieval and directly load bounded Markdown content (including folders) while indexing catches up
 - Desktop use remains login-free; an optional Hub account is used only for publishing and restricted packs.

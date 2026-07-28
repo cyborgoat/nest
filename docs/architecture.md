@@ -111,7 +111,7 @@ Hybrid retrieval in `retrieval.rs`:
 3. Lexical fallback if both are empty
 4. Drop citations whose files no longer exist under the vault
 
-Results are filtered by the resolved retrieval prefixes. Default top-k is fixed in the backend (`DEFAULT_TOP_K`), not user-configurable. Embedding model is fixed to `AllMiniLML6V2Q`.
+Results are filtered by the resolved retrieval prefixes. Default top-k is fixed in the backend (`DEFAULT_TOP_K`), not user-configurable. Embedding model is fixed to `AllMiniLML6V2Q`, with weights bundled into the binary via `include_bytes!` (`embeddings.rs`) rather than downloaded from Hugging Face at runtime — this avoids a first-run network dependency that was unreliable on Windows.
 
 Chat passes a bounded multi-turn history, direct `@` focus content, and eagerly retrieved evidence to one Rig streaming completion; completions go to the user’s OpenAI-compatible LLM (Settings). Avoiding a second model-driven retrieval turn keeps reasoning-model streams compatible across OpenAI-style gateways.
 

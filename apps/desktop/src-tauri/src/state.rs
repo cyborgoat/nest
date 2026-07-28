@@ -23,7 +23,6 @@ pub struct AppState {
 impl AppState {
     pub fn new(app_data_dir: PathBuf) -> AppResult<Self> {
         vault::ensure_dir(&app_data_dir)?;
-        crate::embeddings::configure_cache(&app_data_dir)?;
         let db_path = app_data_dir.join("nest.db");
         let db = crate::db::open_db(&db_path)?;
 

@@ -23,7 +23,6 @@ struct SearchHit {
 pub async fn retrieve(
     app_data_dir: &Path,
     state: &SharedState,
-    embedding_model_id: &str,
     query: &str,
     retrieval_prefixes: &[String],
     top_k: u32,
@@ -34,12 +33,12 @@ pub async fn retrieve(
 
     crate::nest_debug!(
         "retrieval",
-        "query={:?} top_k={top_k} prefixes={retrieval_prefixes:?} model={embedding_model_id}",
+        "query={:?} top_k={top_k} prefixes={retrieval_prefixes:?}",
         query
     );
 
     // Vector hits first — no Sync connection held across await.
-    if let Ok(model) = embeddings::load_embedding_model(embedding_model_id) {
+    if let Ok(model) = embeddings::load_embedding_model() {
         if let Ok(hits) =
             vector_store::vector_search(app_data_dir, model, query, top_k, retrieval_prefixes).await
         {

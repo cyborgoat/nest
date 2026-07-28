@@ -46,8 +46,6 @@ import { queryKeys } from "@/lib/query-keys";
 import { useUiStore, type SettingsSection } from "@/stores/ui";
 import { HubAccountSettings } from "./HubAccountSettings";
 
-/** Matches backend default; not shown in UI — always forced on save. */
-const DEFAULT_EMBEDDING_MODEL = "AllMiniLML6V2Q";
 const LEGACY_OPENAI_BASE_URL = "https://api.openai.com/v1";
 const LEGACY_OPENAI_CHAT_MODEL = "gpt-4o-mini";
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
@@ -59,7 +57,6 @@ const EMPTY: AppSettings = {
   llm_base_url: "",
   llm_api_key: "",
   chat_model: "",
-  embedding_model: DEFAULT_EMBEDDING_MODEL,
   hub_base_url: "",
   proxy_url: "",
   proxy_enabled: false,
@@ -68,10 +65,6 @@ const EMPTY: AppSettings = {
   knowledge_dir: "",
   resolved_knowledge_dir: "",
 };
-
-function withFixedEmbedding(settings: AppSettings): AppSettings {
-  return { ...settings, embedding_model: DEFAULT_EMBEDDING_MODEL };
-}
 
 function withCompatibleLlmDefaults(settings: AppSettings): AppSettings {
   const next = { ...settings };
@@ -92,7 +85,7 @@ function withCompatibleLlmDefaults(settings: AppSettings): AppSettings {
 
 /** Persist payload omits transient resolved path differences for dirty checks. */
 function persistKey(settings: AppSettings): string {
-  const { resolved_knowledge_dir: _, ...rest } = withFixedEmbedding(settings);
+  const { resolved_knowledge_dir: _, ...rest } = settings;
   return JSON.stringify(rest);
 }
 
@@ -130,7 +123,7 @@ export function SettingsPanel() {
   useEffect(() => {
     if (!settingsQuery.data || hydrated.current) return;
     const data = settingsQuery.data;
-    const initial = withFixedEmbedding({
+    const initial: AppSettings = {
       ...EMPTY,
       ...data,
       // Older backends may omit this field until the desktop binary is rebuilt.
@@ -138,7 +131,7 @@ export function SettingsPanel() {
         typeof data.proxy_enabled === "boolean"
           ? data.proxy_enabled
           : Boolean(data.proxy_url?.trim()),
-    });
+    };
     setForm(initial);
     setFontSizeDraft(String(initial.font_size_pt));
     lastSavedKey.current = persistKey(initial);
@@ -151,14 +144,13 @@ export function SettingsPanel() {
 
   useEffect(() => {
     if (!hydrated.current) return;
-    const next = withFixedEmbedding(form);
-    const key = persistKey(next);
+    const key = persistKey(form);
     if (key === lastSavedKey.current) return;
 
     const timer = window.setTimeout(() => {
       void (async () => {
         try {
-          await api.settingsSet(next);
+          await api.settingsSet(form);
           const refreshed = await api.settingsGet();
           lastSavedKey.current = persistKey(refreshed);
           setForm((prev) => ({
@@ -278,7 +270,7 @@ export function SettingsPanel() {
           import("@nest/shared").InstalledPack[]
         >(queryKeys.installedPacks) ?? [];
       for (const pack of installed) clearPathsUnder(pack.local_path);
-      const refreshed = withFixedEmbedding(result.settings);
+      const refreshed = result.settings;
       lastSavedKey.current = persistKey(refreshed);
       setForm(refreshed);
       setPendingVaultChange(null);

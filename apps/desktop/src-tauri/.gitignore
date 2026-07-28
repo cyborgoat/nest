@@ -12,6 +12,8 @@
 *.onnx_data
 *.safetensors
 *.gguf
+# Bundled embedding model (compiled into the binary via include_bytes!, not a runtime download)
+!assets/embedding-model/*.onnx
 
 # Local vector store (created at runtime under app data; ignore if dropped here)
 nest-vectors.db

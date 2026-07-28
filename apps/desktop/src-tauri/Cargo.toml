@@ -1,6 +1,6 @@
 [package]
 name = "nest"
-version = "0.1.6"
+version = "0.1.7"
 description = "Nest — local-first knowledge workspace"
 authors = ["Nest"]
 edition = "2021"
@@ -26,7 +26,8 @@ walkdir = "2"
 zip = "2"
 parking_lot = "0.12"
 rig = { version = "0.40", features = ["derive"] }
-rig-fastembed = "0.40"
+rig-fastembed = { version = "0.40", default-features = false, features = ["ort-download-binaries"] }
+fastembed = { version = "=4.9.1", default-features = false, features = ["ort-download-binaries"] }
 rig-sqlite = "0.40"
 sqlite-vec = "0.1.9"
 tokio-rusqlite = { version = "0.6", features = ["bundled"] }

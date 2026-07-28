@@ -144,7 +144,6 @@ pub async fn run_agent_chat(request: AgentChatRequest) -> AppResult<AgentChatRes
     let eager = retrieval::retrieve(
         &app_data_dir,
         &state,
-        &settings.embedding_model,
         &query,
         &retrieval_prefixes,
         DEFAULT_TOP_K,
