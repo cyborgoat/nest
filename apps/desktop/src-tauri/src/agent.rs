@@ -17,7 +17,7 @@ use rig::completion::Message;
 use rig::providers::openai;
 use rig::streaming::{StreamedAssistantContent, StreamingChat};
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 
@@ -112,7 +112,16 @@ pub async fn run_agent_chat(request: AgentChatRequest) -> AppResult<AgentChatRes
         .filter(|path| retrieval_prefixes.contains(path))
         .cloned()
         .collect::<Vec<_>>();
-    let focus_context = build_focus_context(&state, &valid_focus_paths)?;
+    // `build_focus_context` does a synchronous, potentially slow filesystem
+    // walk (`vault::list_tree`) — run it on a blocking-pool thread so it
+    // can't stall the async runtime that's also driving other in-flight
+    // chat streams.
+    let vault_root = state.vault_path();
+    let focus_context = tokio::task::spawn_blocking(move || {
+        build_focus_context(&vault_root, &valid_focus_paths)
+    })
+    .await
+    .map_err(|e| AppError::msg(format!("Focus context task failed: {e}")))??;
     let agent_query = if focus_context.text.is_empty() {
         query.clone()
     } else {
@@ -356,12 +365,11 @@ fn agent_preamble_with_retrieval(
     format!("{body}\n\n{}", format_active_packs_for_prompt(active_packs))
 }
 
-fn build_focus_context(state: &SharedState, focus_paths: &[String]) -> AppResult<FocusContext> {
+fn build_focus_context(vault: &Path, focus_paths: &[String]) -> AppResult<FocusContext> {
     if focus_paths.is_empty() {
         return Ok(FocusContext::default());
     }
-    let vault = state.vault_path();
-    let tree = vault::list_tree(&vault)?;
+    let tree = vault::list_tree(vault)?;
     let mut files = Vec::new();
     for path in focus_paths {
         if let Some(node) = find_tree_node(&tree, path) {
@@ -379,7 +387,7 @@ fn build_focus_context(state: &SharedState, focus_paths: &[String]) -> AppResult
         if remaining_chars == 0 {
             break;
         }
-        if let Ok(content) = vault::read_file(&vault, path) {
+        if let Ok(content) = vault::read_file(vault, path) {
             let limit = MAX_FOCUS_CHARS_PER_FILE.min(remaining_chars);
             let truncated = truncate_chars(&content, limit);
             remaining_chars = remaining_chars.saturating_sub(truncated.chars().count());

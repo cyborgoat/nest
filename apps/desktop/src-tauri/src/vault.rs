@@ -60,7 +60,13 @@ fn build_tree(root: &Path, dir: &Path) -> AppResult<Vec<TreeNode>> {
             .to_string_lossy()
             .replace('\\', "/");
 
-        if path.is_dir() {
+        // Use the entry's own file type, not `path.is_dir()`: the latter
+        // follows symlinks, so a symlinked directory that cycles back to an
+        // ancestor would recurse forever. A symlink is never treated as a
+        // folder to descend into (matching `walkdir`'s default elsewhere in
+        // this codebase); a symlinked `.md` file is still listed below.
+        let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+        if is_dir {
             let children = build_tree(root, &path)?;
             // Hide empty folders (e.g. leftovers after a pack remove).
             if children.is_empty() {
@@ -212,7 +218,9 @@ fn prune_empty_dirs_inner(root: &Path, dir: &Path) -> AppResult<()> {
     };
     for entry in &entries {
         let path = entry.path();
-        if path.is_dir() {
+        // See `build_tree`: don't follow symlinks into a recursive walk.
+        let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+        if is_dir {
             let name = entry.file_name().to_string_lossy().to_string();
             if name.starts_with('.') {
                 continue;
@@ -441,6 +449,22 @@ mod tests {
         let resolved = resolve_vault_path(&dir, "gone/pack/note.md").unwrap();
         assert_eq!(resolved, dir.join("gone/pack/note.md"));
         assert!(!dir.join("gone").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn list_tree_does_not_follow_a_symlink_cycle() {
+        let dir = env::temp_dir().join("nest-vault-symlink-cycle");
+        let _ = fs::remove_dir_all(&dir);
+        ensure_dir(&dir).unwrap();
+        fs::write(dir.join("note.md"), b"hello").unwrap();
+        // A symlink back to the vault root: `build_tree`/`prune_empty_dirs`
+        // must never follow it into recursion, or this call hangs forever.
+        std::os::unix::fs::symlink(&dir, dir.join("loop")).unwrap();
+
+        let tree = list_tree(&dir).unwrap();
+        assert_eq!(tree.len(), 1);
+        assert_eq!(tree[0].name, "note.md");
     }
 
     #[test]

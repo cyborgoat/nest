@@ -48,9 +48,15 @@ export function ChatPanel() {
   const [streamThinking, setStreamThinking] = useState("");
   const [agentActivity, setAgentActivity] = useState<AgentActivity>(null);
   const [isSending, setIsSending] = useState(false);
+  // Session the in-flight mutation actually belongs to, captured at send time.
+  // Distinct from `sessionId` (the currently *viewed* tab) so switching tabs
+  // mid-generation doesn't leak the streaming UI into a session it isn't for.
+  const [pendingSessionId, setPendingSessionId] = useState<string | null>(null);
   const [chatError, setChatError] = useState<string | null>(null);
   const [isStopping, setIsStopping] = useState(false);
   const [completedTurn, setCompletedTurn] = useState(0);
+
+  const isGeneratingHere = isSending && pendingSessionId === sessionId;
 
   const treeQuery = useQuery({
     queryKey: queryKeys.tree,
@@ -131,12 +137,18 @@ export function ChatPanel() {
 
   const sessions: ChatSession[] = sessionsQuery.data ?? [];
 
+  // Called when navigating away from the current tab (new chat, switch, close).
+  // Only clears streaming artifacts when nothing is in flight — an in-flight
+  // generation belongs to `pendingSessionId`, not whichever tab is active, and
+  // must survive the switch so it renders correctly if the user comes back.
   const resetChatUi = () => {
-    setPendingUser(null);
-    clearStream();
-    setAgentActivity(null);
     setChatError(null);
     setIsStopping(false);
+    if (!isSending) {
+      setPendingUser(null);
+      clearStream();
+      setAgentActivity(null);
+    }
   };
 
   useEffect(() => {
@@ -214,13 +226,14 @@ export function ChatPanel() {
 
   const send = useMutation({
     mutationFn: async ({
+      sessionId: targetSessionId,
       query,
       focusPaths,
     }: {
+      sessionId: string;
       query: string;
       focusPaths: string[];
     }) => {
-      if (!sessionId) throw new Error("No chat session");
       const eventName = `chat-stream-${Date.now()}`;
 
       const unlisten = await listenChatStream(
@@ -245,14 +258,15 @@ export function ChatPanel() {
       );
 
       try {
-        return await api.chatSend(sessionId, query, focusPaths, eventName);
+        return await api.chatSend(targetSessionId, query, focusPaths, eventName);
       } finally {
         unlisten();
       }
     },
-    onMutate: ({ query }) => {
+    onMutate: ({ sessionId: targetSessionId, query }) => {
       setChatError(null);
       setPendingUser(query);
+      setPendingSessionId(targetSessionId);
       setIsSending(true);
       setIsStopping(false);
       clearStream();
@@ -260,37 +274,38 @@ export function ChatPanel() {
     },
     onSuccess: (assistantMsg, vars) => {
       flushStream();
-      if (sessionId) {
-        queryClient.setQueryData<ChatMessage[]>(
-          queryKeys.chatMessages(sessionId),
-          (old) => {
-            const list = [...(old ?? [])];
-            if (
-              !list.some((m) => m.role === "user" && m.content === vars.query)
-            ) {
-              list.push({
-                id: `local-user-${Date.now()}`,
-                role: "user",
-                content: vars.query,
-                created_at: new Date().toISOString(),
-              });
-            }
-            if (!list.some((m) => m.id === assistantMsg.id)) {
-              list.push(assistantMsg);
-            }
-            return list;
-          },
-        );
-      }
+      queryClient.setQueryData<ChatMessage[]>(
+        queryKeys.chatMessages(vars.sessionId),
+        (old) => {
+          const list = [...(old ?? [])];
+          if (
+            !list.some((m) => m.role === "user" && m.content === vars.query)
+          ) {
+            list.push({
+              id: `local-user-${Date.now()}`,
+              role: "user",
+              content: vars.query,
+              created_at: new Date().toISOString(),
+            });
+          }
+          if (!list.some((m) => m.id === assistantMsg.id)) {
+            list.push(assistantMsg);
+          }
+          return list;
+        },
+      );
       setPendingUser(null);
       setAgentActivity(null);
       setIsSending(false);
       setIsStopping(false);
+      setPendingSessionId(null);
       clearStream();
-      setCompletedTurn((current) => current + 1);
+      if (vars.sessionId === sessionId) {
+        setCompletedTurn((current) => current + 1);
+      }
       void queryClient.invalidateQueries({ queryKey: queryKeys.chatSessions });
     },
-    onError: (error: unknown) => {
+    onError: (error: unknown, vars) => {
       const message = appErrorMessage(error, "Chat request failed");
       if (message.toLowerCase().includes("cancelled")) {
         setIsSending(false);
@@ -298,11 +313,10 @@ export function ChatPanel() {
         clearStream();
         setPendingUser(null);
         setAgentActivity(null);
-        if (sessionId) {
-          void queryClient.invalidateQueries({
-            queryKey: queryKeys.chatMessages(sessionId),
-          });
-        }
+        setPendingSessionId(null);
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.chatMessages(vars.sessionId),
+        });
         return;
       }
       setChatError(message);
@@ -312,10 +326,12 @@ export function ChatPanel() {
       clearStream();
       setPendingUser(null);
       setAgentActivity(null);
+      setPendingSessionId(null);
     },
   });
 
   const showOptimisticUser =
+    isGeneratingHere &&
     pendingUser !== null &&
     !(messagesQuery.data ?? []).some(
       (m: ChatMessage) => m.role === "user" && m.content === pendingUser,
@@ -335,7 +351,7 @@ export function ChatPanel() {
         <MessageScroller.Root className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
           <MessageScroller.Viewport className="min-h-0 flex-1 overflow-y-auto outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-primary/20">
             <MessageScroller.Content
-              aria-busy={isSending}
+              aria-busy={isGeneratingHere}
               className="flex min-w-0 max-w-full flex-col gap-4 overflow-x-hidden px-3 pt-3 pb-8"
             >
           {(messagesQuery.data ?? []).map((msg: ChatMessage) => (
@@ -379,7 +395,7 @@ export function ChatPanel() {
             </MessageScroller.Item>
           )}
 
-          {isSending && (
+          {isGeneratingHere && (
             <MessageScroller.Item
               messageId="streaming-assistant"
               className="min-w-0"
@@ -449,9 +465,12 @@ export function ChatPanel() {
       <div className="shrink-0 px-3 pb-3 pt-4">
         <MentionComposer
           candidates={mentionCandidates}
-          isGenerating={isSending}
+          isGenerating={isGeneratingHere}
           canSend={!!sessionId && !isSending}
-          onSend={(query, focusPaths) => send.mutate({ query, focusPaths })}
+          onSend={(query, focusPaths) => {
+            if (!sessionId) return;
+            send.mutate({ sessionId, query, focusPaths });
+          }}
           onStop={() => {
             if (isStopping) return;
             setIsStopping(true);
