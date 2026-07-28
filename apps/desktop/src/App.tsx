@@ -383,7 +383,11 @@ export default function App() {
           <span>
             {shell.index}: {indexQuery.data?.indexed_files ?? 0} {shell.files} /{" "}
             {indexQuery.data?.indexed_chunks ?? 0} {shell.chunks}
-            {indexQuery.data?.is_indexing ? shell.indexing : ""}
+            {indexQuery.data?.is_indexing
+              ? indexQuery.data?.message
+                ? ` · ${indexQuery.data.message}`
+                : shell.indexing
+              : ""}
           </span>
           <span className="truncate pl-4">{statusMessage ?? shell.ready}</span>
         </footer>

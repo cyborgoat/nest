@@ -121,6 +121,12 @@ export function SettingsPanel() {
     queryFn: api.settingsGet,
   });
 
+  const indexQuery = useQuery({
+    queryKey: queryKeys.index,
+    queryFn: api.indexStatus,
+    refetchInterval: (q) => (q.state.data?.is_indexing ? 1000 : 10_000),
+  });
+
   useEffect(() => {
     if (!settingsQuery.data || hydrated.current) return;
     const data = settingsQuery.data;
@@ -222,6 +228,17 @@ export function SettingsPanel() {
     }
     setFontSizeDraft(String(parsed));
   };
+
+  const syncIndex = useMutation({
+    mutationFn: () => api.indexRebuild(),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.index });
+    },
+    onError: (e) =>
+      toast.error(t("settings.syncFailed"), {
+        description: e instanceof Error ? e.message : String(e),
+      }),
+  });
 
   const testHubConnection = useMutation({
     mutationFn: () =>
@@ -391,6 +408,39 @@ export function SettingsPanel() {
                           {t("settings.resetToDefault")}
                         </Button>
                       )}
+                    </div>
+                  </Field>
+                  <Field
+                    label={t("settings.localIndex")}
+                    description={t("settings.localIndexDescription")}
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-xs text-muted-foreground">
+                        {indexQuery.data?.indexed_files ?? 0}{" "}
+                        {t("settings.indexFiles")} ·{" "}
+                        {indexQuery.data?.indexed_chunks ?? 0}{" "}
+                        {t("settings.indexChunks")}
+                        {indexQuery.data?.message
+                          ? ` — ${indexQuery.data.message}`
+                          : ""}
+                      </p>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={
+                          syncIndex.isPending || indexQuery.data?.is_indexing
+                        }
+                        onClick={() => syncIndex.mutate()}
+                      >
+                        {(syncIndex.isPending ||
+                          indexQuery.data?.is_indexing) && (
+                          <LoaderCircle className="size-3.5 animate-spin" />
+                        )}
+                        {syncIndex.isPending || indexQuery.data?.is_indexing
+                          ? t("settings.syncing")
+                          : t("settings.syncIndexNow")}
+                      </Button>
                     </div>
                   </Field>
                 </GeneralGroup>

@@ -567,6 +567,11 @@ pub fn index_status(state: State<'_, SharedState>) -> AppResult<IndexStatus> {
 }
 
 #[tauri::command]
+pub fn index_rebuild(state: State<'_, SharedState>) -> AppResult<IndexStatus> {
+    indexing::schedule(state.inner())
+}
+
+#[tauri::command]
 pub fn chat_create_session(
     state: State<'_, SharedState>,
     title: Option<String>,

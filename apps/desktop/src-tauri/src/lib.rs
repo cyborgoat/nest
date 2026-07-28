@@ -38,6 +38,10 @@ pub fn run() {
             nest_debug!("app", "app_data_dir={}", app_data.display());
             let state = AppState::new(app_data)?;
             app.manage(Arc::new(state) as SharedState);
+            let shared_state = app.state::<SharedState>();
+            if indexing::status(&shared_state)?.indexed_chunks == 0 {
+                indexing::schedule(&shared_state)?;
+            }
             tray::setup_tray(app.handle())?;
             Ok(())
         })
@@ -59,6 +63,7 @@ pub fn run() {
             commands::settings_change_knowledge_dir,
             commands::settings_set,
             commands::index_status,
+            commands::index_rebuild,
             commands::chat_create_session,
             commands::chat_get_or_create_initial_session,
             commands::chat_list_sessions,
