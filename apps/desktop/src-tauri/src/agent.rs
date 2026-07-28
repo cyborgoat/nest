@@ -117,11 +117,10 @@ pub async fn run_agent_chat(request: AgentChatRequest) -> AppResult<AgentChatRes
     // can't stall the async runtime that's also driving other in-flight
     // chat streams.
     let vault_root = state.vault_path();
-    let focus_context = tokio::task::spawn_blocking(move || {
-        build_focus_context(&vault_root, &valid_focus_paths)
-    })
-    .await
-    .map_err(|e| AppError::msg(format!("Focus context task failed: {e}")))??;
+    let focus_context =
+        tokio::task::spawn_blocking(move || build_focus_context(&vault_root, &valid_focus_paths))
+            .await
+            .map_err(|e| AppError::msg(format!("Focus context task failed: {e}")))??;
     let agent_query = if focus_context.text.is_empty() {
         query.clone()
     } else {
