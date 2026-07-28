@@ -81,6 +81,12 @@ pub async fn run_agent_chat(request: AgentChatRequest) -> AppResult<AgentChatRes
     if settings.llm_api_key.trim().is_empty() {
         return Err(AppError::msg("API key not configured"));
     }
+    if settings.llm_base_url.trim().is_empty() {
+        return Err(AppError::msg("LLM Base URL not configured"));
+    }
+    if settings.chat_model.trim().is_empty() {
+        return Err(AppError::msg("Chat model not configured"));
+    }
 
     let mut cancel_rx = state.begin_chat_cancel();
 
@@ -263,7 +269,7 @@ pub async fn run_agent_chat(request: AgentChatRequest) -> AppResult<AgentChatRes
                 }
                 let msg = e.to_string();
                 crate::nest_debug!("agent", "stream error: {msg}");
-                return Err(AppError::msg(format!("LLM request failed: {msg}")));
+                return Err(AppError::msg(llm_request_error(&settings, &msg)));
             }
         }
     }
@@ -306,6 +312,19 @@ pub async fn run_agent_chat(request: AgentChatRequest) -> AppResult<AgentChatRes
         thinking: (!thinking.trim().is_empty()).then_some(thinking),
         thinking_seconds: thinking_started.map(|start| start.elapsed().as_secs_f64()),
     })
+}
+
+fn llm_request_error(settings: &AppSettings, message: &str) -> String {
+    if message.contains("401") || message.to_ascii_lowercase().contains("unauthorized") {
+        let provider = reqwest::Url::parse(&settings.llm_base_url)
+            .ok()
+            .and_then(|url| url.host_str().map(str::to_string))
+            .unwrap_or_else(|| "the configured provider".into());
+        return format!(
+            "LLM authentication failed at {provider}. Check that the API key belongs to this provider and that the Base URL is correct in Settings."
+        );
+    }
+    format!("LLM request failed: {message}")
 }
 
 fn agent_preamble_with_retrieval(
@@ -443,15 +462,33 @@ fn truncate_chars(content: &str, max_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        agent_preamble_with_retrieval, collect_markdown_files, merge_citations, truncate_chars,
+        agent_preamble_with_retrieval, collect_markdown_files, llm_request_error, merge_citations,
+        truncate_chars,
     };
-    use crate::db::{Citation, InstalledPack};
+    use crate::db::{AppSettings, Citation, InstalledPack};
     use crate::vault::{TreeNode, TreeNodeKind};
 
     #[test]
     fn truncates_unicode_on_character_boundaries() {
         assert_eq!(truncate_chars("知识库 content", 3), "知识库…");
         assert_eq!(truncate_chars("短文", 4), "短文");
+    }
+
+    #[test]
+    fn authentication_errors_do_not_expose_provider_response_bodies() {
+        let settings = AppSettings {
+            llm_base_url: "https://openrouter.ai/api/v1".into(),
+            ..AppSettings::default()
+        };
+        let message = llm_request_error(
+            &settings,
+            "CompletionError: HttpError: Invalid status code 401 Unauthorized with message: secret",
+        );
+        assert_eq!(
+            message,
+            "LLM authentication failed at openrouter.ai. Check that the API key belongs to this provider and that the Base URL is correct in Settings."
+        );
+        assert!(!message.contains("secret"));
     }
 
     #[test]

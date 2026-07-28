@@ -1,4 +1,4 @@
-import { FileText, Folder, Send, Square, X } from "lucide-react";
+import { ArrowUp, FileText, Folder, Square, X } from "lucide-react";
 import {
   useEffect,
   useMemo,
@@ -231,7 +231,7 @@ export function MentionComposer({
             aria-label="Send"
             title="Send"
           >
-            <Send className="size-3.5" />
+            <ArrowUp className="size-3.5" />
           </Button>
         )}
       </div>

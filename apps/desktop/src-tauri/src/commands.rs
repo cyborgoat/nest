@@ -185,6 +185,7 @@ pub async fn settings_set(
 ) -> AppResult<()> {
     // Embedding model is fixed locally — not user-configurable.
     settings.embedding_model = embeddings::DEFAULT_EMBEDDING_MODEL.into();
+    settings.normalize_llm_configuration();
     settings.knowledge_dir = settings.knowledge_dir.trim().to_string();
     settings.hub_base_url = settings
         .hub_base_url
@@ -194,6 +195,9 @@ pub async fn settings_set(
     settings.proxy_url = settings.proxy_url.trim().to_string();
     if !settings.hub_base_url.is_empty() {
         validate_http_base_url("Hub URL", &settings.hub_base_url)?;
+    }
+    if !settings.llm_base_url.is_empty() {
+        validate_http_base_url("LLM Base URL", &settings.llm_base_url)?;
     }
     if settings.proxy_enabled {
         crate::http::validate_proxy_url(&settings.proxy_url)?;

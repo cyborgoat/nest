@@ -5,6 +5,7 @@ import {
   Bot,
   Cloud,
   FolderOpen,
+  Info,
   LoaderCircle,
   Network,
   Palette,
@@ -21,6 +22,11 @@ import { PanelHeader } from "@/components/ui/panel-header";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { queryKeys } from "@/lib/query-keys";
@@ -29,13 +35,17 @@ import { HubAccountSettings } from "./HubAccountSettings";
 
 /** Matches backend default; not shown in UI — always forced on save. */
 const DEFAULT_EMBEDDING_MODEL = "AllMiniLML6V2Q";
+const LEGACY_OPENAI_BASE_URL = "https://api.openai.com/v1";
+const LEGACY_OPENAI_CHAT_MODEL = "gpt-4o-mini";
+const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
+const OPENROUTER_DEFAULT_CHAT_MODEL = "openai/gpt-4o-mini";
 const MIN_FONT_SIZE_PT = 6;
 const MAX_FONT_SIZE_PT = 24;
 
 const EMPTY: AppSettings = {
-  llm_base_url: "https://api.openai.com/v1",
+  llm_base_url: "",
   llm_api_key: "",
-  chat_model: "gpt-4o-mini",
+  chat_model: "",
   embedding_model: DEFAULT_EMBEDDING_MODEL,
   hub_base_url: "",
   proxy_url: "",
@@ -48,6 +58,23 @@ const EMPTY: AppSettings = {
 
 function withFixedEmbedding(settings: AppSettings): AppSettings {
   return { ...settings, embedding_model: DEFAULT_EMBEDDING_MODEL };
+}
+
+function withCompatibleLlmDefaults(settings: AppSettings): AppSettings {
+  const next = { ...settings };
+  const baseUrl = next.llm_base_url.trim().replace(/\/+$/, "");
+  const openRouterKey = next.llm_api_key.trim().startsWith("sk-or-v1-");
+  if (openRouterKey && (!baseUrl || baseUrl === LEGACY_OPENAI_BASE_URL)) {
+    next.llm_base_url = OPENROUTER_BASE_URL;
+  }
+  if (
+    (openRouterKey ||
+      next.llm_base_url.trim().replace(/\/+$/, "") === OPENROUTER_BASE_URL) &&
+    next.chat_model.trim() === LEGACY_OPENAI_CHAT_MODEL
+  ) {
+    next.chat_model = OPENROUTER_DEFAULT_CHAT_MODEL;
+  }
+  return next;
 }
 
 /** Persist payload omits transient resolved path differences for dirty checks. */
@@ -146,7 +173,14 @@ export function SettingsPanel() {
     ) {
       setHubTestResult(null);
     }
-    setForm((prev) => ({ ...prev, [key]: value }));
+    setForm((prev) => {
+      const next = { ...prev, [key]: value };
+      return key === "llm_api_key" ||
+        key === "llm_base_url" ||
+        key === "chat_model"
+        ? withCompatibleLlmDefaults(next)
+        : next;
+    });
   };
 
   const commitFontSizeInput = () => {
@@ -311,7 +345,36 @@ export function SettingsPanel() {
                     />
                   </Field>
                 </GeneralGroup>
-                <GeneralGroup icon={Bot} title={t("settings.llm")}>
+                <GeneralGroup
+                  icon={Bot}
+                  title={t("settings.llm")}
+                  help={
+                    <div className="space-y-2">
+                      <p>
+                        Use the Base URL, API key, and exact model ID from the
+                        same OpenAI-compatible provider.
+                      </p>
+                      <p>
+                        OpenAI example:{" "}
+                        <span className="font-mono">
+                          https://api.openai.com/v1
+                        </span>{" "}
+                        with <span className="font-mono">gpt-4o-mini</span>.
+                      </p>
+                      <p>
+                        OpenRouter example:{" "}
+                        <span className="font-mono">
+                          https://openrouter.ai/api/v1
+                        </span>{" "}
+                        with{" "}
+                        <span className="font-mono">
+                          openai/gpt-4o-mini
+                        </span>
+                        .
+                      </p>
+                    </div>
+                  }
+                >
                   <Field
                     label={t("settings.baseUrl")}
                     description={t("settings.baseUrlDescription")}
@@ -319,6 +382,7 @@ export function SettingsPanel() {
                     <Input
                       value={form.llm_base_url}
                       onChange={(e) => update("llm_base_url", e.target.value)}
+                      placeholder="https://openrouter.ai/api/v1"
                     />
                   </Field>
                   <Field
@@ -331,6 +395,13 @@ export function SettingsPanel() {
                       onChange={(e) => update("llm_api_key", e.target.value)}
                       placeholder="sk-…"
                     />
+                    {form.llm_api_key.trim().startsWith("sk-or-v1-") && (
+                      <p className="text-xs text-muted-foreground">
+                        OpenRouter key detected. Requests use{" "}
+                        <span className="font-mono">{OPENROUTER_BASE_URL}</span>{" "}
+                        and an OpenRouter model slug.
+                      </p>
+                    )}
                   </Field>
                   <Field
                     label={t("settings.chatModel")}
@@ -339,6 +410,7 @@ export function SettingsPanel() {
                     <Input
                       value={form.chat_model}
                       onChange={(e) => update("chat_model", e.target.value)}
+                      placeholder="openai/gpt-4o-mini"
                     />
                   </Field>
                 </GeneralGroup>
@@ -432,10 +504,12 @@ function SettingsSection({ children }: { children: ReactNode }) {
 function GeneralGroup({
   icon: Icon,
   title,
+  help,
   children,
 }: {
   icon: LucideIcon;
   title: string;
+  help?: ReactNode;
   children: ReactNode;
 }) {
   return (
@@ -443,6 +517,26 @@ function GeneralGroup({
       <h4 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
         <Icon className="size-4 text-primary" aria-hidden />
         {title}
+        {help && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                className="rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                aria-label={`${title} configuration help`}
+              >
+                <Info className="size-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent
+              side="right"
+              align="start"
+              className="max-w-80 normal-case leading-5 tracking-normal"
+            >
+              {help}
+            </TooltipContent>
+          </Tooltip>
+        )}
       </h4>
       {children}
     </div>

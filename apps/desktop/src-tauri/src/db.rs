@@ -5,6 +5,11 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 use uuid::Uuid;
 
+pub const LEGACY_OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
+pub const LEGACY_OPENAI_CHAT_MODEL: &str = "gpt-4o-mini";
+pub const OPENROUTER_BASE_URL: &str = "https://openrouter.ai/api/v1";
+pub const OPENROUTER_DEFAULT_CHAT_MODEL: &str = "openai/gpt-4o-mini";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
     pub llm_base_url: String,
@@ -33,9 +38,9 @@ pub struct AppSettings {
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
-            llm_base_url: "https://api.openai.com/v1".into(),
+            llm_base_url: String::new(),
             llm_api_key: String::new(),
-            chat_model: "gpt-4o-mini".into(),
+            chat_model: String::new(),
             embedding_model: crate::embeddings::DEFAULT_EMBEDDING_MODEL.into(),
             hub_base_url: String::new(),
             proxy_url: String::new(),
@@ -57,6 +62,27 @@ fn default_display_language() -> String {
 }
 
 impl AppSettings {
+    /// Normalize user-entered LLM settings and correct the common case where
+    /// an OpenRouter key is pasted while Nest's untouched OpenAI defaults are
+    /// still selected. Explicit custom endpoints and models are preserved.
+    pub fn normalize_llm_configuration(&mut self) {
+        self.llm_base_url = self.llm_base_url.trim().trim_end_matches('/').to_string();
+        self.llm_api_key = self.llm_api_key.trim().to_string();
+        self.chat_model = self.chat_model.trim().to_string();
+
+        let openrouter_key = self.llm_api_key.starts_with("sk-or-v1-");
+        let default_openai_endpoint =
+            self.llm_base_url.is_empty() || self.llm_base_url == LEGACY_OPENAI_BASE_URL;
+        if openrouter_key && default_openai_endpoint {
+            self.llm_base_url = OPENROUTER_BASE_URL.into();
+        }
+        if (openrouter_key || self.llm_base_url == OPENROUTER_BASE_URL)
+            && self.chat_model == LEGACY_OPENAI_CHAT_MODEL
+        {
+            self.chat_model = OPENROUTER_DEFAULT_CHAT_MODEL.into();
+        }
+    }
+
     /// Proxy URL used for outbound requests when enabled; otherwise empty (direct).
     pub fn effective_proxy_url(&self) -> &str {
         if self.proxy_enabled {
@@ -397,6 +423,7 @@ pub fn get_settings(conn: &Connection) -> AppResult<AppSettings> {
     if !proxy_enabled_set {
         settings.proxy_enabled = !settings.proxy_url.trim().is_empty();
     }
+    settings.normalize_llm_configuration();
     Ok(settings)
 }
 
@@ -1088,6 +1115,52 @@ fn recount_index_meta(conn: &Connection) -> AppResult<()> {
 #[cfg(test)]
 mod sync_state_tests {
     use super::*;
+
+    #[test]
+    fn llm_defaults_are_empty() {
+        let settings = AppSettings::default();
+        assert!(settings.llm_base_url.is_empty());
+        assert!(settings.llm_api_key.is_empty());
+        assert!(settings.chat_model.is_empty());
+    }
+
+    #[test]
+    fn openrouter_keys_correct_legacy_openai_defaults() {
+        let mut settings = AppSettings {
+            llm_base_url: LEGACY_OPENAI_BASE_URL.into(),
+            llm_api_key: "  sk-or-v1-example  ".into(),
+            chat_model: LEGACY_OPENAI_CHAT_MODEL.into(),
+            ..AppSettings::default()
+        };
+        settings.normalize_llm_configuration();
+        assert_eq!(settings.llm_base_url, OPENROUTER_BASE_URL);
+        assert_eq!(settings.chat_model, OPENROUTER_DEFAULT_CHAT_MODEL);
+        assert_eq!(settings.llm_api_key, "sk-or-v1-example");
+    }
+
+    #[test]
+    fn openrouter_keys_infer_the_endpoint_but_not_a_model() {
+        let mut settings = AppSettings {
+            llm_api_key: "sk-or-v1-example".into(),
+            ..AppSettings::default()
+        };
+        settings.normalize_llm_configuration();
+        assert_eq!(settings.llm_base_url, OPENROUTER_BASE_URL);
+        assert!(settings.chat_model.is_empty());
+    }
+
+    #[test]
+    fn openrouter_detection_preserves_explicit_custom_configuration() {
+        let mut settings = AppSettings {
+            llm_base_url: "https://llm.internal.example/v1/".into(),
+            llm_api_key: "sk-or-v1-example".into(),
+            chat_model: "custom/model".into(),
+            ..AppSettings::default()
+        };
+        settings.normalize_llm_configuration();
+        assert_eq!(settings.llm_base_url, "https://llm.internal.example/v1");
+        assert_eq!(settings.chat_model, "custom/model");
+    }
 
     #[test]
     fn migrates_legacy_pack_origins_and_updates_provenance() {

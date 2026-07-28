@@ -65,6 +65,12 @@ async fn generate_title(settings: &AppSettings, turns: &[(String, String)]) -> A
     if settings.llm_api_key.trim().is_empty() {
         return Err(AppError::msg("API key not configured"));
     }
+    if settings.llm_base_url.trim().is_empty() {
+        return Err(AppError::msg("LLM Base URL not configured"));
+    }
+    if settings.chat_model.trim().is_empty() {
+        return Err(AppError::msg("Chat model not configured"));
+    }
 
     let mut transcript = String::new();
     for (role, content) in turns.iter().take(4) {
