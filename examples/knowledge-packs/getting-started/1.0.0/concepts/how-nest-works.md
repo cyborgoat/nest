@@ -1,7 +1,8 @@
 # How Nest Works
 
-Nest keeps knowledge in ordinary folders of Markdown files. A folder becomes a
-knowledge pack when it contains a valid `pack.json`.
+Nest keeps knowledge in ordinary folders of Markdown files. Installed packs
+contain a `pack.json`, but you do not need to create one before importing a
+folder: Nest can collect the metadata and generate the file for you.
 
 ## The main areas
 

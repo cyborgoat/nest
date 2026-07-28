@@ -425,12 +425,6 @@ export function ChatPanel() {
           candidates={mentionCandidates}
           isGenerating={isSending}
           canSend={!!sessionId && !isSending}
-          placeholders={{
-            emptyActive:
-              "Type a message… Activate a pack to use @ mentions.",
-            ready:
-              "Type a message… Enter to send; Shift+Enter for a new line; @ to mention files or folders.",
-          }}
           onSend={(query, focusPaths) => send.mutate({ query, focusPaths })}
           onStop={() => {
             if (isStopping) return;

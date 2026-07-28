@@ -23,6 +23,7 @@ import {
   isAssignableRole,
 } from '../auth/access-policy';
 import { HubRuntimeConfig } from '../hub.config';
+import { PacksService } from '../packs/packs.service';
 import { sortSemVerDesc } from '../packs/semver';
 
 const now = () => new Date().toISOString();
@@ -63,7 +64,22 @@ export class AdminService {
     private readonly database: DatabaseService,
     private readonly audit: AuditService,
     private readonly config: HubRuntimeConfig,
+    private readonly packsService: PacksService,
   ) {}
+
+  async resyncRegistry(actor: AuthUser) {
+    const result = await this.packsService.reconcileRegistry();
+    this.audit.record(actor, 'registry.resync', 'registry', 'knowledge-packs', {
+      packs_added: result.packs_added,
+      packs_updated: result.packs_updated,
+      packs_removed: result.packs_removed,
+      releases_added: result.releases_added,
+      releases_updated: result.releases_updated,
+      releases_removed: result.releases_removed,
+      issue_count: result.issues.length,
+    });
+    return result;
+  }
 
   listUsers(): AdminUserView[] {
     const rows = this.database.db

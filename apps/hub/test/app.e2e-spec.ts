@@ -1066,6 +1066,195 @@ describe('Hub (e2e)', () => {
     ).toBeDefined();
   });
 
+  it('resynchronizes manual registry changes without overwriting administrative settings', async () => {
+    const rootLogin = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ id: 'root-admin', password: 'test-superuser-password' })
+      .expect(201);
+    const authorLogin = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ id: 'pack-author', password: 'a-secure-password' })
+      .expect(201);
+    const authorization = `Bearer ${rootLogin.body.access_token}`;
+    const packRoot = path.join(registryPath, 'manual-sync-pack');
+    const writeRelease = async (
+      version: string,
+      name: string,
+      description: string,
+      id = 'manual-sync-pack',
+    ) => {
+      const releaseRoot = path.join(packRoot, version);
+      await fs.mkdir(releaseRoot, { recursive: true });
+      await fs.writeFile(
+        path.join(releaseRoot, 'pack.json'),
+        JSON.stringify({ id, name, description, version }),
+      );
+      await fs.writeFile(path.join(releaseRoot, 'README.md'), `# ${name}\n`);
+    };
+
+    await request(app.getHttpServer())
+      .post('/api/admin/packs/resync')
+      .set('Authorization', `Bearer ${authorLogin.body.access_token}`)
+      .send({})
+      .expect(403);
+
+    await writeRelease('1.0.0', 'Manual Pack', 'Initial metadata');
+    const first = await request(app.getHttpServer())
+      .post('/api/admin/packs/resync')
+      .set('Authorization', authorization)
+      .send({})
+      .expect(201);
+    expect(first.body).toMatchObject({
+      packs_added: ['manual-sync-pack'],
+      releases_added: ['manual-sync-pack@1.0.0'],
+      issues: [],
+    });
+
+    await request(app.getHttpServer())
+      .patch('/api/admin/packs/manual-sync-pack')
+      .set('Authorization', authorization)
+      .send({ visibility: 'restricted', archived: true })
+      .expect(200);
+    await request(app.getHttpServer())
+      .post(
+        `/api/admin/packs/manual-sync-pack/maintainers/${authorLogin.body.user.uuid}`,
+      )
+      .set('Authorization', authorization)
+      .send({ allowed: true })
+      .expect(201);
+
+    await fs.rm(path.join(packRoot, '1.0.0'), {
+      recursive: true,
+      force: true,
+    });
+    await writeRelease('1.1.0', 'Manual Pack Updated', 'Current metadata');
+    await writeRelease(
+      '2.0.0',
+      'Broken Manual Pack',
+      'Should not replace metadata',
+      'wrong-id',
+    );
+    const second = await request(app.getHttpServer())
+      .post('/api/admin/packs/resync')
+      .set('Authorization', authorization)
+      .send({})
+      .expect(201);
+    expect(second.body.packs_updated).toEqual(['manual-sync-pack']);
+    expect(second.body.releases_added).toEqual(['manual-sync-pack@1.1.0']);
+    expect(second.body.releases_removed).toEqual(['manual-sync-pack@1.0.0']);
+    expect(second.body.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: 'manual-sync-pack/2.0.0' }),
+      ]),
+    );
+    expect(JSON.stringify(second.body.issues)).not.toContain(registryPath);
+
+    await request(app.getHttpServer())
+      .post('/api/admin/packs/manual-sync-pack/releases/1.1.0/yank')
+      .set('Authorization', authorization)
+      .send({ yanked: true })
+      .expect(201);
+    const packs = await request(app.getHttpServer())
+      .get('/api/admin/packs')
+      .set('Authorization', authorization)
+      .expect(200);
+    expect(packs.body).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'manual-sync-pack',
+          name: 'Manual Pack Updated',
+          description: 'Current metadata',
+          visibility: 'restricted',
+          archived: true,
+          releases: [
+            expect.objectContaining({ version: '1.1.0', yanked: true }),
+          ],
+          maintainers: [expect.objectContaining({ id: 'pack-author' })],
+        }),
+      ]),
+    );
+
+    await writeRelease(
+      '1.1.0',
+      'Temporarily Invalid',
+      'Existing row must survive',
+      'wrong-id',
+    );
+    const invalidExisting = await request(app.getHttpServer())
+      .post('/api/admin/packs/resync')
+      .set('Authorization', authorization)
+      .send({})
+      .expect(201);
+    expect(invalidExisting.body.releases_removed).not.toContain(
+      'manual-sync-pack@1.1.0',
+    );
+    const preserved = await request(app.getHttpServer())
+      .get('/api/admin/packs')
+      .set('Authorization', authorization)
+      .expect(200);
+    expect(
+      preserved.body.find(
+        (pack: { id: string }) => pack.id === 'manual-sync-pack',
+      ).releases,
+    ).toEqual([expect.objectContaining({ version: '1.1.0', yanked: true })]);
+
+    await fs.rm(path.join(packRoot, '1.1.0'), {
+      recursive: true,
+      force: true,
+    });
+    await fs.rm(path.join(packRoot, '2.0.0'), {
+      recursive: true,
+      force: true,
+    });
+    const emptied = await request(app.getHttpServer())
+      .post('/api/admin/packs/resync')
+      .set('Authorization', authorization)
+      .send({})
+      .expect(201);
+    expect(emptied.body.releases_removed).toEqual(['manual-sync-pack@1.1.0']);
+    expect(emptied.body.packs_removed).not.toContain('manual-sync-pack');
+
+    await fs.rm(packRoot, { recursive: true, force: true });
+    const removed = await request(app.getHttpServer())
+      .post('/api/admin/packs/resync')
+      .set('Authorization', authorization)
+      .send({})
+      .expect(201);
+    expect(removed.body.packs_removed).toEqual(['manual-sync-pack']);
+    expect(
+      app
+        .get(DatabaseService)
+        .db.prepare(
+          "SELECT 1 FROM audit_log WHERE action = 'registry.resync' AND actor_uuid = ?",
+        )
+        .get(String(rootLogin.body.user.uuid)),
+    ).toBeDefined();
+
+    const database = app.get(DatabaseService).db;
+    const beforeUnavailable = (
+      database.prepare('SELECT COUNT(*) AS count FROM packs').get() as {
+        count: number;
+      }
+    ).count;
+    const unavailablePath = `${registryPath}-unavailable`;
+    await fs.rename(registryPath, unavailablePath);
+    try {
+      await request(app.getHttpServer())
+        .post('/api/admin/packs/resync')
+        .set('Authorization', authorization)
+        .send({})
+        .expect(503);
+      const afterUnavailable = (
+        database.prepare('SELECT COUNT(*) AS count FROM packs').get() as {
+          count: number;
+        }
+      ).count;
+      expect(afterUnavailable).toBe(beforeUnavailable);
+    } finally {
+      await fs.rename(unavailablePath, registryPath);
+    }
+  });
+
   it('lists filtered review history with comments, identities, and cursors', async () => {
     const rootLogin = await request(app.getHttpServer())
       .post('/api/auth/login')

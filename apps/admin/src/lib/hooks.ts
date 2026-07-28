@@ -1,6 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   AdminPack as Pack,
+  RegistryResyncResult,
   AdminUser as User,
   PendingPublishRequest as RequestItem,
 } from "@nest/shared";
@@ -22,4 +23,18 @@ export function useAdminData() {
     queryFn: () => api<Pack[]>("/api/admin/packs"),
   });
   return { users, reviews, packs };
+}
+
+export function useRegistryResync() {
+  const api = useApi();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      api<RegistryResyncResult>("/api/admin/packs/resync", {
+        method: "POST",
+        body: "{}",
+      }),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: adminQueryKeys.packs }),
+  });
 }

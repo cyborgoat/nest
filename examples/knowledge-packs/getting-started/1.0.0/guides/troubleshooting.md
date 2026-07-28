@@ -22,7 +22,9 @@ Cookies are marked `Secure` only for HTTPS requests.
 
 ## Import or publish fails
 
-- Confirm the ZIP contains one top-level pack folder.
+- For folder imports, include at least one Markdown file. `pack.json` is
+  optional because Nest generates it from the metadata you confirm.
+- For ZIP imports, confirm the archive contains one pack and its `pack.json`.
 - Check that `pack.json.id` matches the folder and uses a valid ID.
 - Check that `pack.json.version` is valid SemVer and not already published.
 - Include at least one Markdown file.

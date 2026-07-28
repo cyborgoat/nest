@@ -114,5 +114,12 @@ uv.lock
 .node_repl_history
 .yarn-integrity
 
-# Extra added examples
-/examples/
+# Ignore extra/generated examples while keeping the bundled tutorial editable.
+/examples/*
+!/examples/knowledge-packs/
+/examples/knowledge-packs/*
+!/examples/knowledge-packs/README.md
+!/examples/knowledge-packs/getting-started/
+/examples/knowledge-packs/getting-started/*
+!/examples/knowledge-packs/getting-started/1.0.0/
+!/examples/knowledge-packs/getting-started/1.0.0/**

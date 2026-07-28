@@ -24,6 +24,7 @@ import {
   ItemTitle,
 } from "../components/Item";
 import { UploadPackDialog } from "../components/UploadPackDialog";
+import { RegistryResyncNotice } from "../components/RegistryResyncNotice";
 import {
   Badge,
   Button,
@@ -35,7 +36,7 @@ import {
 } from "../components/ui";
 import { useApi } from "../app/contexts";
 import { adminQueryKeys } from "../lib/api";
-import { useAdminData } from "../lib/hooks";
+import { useAdminData, useRegistryResync } from "../lib/hooks";
 import { cn } from "../lib/cn";
 import { PageHeader } from "../layout/PageHeader";
 
@@ -55,6 +56,7 @@ export function PacksPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [uploadOpen, setUploadOpen] = useState(false);
+  const resync = useRegistryResync();
   const upload = useMutation({
     mutationFn: (file: File) => {
       const body = new FormData();
@@ -104,10 +106,9 @@ export function PacksPage() {
         actions={
           <div className="flex items-center gap-2">
             <RefreshButton
-              onClick={() =>
-                qc.invalidateQueries({ queryKey: adminQueryKeys.packs })
-              }
-              busy={packs.isFetching}
+              onClick={() => resync.mutate()}
+              busy={resync.isPending || packs.isFetching}
+              label="Resync with registry folder"
             />
             <Button onClick={() => setUploadOpen(true)}>
               <Upload className="size-4" />
@@ -116,7 +117,10 @@ export function PacksPage() {
           </div>
         }
       />
-      {packs.error && <ErrorBox error={packs.error} />}
+      {(packs.error || resync.error) && (
+        <ErrorBox error={packs.error || resync.error} />
+      )}
+      <RegistryResyncNotice result={resync.data} />
       <Card className="overflow-hidden p-0">
         <div className="flex flex-col gap-3 border-b border-border p-4 lg:flex-row lg:items-center lg:justify-between">
           <InputGroup className="w-full lg:max-w-md">

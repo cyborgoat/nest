@@ -56,6 +56,13 @@ Hub now imports filesystem releases into its SQLite control catalog. Release byt
 
 Download zip layout: top-level folder `{id}/` including `pack.json` (vault paths stay `getting-started/...`).
 
+Administrators who make emergency filesystem changes can use the refresh
+action on the admin pack pages. It calls `POST /api/admin/packs/resync` to add
+or update valid filesystem entries and remove database rows for directories
+that no longer exist. Invalid manifests are reported without deleting their
+existing database records. Pack visibility, archive state, maintainers, grants,
+yank state, and publishing history remain database-owned.
+
 ## Desktop / vault
 
 - Install one version per pack id at `vault/<id>/` (replace on upgrade), like `pip install pkg==x.y.z`.

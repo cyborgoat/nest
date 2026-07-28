@@ -191,6 +191,23 @@ export type AdminPack = {
   maintainers: AdminMaintainer[];
 };
 
+export type RegistryResyncIssue = {
+  /** Path relative to the configured registry root. */
+  path: string;
+  message: string;
+};
+
+export type RegistryResyncResult = {
+  completed_at: string;
+  packs_added: string[];
+  packs_updated: string[];
+  packs_removed: string[];
+  releases_added: string[];
+  releases_updated: string[];
+  releases_removed: string[];
+  issues: RegistryResyncIssue[];
+};
+
 export type InstalledPack = {
   pack_id: string;
   name: string;

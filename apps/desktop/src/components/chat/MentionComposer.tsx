@@ -20,7 +20,6 @@ type Candidate = MentionRef;
 type Props = {
   candidates: Candidate[];
   isGenerating?: boolean;
-  placeholders?: { emptyActive: string; ready: string };
   onSend: (text: string, focusPaths: string[]) => void;
   onStop?: () => void;
   canSend: boolean;
@@ -29,7 +28,6 @@ type Props = {
 export function MentionComposer({
   candidates,
   isGenerating = false,
-  placeholders,
   onSend,
   onStop,
   canSend,
@@ -149,13 +147,6 @@ export function MentionComposer({
     }
   };
 
-  const placeholder =
-    candidates.length === 0
-      ? (placeholders?.emptyActive ??
-        "Activate a pack in the Library to chat and use @…")
-      : (placeholders?.ready ??
-        "Ask about your knowledge… (@ for files/folders)");
-
   return (
     <div className="relative">
       <div
@@ -197,7 +188,7 @@ export function MentionComposer({
           ref={textareaRef}
           value={text}
           disabled={isGenerating}
-          placeholder={placeholder}
+          placeholder="Ask anything…"
           rows={2}
           className="block w-full resize-none bg-transparent pr-8 text-sm leading-5 text-foreground outline-none placeholder:text-muted-foreground"
           onChange={(e) => {

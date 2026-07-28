@@ -1,4 +1,10 @@
-# Publishing and Messages
+# Exporting, Publishing, and Messages
+
+## Export a portable copy
+
+Use **Export ZIP** from the installed pack actions. Nest includes the pack
+metadata and content in a portable archive that can be imported on another
+computer.
 
 ## Prepare a release
 

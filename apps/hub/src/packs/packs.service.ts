@@ -4,6 +4,7 @@ import {
   Logger,
   NotFoundException,
   OnModuleInit,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { createHash, randomUUID } from 'crypto';
 import { createReadStream, existsSync, promises as fs } from 'fs';
@@ -14,6 +15,7 @@ import { HubRuntimeConfig } from '../hub.config';
 import { DatabaseService } from '../database/database.service';
 import { isRegistryAdmin } from '../auth/access-policy';
 import type { AuthUser } from '../auth/auth.types';
+import type { RegistryResyncIssue, RegistryResyncResult } from '@nest/shared';
 import type { PackProject, PackRelease } from './pack.types';
 import { isValidSemVer, sortSemVerDesc } from './semver';
 
@@ -40,9 +42,22 @@ type RawPackJson = {
   yanked?: boolean;
 };
 
+type ScannedRelease = PackRelease & {
+  manifestModifiedAt: string;
+};
+
+type RegistryScan = {
+  projectDirectories: Set<string>;
+  unreadableProjects: Set<string>;
+  releaseDirectories: Set<string>;
+  releases: ScannedRelease[];
+  issues: RegistryResyncIssue[];
+};
+
 @Injectable()
 export class PacksService implements OnModuleInit {
   private readonly logger = new Logger(PacksService.name);
+  private registryReconcile: Promise<RegistryResyncResult> | null = null;
 
   constructor(
     private readonly config: HubRuntimeConfig,
@@ -199,6 +214,244 @@ export class PacksService implements OnModuleInit {
         );
       }
     })();
+  }
+
+  /**
+   * Reconcile database catalog rows with the registry directory. Unlike the
+   * additive startup sync, this is an explicit administrative operation and
+   * therefore also removes rows whose directories were manually removed.
+   */
+  reconcileRegistry(): Promise<RegistryResyncResult> {
+    if (this.registryReconcile) return this.registryReconcile;
+    this.registryReconcile = this.performRegistryReconciliation().finally(
+      () => {
+        this.registryReconcile = null;
+      },
+    );
+    return this.registryReconcile;
+  }
+
+  private async scanRegistryForReconciliation(): Promise<RegistryScan> {
+    const root = this.registryRoot();
+    const projects = await fs
+      .readdir(root, { withFileTypes: true })
+      .catch(() => {
+        throw new ServiceUnavailableException(
+          'The knowledge-pack registry folder is unavailable.',
+        );
+      });
+    const scan: RegistryScan = {
+      projectDirectories: new Set(),
+      unreadableProjects: new Set(),
+      releaseDirectories: new Set(),
+      releases: [],
+      issues: [],
+    };
+
+    for (const project of projects.sort((a, b) =>
+      a.name.localeCompare(b.name),
+    )) {
+      if (!project.isDirectory() || project.name.startsWith('.')) continue;
+      if (!PACK_ID_RE.test(project.name)) {
+        scan.issues.push({
+          path: project.name,
+          message: 'Pack folder name must be a lowercase, hyphenated pack ID.',
+        });
+        continue;
+      }
+      scan.projectDirectories.add(project.name);
+      const projectDir = path.join(root, project.name);
+      let versions;
+      try {
+        versions = await fs.readdir(projectDir, { withFileTypes: true });
+      } catch (error) {
+        scan.unreadableProjects.add(project.name);
+        const message = error instanceof Error ? error.message : String(error);
+        scan.issues.push({
+          path: project.name,
+          message: `Could not read pack folder: ${message.replaceAll(
+            projectDir,
+            project.name,
+          )}`,
+        });
+        continue;
+      }
+
+      for (const version of versions.sort((a, b) =>
+        a.name.localeCompare(b.name),
+      )) {
+        if (!version.isDirectory() || version.name.startsWith('.')) continue;
+        const relativePath = path.posix.join(project.name, version.name);
+        if (!isValidSemVer(version.name)) {
+          scan.issues.push({
+            path: relativePath,
+            message: 'Release folder name must be a valid semantic version.',
+          });
+          continue;
+        }
+        scan.releaseDirectories.add(`${project.name}@${version.name}`);
+        const versionDir = path.join(projectDir, version.name);
+        try {
+          const release = await this.readRelease(
+            project.name,
+            version.name,
+            versionDir,
+          );
+          if (!release) {
+            scan.issues.push({
+              path: relativePath,
+              message: 'Release folder is missing pack.json.',
+            });
+            continue;
+          }
+          const manifest = await fs.stat(path.join(versionDir, 'pack.json'));
+          scan.releases.push({
+            ...release,
+            manifestModifiedAt: manifest.mtime.toISOString(),
+          });
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          scan.issues.push({
+            path: relativePath,
+            message: message.replaceAll(versionDir, relativePath),
+          });
+        }
+      }
+    }
+    return scan;
+  }
+
+  private async performRegistryReconciliation(): Promise<RegistryResyncResult> {
+    const scan = await this.scanRegistryForReconciliation();
+    const completedAt = new Date().toISOString();
+    const result: RegistryResyncResult = {
+      completed_at: completedAt,
+      packs_added: [],
+      packs_updated: [],
+      packs_removed: [],
+      releases_added: [],
+      releases_updated: [],
+      releases_removed: [],
+      issues: scan.issues,
+    };
+    const db = this.database.db;
+    const existingPacks = db
+      .prepare('SELECT id, name, description FROM packs')
+      .all() as Array<{ id: string; name: string; description: string }>;
+    const existingReleases = db
+      .prepare('SELECT pack_id, version, storage_path FROM releases')
+      .all() as Array<{
+      pack_id: string;
+      version: string;
+      storage_path: string;
+    }>;
+    const packRows = new Map(existingPacks.map((pack) => [pack.id, pack]));
+    const releaseRows = new Map(
+      existingReleases.map((release) => [
+        `${release.pack_id}@${release.version}`,
+        release,
+      ]),
+    );
+    const releasesByPack = new Map<string, ScannedRelease[]>();
+    for (const release of scan.releases) {
+      const releases = releasesByPack.get(release.id) ?? [];
+      releases.push(release);
+      releasesByPack.set(release.id, releases);
+    }
+
+    db.transaction(() => {
+      for (const pack of existingPacks) {
+        if (scan.projectDirectories.has(pack.id)) continue;
+        result.packs_removed.push(pack.id);
+        for (const release of existingReleases) {
+          if (release.pack_id === pack.id) {
+            result.releases_removed.push(
+              `${release.pack_id}@${release.version}`,
+            );
+          }
+        }
+        db.prepare('DELETE FROM packs WHERE id = ?').run(pack.id);
+      }
+
+      for (const release of existingReleases) {
+        if (!scan.projectDirectories.has(release.pack_id)) continue;
+        if (scan.unreadableProjects.has(release.pack_id)) continue;
+        const key = `${release.pack_id}@${release.version}`;
+        if (scan.releaseDirectories.has(key)) continue;
+        result.releases_removed.push(key);
+        db.prepare(
+          'DELETE FROM releases WHERE pack_id = ? AND version = ?',
+        ).run(release.pack_id, release.version);
+      }
+
+      for (const [packId, releases] of releasesByPack) {
+        const latestVersion = sortSemVerDesc(
+          releases.map((release) => release.version),
+        )[0];
+        const latest = releases.find(
+          (release) => release.version === latestVersion,
+        )!;
+        const existing = packRows.get(packId);
+        if (!existing) {
+          db.prepare(
+            `INSERT INTO packs(id, name, description, visibility, archived, created_at, updated_at)
+             VALUES (?, ?, ?, 'public', 0, ?, ?)`,
+          ).run(
+            packId,
+            latest.name,
+            latest.description,
+            completedAt,
+            completedAt,
+          );
+          result.packs_added.push(packId);
+        } else if (
+          existing.name !== latest.name ||
+          existing.description !== latest.description
+        ) {
+          db.prepare(
+            'UPDATE packs SET name = ?, description = ?, updated_at = ? WHERE id = ?',
+          ).run(latest.name, latest.description, completedAt, packId);
+          result.packs_updated.push(packId);
+        }
+      }
+
+      for (const release of scan.releases) {
+        const key = `${release.id}@${release.version}`;
+        const storagePath = path.join(release.id, release.version);
+        const existing = releaseRows.get(key);
+        if (!existing) {
+          db.prepare(
+            `INSERT INTO releases(pack_id, version, storage_path, yanked, published_at)
+             VALUES (?, ?, ?, ?, ?)`,
+          ).run(
+            release.id,
+            release.version,
+            storagePath,
+            release.yanked ? 1 : 0,
+            release.manifestModifiedAt,
+          );
+          result.releases_added.push(key);
+        } else if (existing.storage_path !== storagePath) {
+          db.prepare(
+            'UPDATE releases SET storage_path = ? WHERE pack_id = ? AND version = ?',
+          ).run(storagePath, release.id, release.version);
+          result.releases_updated.push(key);
+        }
+      }
+    })();
+
+    for (const values of [
+      result.packs_added,
+      result.packs_updated,
+      result.packs_removed,
+      result.releases_added,
+      result.releases_updated,
+      result.releases_removed,
+    ]) {
+      values.sort();
+    }
+    return result;
   }
 
   async listReleases(

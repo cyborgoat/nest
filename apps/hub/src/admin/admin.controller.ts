@@ -123,6 +123,9 @@ export class AdminController {
   @Get('packs') packs() {
     return this.admin.listPacks();
   }
+  @Post('packs/resync') resyncPacks(@Req() req: Request) {
+    return this.admin.resyncRegistry(req.authUser!);
+  }
   @Patch('packs/:id') updatePack(
     @Req() req: Request,
     @Param('id') id: string,

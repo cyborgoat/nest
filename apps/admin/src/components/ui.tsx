@@ -124,16 +124,20 @@ export function ErrorBox({ error }: { error: unknown }) {
 export function RefreshButton({
   onClick,
   busy,
+  label = "Refresh",
 }: {
   onClick: () => void;
   busy: boolean;
+  label?: string;
 }) {
   return (
     <Button
       variant="outline"
       size="icon"
       onClick={onClick}
-      aria-label="Refresh"
+      disabled={busy}
+      aria-label={label}
+      title={label}
     >
       <RefreshCw className={busy ? "animate-spin" : ""} />
     </Button>

@@ -5,6 +5,7 @@ import { Archive, Check, Download, Eye, EyeOff, Trash2 } from "lucide-react";
 import type { PackVisibility } from "@nest/shared";
 import { Breadcrumbs } from "../components/Breadcrumbs";
 import { DeleteReleaseDialog } from "../components/DeleteReleaseDialog";
+import { RegistryResyncNotice } from "../components/RegistryResyncNotice";
 import { UserMultiPicker } from "../components/UserMultiPicker";
 import {
   Badge,
@@ -21,7 +22,7 @@ import {
 } from "../components/ui";
 import { useApi } from "../app/contexts";
 import { adminQueryKeys } from "../lib/api";
-import { useAdminData } from "../lib/hooks";
+import { useAdminData, useRegistryResync } from "../lib/hooks";
 import { PageHeader } from "../layout/PageHeader";
 
 export function PackDetailPage() {
@@ -30,6 +31,7 @@ export function PackDetailPage() {
   const api = useApi();
   const qc = useQueryClient();
   const { packs, users } = useAdminData();
+  const resync = useRegistryResync();
   const pack = packs.data?.find((item) => item.id === packId);
   const [deleteReleaseTarget, setDeleteReleaseTarget] = useState<{
     packName: string;
@@ -115,10 +117,9 @@ export function PackDetailPage() {
         actions={
           <div className="flex flex-wrap items-center justify-end gap-2">
             <RefreshButton
-              onClick={() =>
-                qc.invalidateQueries({ queryKey: adminQueryKeys.packs })
-              }
-              busy={packs.isFetching}
+              onClick={() => resync.mutate()}
+              busy={resync.isPending || packs.isFetching}
+              label="Resync with registry folder"
             />
             {pack.latest_version && (
               <a
@@ -141,11 +142,20 @@ export function PackDetailPage() {
           </div>
         }
       />
-      {(releaseAndAccess.error || update.error || removeRelease.error) && (
+      {(releaseAndAccess.error ||
+        update.error ||
+        removeRelease.error ||
+        resync.error) && (
         <ErrorBox
-          error={releaseAndAccess.error || update.error || removeRelease.error}
+          error={
+            releaseAndAccess.error ||
+            update.error ||
+            removeRelease.error ||
+            resync.error
+          }
         />
       )}
+      <RegistryResyncNotice result={resync.data} />
       <div className="grid gap-5 xl:grid-cols-[1fr_420px]">
         <div className="space-y-5">
           <Card>
