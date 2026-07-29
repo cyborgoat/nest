@@ -1,4 +1,5 @@
 use crate::error::{AppError, AppResult};
+use crate::retrieval::snippet;
 use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -548,14 +549,6 @@ fn path_in_prefixes(path: &str, prefixes: &[String]) -> bool {
     prefixes.iter().any(|s| {
         path == s || path.starts_with(&format!("{s}/")) || s.starts_with(&format!("{path}/"))
     })
-}
-
-fn snippet(content: &str) -> String {
-    if content.len() > 280 {
-        format!("{}…", &content[..280])
-    } else {
-        content.to_string()
-    }
 }
 
 pub fn fts_search(

@@ -10,20 +10,27 @@ use crate::retrieval::{
 use crate::state::SharedState;
 use crate::vault;
 use futures::StreamExt;
-use rig::agent::MultiTurnStreamItem;
+use rig::agent::{AgentHook, Flow, HookContext, MultiTurnStreamItem, StepEvent};
 use rig::client::CompletionClient;
 use rig::completion::message::Text;
-use rig::completion::Message;
+use rig::completion::{CompletionModel, Message};
 use rig::providers::openai;
 use rig::streaming::{StreamedAssistantContent, StreamingChat};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
+use tokio::sync::watch;
 
 const MAX_FOCUS_FILES: usize = 16;
 const MAX_FOCUS_CHARS_PER_FILE: usize = 6_000;
 const MAX_FOCUS_CHARS_TOTAL: usize = 48_000;
+/// Bound on building `@`-focus content (vault walk + file reads). This is
+/// local disk I/O, not an LLM call, so it should normally finish in well
+/// under a second even for a large folder — the timeout only exists to
+/// catch a slow/unresponsive read (network-mounted path, unsynced cloud
+/// placeholder, ...) that would otherwise hang the turn forever.
+const FOCUS_CONTEXT_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Result of a completed agent chat run.
 pub struct AgentChatResult {
@@ -49,6 +56,25 @@ pub struct AgentChatRequest {
 struct FocusContext {
     text: String,
     citations: Vec<Citation>,
+}
+
+/// Rig `AgentHook` that terminates the run if the user clicked "Stop" before
+/// this turn's model request was sent. Additive to (not a replacement for)
+/// the streaming loop's own cancellation: `StepEvent` has no reasoning/thinking
+/// delta variant, so the loop must keep consuming the raw stream itself for
+/// the "Thinking…" UI — this hook only closes the earlier, narrower gap.
+struct CancelHook {
+    cancel_rx: watch::Receiver<bool>,
+}
+
+impl<M: CompletionModel> AgentHook<M> for CancelHook {
+    async fn on_event(&self, _ctx: &HookContext, event: StepEvent<'_, M>) -> Flow {
+        if matches!(event, StepEvent::CompletionCall { .. }) && *self.cancel_rx.borrow() {
+            Flow::terminate("cancelled")
+        } else {
+            Flow::Continue
+        }
+    }
 }
 
 async fn emit_reading_files(app: &AppHandle, stream_event: &str, paths: &[String]) {
@@ -113,14 +139,20 @@ pub async fn run_agent_chat(request: AgentChatRequest) -> AppResult<AgentChatRes
         .cloned()
         .collect::<Vec<_>>();
     // `build_focus_context` does a synchronous, potentially slow filesystem
-    // walk (`vault::list_tree`) — run it on a blocking-pool thread so it
-    // can't stall the async runtime that's also driving other in-flight
-    // chat streams.
+    // walk and file reads (`vault::list_tree`, `vault::read_file`) — run it
+    // on a blocking-pool thread so it can't stall the async runtime that's
+    // also driving other in-flight chat streams. Bound it with a timeout and
+    // race it against cancellation: a slow/unresponsive read has no other
+    // bound, and Tokio cannot forcibly abort a `spawn_blocking` closure once
+    // it starts running — the timeout/cancel here make the *request* give up
+    // promptly (what "Stop" needs to do), even though the underlying
+    // blocking-pool thread may keep running the stuck read in the background
+    // until it eventually finishes or errors on its own.
     let vault_root = state.vault_path();
-    let focus_context =
-        tokio::task::spawn_blocking(move || build_focus_context(&vault_root, &valid_focus_paths))
-            .await
-            .map_err(|e| AppError::msg(format!("Focus context task failed: {e}")))??;
+    let focus_context = tokio::select! {
+        result = build_focus_context_bounded(vault_root, valid_focus_paths, FOCUS_CONTEXT_TIMEOUT) => result?,
+        _ = cancel_rx.changed() => return Err(AppError::msg("cancelled")),
+    };
     let agent_query = if focus_context.text.is_empty() {
         query.clone()
     } else {
@@ -149,17 +181,18 @@ pub async fn run_agent_chat(request: AgentChatRequest) -> AppResult<AgentChatRes
     // Retrieval is deliberately completed before any LLM network request. The
     // previous best-effort call discarded errors and only updated the UI, so a
     // bundled build could silently bypass local search and start the model call.
-    let eager = retrieval::retrieve(
-        &app_data_dir,
-        &state,
-        &query,
-        &retrieval_prefixes,
-        DEFAULT_TOP_K,
-    )
-    .await?;
-    if *cancel_rx.borrow() {
-        return Err(AppError::msg("cancelled"));
-    }
+    // Raced against cancellation (a real async future, so dropping it here
+    // actually stops the in-flight work, unlike the `spawn_blocking` above).
+    let eager = tokio::select! {
+        result = retrieval::retrieve(
+            &app_data_dir,
+            &state,
+            &query,
+            &retrieval_prefixes,
+            DEFAULT_TOP_K,
+        ) => result?,
+        _ = cancel_rx.changed() => return Err(AppError::msg("cancelled")),
+    };
     crate::nest_debug!("agent", "eager_retrieval hits={}", eager.len());
     let focus_count = focus_context.citations.len();
     let citations = merge_citations(focus_context.citations, eager);
@@ -183,7 +216,18 @@ pub async fn run_agent_chat(request: AgentChatRequest) -> AppResult<AgentChatRes
 
     let _ = app.emit(&stream_event, ChatStreamEvent::Generating);
 
-    let mut stream = agent.stream_chat(agent_query, prior_history).await;
+    // Closes the one cancellation gap the loop below can't cover: whatever
+    // `stream_chat(...)` does internally before the stream object exists (and
+    // the loop's own `cancel_rx`-aware `select!` starts). `CompletionCall`
+    // fires before the model request is sent, honors `Flow::Terminate`, and
+    // is the rig-native checkpoint for exactly this — see
+    // `rig::agent::hook` docs.
+    let mut stream = agent
+        .stream_chat(agent_query, prior_history)
+        .add_hook(CancelHook {
+            cancel_rx: cancel_rx.clone(),
+        })
+        .await;
 
     let mut full = String::new();
     let mut thinking = String::new();
@@ -364,6 +408,29 @@ fn agent_preamble_with_retrieval(
     format!("{body}\n\n{}", format_active_packs_for_prompt(active_packs))
 }
 
+/// Runs [`build_focus_context`] on a blocking-pool thread, bounded by
+/// `timeout`. Tokio cannot forcibly abort a `spawn_blocking` closure once it
+/// starts running, so a slow/unresponsive read (network-mounted path,
+/// unsynced cloud placeholder, ...) leaves the underlying thread running in
+/// the background regardless — this only bounds how long the *caller* waits.
+async fn build_focus_context_bounded(
+    vault: PathBuf,
+    focus_paths: Vec<String>,
+    timeout: Duration,
+) -> AppResult<FocusContext> {
+    let focus_task = tokio::task::spawn_blocking(move || build_focus_context(&vault, &focus_paths));
+    match tokio::time::timeout(timeout, focus_task).await {
+        Ok(Ok(inner)) => inner,
+        Ok(Err(join_err)) => Err(AppError::msg(format!(
+            "Focus context task failed: {join_err}"
+        ))),
+        Err(_elapsed) => Err(AppError::msg(
+            "Timed out reading the selected file(s) or folder — check they're accessible \
+             (not a disconnected network drive, an unsynced cloud file, etc.).",
+        )),
+    }
+}
+
 fn build_focus_context(vault: &Path, focus_paths: &[String]) -> AppResult<FocusContext> {
     if focus_paths.is_empty() {
         return Ok(FocusContext::default());
@@ -468,16 +535,60 @@ fn truncate_chars(content: &str, max_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        agent_preamble_with_retrieval, collect_markdown_files, llm_request_error, merge_citations,
-        truncate_chars,
+        agent_preamble_with_retrieval, build_focus_context_bounded, collect_markdown_files,
+        llm_request_error, merge_citations, truncate_chars,
     };
     use crate::db::{AppSettings, Citation, InstalledPack};
     use crate::vault::{TreeNode, TreeNodeKind};
+    use std::time::Duration;
 
     #[test]
     fn truncates_unicode_on_character_boundaries() {
         assert_eq!(truncate_chars("知识库 content", 3), "知识库…");
         assert_eq!(truncate_chars("短文", 4), "短文");
+    }
+
+    /// Mirrors `build_focus_context_bounded`'s technique directly: a
+    /// `spawn_blocking` closure that outlives the timeout (as a genuinely
+    /// stuck disk read might — a network-mounted path, an unsynced cloud
+    /// placeholder, ...) is still bounded by `tokio::time::timeout` from the
+    /// awaiting side, even though Tokio cannot forcibly abort the
+    /// blocking-pool thread itself once it starts running. This is the exact
+    /// risk `build_focus_context_bounded` mitigates; reproducing a real vault
+    /// file that both passes `vault::read_file`'s `is_file()` check *and*
+    /// blocks on read (a FIFO fails the former) isn't practical in a fast,
+    /// portable unit test, so this exercises the underlying combinator
+    /// directly instead. Sleep is kept short (not a "forever" hang): the test
+    /// runtime waits for the orphaned blocking thread to actually finish
+    /// before the process can exit, so a longer sleep here would tax every
+    /// test run with real wall-clock time — the 100ms timeout still fires
+    /// and returns well before the 1s sleep completes either way.
+    #[tokio::test]
+    async fn spawn_blocking_stuck_read_is_bounded_by_timeout() {
+        let task = tokio::task::spawn_blocking(|| {
+            std::thread::sleep(Duration::from_secs(1));
+        });
+        let result = tokio::time::timeout(Duration::from_millis(100), task).await;
+        assert!(
+            result.is_err(),
+            "expected the timeout to fire before the stuck blocking task finished"
+        );
+    }
+
+    #[tokio::test]
+    async fn build_focus_context_bounded_reads_a_normal_file_quickly() {
+        let dir = std::env::temp_dir().join("nest-agent-focus-context-bounded");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("note.md"), "hello from the vault").unwrap();
+
+        let result =
+            build_focus_context_bounded(dir, vec!["note.md".to_string()], Duration::from_secs(5))
+                .await
+                .expect("a normal, fast file read should not time out");
+
+        assert!(result.text.contains("hello from the vault"));
+        assert_eq!(result.citations.len(), 1);
     }
 
     #[test]

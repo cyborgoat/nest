@@ -171,7 +171,11 @@ fn char_suffix(s: &str, n: usize) -> String {
     s.chars().skip(total.saturating_sub(n)).collect()
 }
 
-fn snippet(content: &str) -> String {
+/// Truncates to at most 280 *characters* (not bytes) — a raw byte-index slice
+/// panics whenever the boundary lands mid-character, which any non-ASCII
+/// vault content (CJK, accented text, emoji, ...) makes a real, not
+/// theoretical, risk.
+pub(crate) fn snippet(content: &str) -> String {
     let mut chars = content.chars();
     let prefix = chars.by_ref().take(280).collect::<String>();
     if chars.next().is_some() {

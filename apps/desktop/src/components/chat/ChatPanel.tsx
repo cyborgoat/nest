@@ -274,26 +274,27 @@ export function ChatPanel() {
     },
     onSuccess: (assistantMsg, vars) => {
       flushStream();
+      // The backend already persisted the user's message before generation
+      // started (commands.rs's chat_send inserts it before calling into the
+      // agent), so it's never fabricated here — only the assistant reply
+      // needs adding. A tab left inactive during generation has a stale
+      // cache that doesn't yet contain that user row; reconstructing it from
+      // `vars.query` here raced against the tab-switch-triggered background
+      // refetch, producing a visible duplicate. Appending just the reply and
+      // invalidating (instead of trying to out-guess the DB) lets the next
+      // fetch reconcile the cache with the authoritative backend state.
       queryClient.setQueryData<ChatMessage[]>(
         queryKeys.chatMessages(vars.sessionId),
         (old) => {
-          const list = [...(old ?? [])];
-          if (
-            !list.some((m) => m.role === "user" && m.content === vars.query)
-          ) {
-            list.push({
-              id: `local-user-${Date.now()}`,
-              role: "user",
-              content: vars.query,
-              created_at: new Date().toISOString(),
-            });
-          }
-          if (!list.some((m) => m.id === assistantMsg.id)) {
-            list.push(assistantMsg);
-          }
-          return list;
+          const list = old ?? [];
+          return list.some((m) => m.id === assistantMsg.id)
+            ? list
+            : [...list, assistantMsg];
         },
       );
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.chatMessages(vars.sessionId),
+      });
       setPendingUser(null);
       setAgentActivity(null);
       setIsSending(false);
