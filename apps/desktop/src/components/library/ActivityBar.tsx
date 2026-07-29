@@ -1,4 +1,4 @@
-import { Files, GitBranch } from "lucide-react";
+import { Files, GitBranch, PackageSearch } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Tooltip,
@@ -15,12 +15,15 @@ const ITEMS: {
 }[] = [
   { view: "explorer", icon: Files, label: "Explorer" },
   { view: "source-control", icon: GitBranch, label: "Source Control" },
+  { view: "reviews", icon: PackageSearch, label: "Under Review" },
 ];
 
 export function ActivityBar({
   hasSourceControlChanges,
+  hasPacksUnderReview,
 }: {
   hasSourceControlChanges: boolean;
+  hasPacksUnderReview: boolean;
 }) {
   const activeView = useUiStore((s) => s.activitySidebarView);
   const setActiveView = useUiStore((s) => s.setActivitySidebarView);
@@ -31,7 +34,9 @@ export function ActivityBar({
     <nav className="flex w-11 shrink-0 flex-col items-center gap-1 border-r border-border bg-sidebar/60 py-2">
       {ITEMS.map(({ view, icon: Icon, label }) => {
         const isOpenAndActive = sidebarOpen && activeView === view;
-        const showDot = view === "source-control" && hasSourceControlChanges;
+        const showDot =
+          (view === "source-control" && hasSourceControlChanges) ||
+          (view === "reviews" && hasPacksUnderReview);
         return (
           <Tooltip key={view}>
             <TooltipTrigger asChild>

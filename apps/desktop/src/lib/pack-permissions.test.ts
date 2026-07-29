@@ -15,6 +15,8 @@ function pack(overrides: Partial<InstalledPack> = {}): InstalledPack {
     description: "",
     pending_version: null,
     pending_request_id: null,
+    publish_review_status: null,
+    publish_review_created_at: null,
     ...overrides,
   };
 }

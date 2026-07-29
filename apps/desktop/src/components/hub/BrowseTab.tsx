@@ -207,8 +207,9 @@ function PackRow({
   }, [project.id, project.latest_version, installed?.version]);
 
   const isInstalled = !!installed;
+  const reviewLocked = Boolean(installed?.pending_request_id);
   const updateAvailable =
-    isInstalled && installed.version !== project.latest_version;
+    isInstalled && !reviewLocked && installed.version !== project.latest_version;
   const selectedIsInstalled =
     isInstalled && installed.version === selectedVersion;
   const selectedVersionDelta = installed
@@ -291,6 +292,7 @@ function PackRow({
           {isInstalled && (
             <div className="mt-1 flex items-center gap-1.5">
               <Badge variant="muted">{t("hub.installedLabel", { version: installed.version })}</Badge>
+              {reviewLocked && <Badge variant="accent">Publish review active</Badge>}
               {updateAvailable && <Badge variant="update">{t("hub.updateAvailable")}</Badge>}
             </div>
           )}
@@ -301,7 +303,7 @@ function PackRow({
                   <Button
                     size="sm"
                     className="h-7 gap-1 bg-success-muted px-2 text-[11px] text-success hover:bg-success-muted-hover"
-                    disabled={busy}
+                    disabled={busy || reviewLocked}
                     onClick={() => installVersion(project.latest_version)}
                   >
                     {downloading ? (
@@ -317,7 +319,7 @@ function PackRow({
                   <Button
                     size="sm"
                     className="h-7 gap-1 px-2 text-[11px]"
-                    disabled={busy}
+                    disabled={busy || reviewLocked}
                     onClick={requestInstall}
                   >
                     {downloading ? (

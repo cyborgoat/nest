@@ -6,6 +6,7 @@ import {
   GitBranch,
   GitCompare,
   Loader2,
+  Merge,
   Package,
   Undo2,
 } from "lucide-react";
@@ -19,6 +20,7 @@ import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { PublishPackDialog } from "@/components/hub/PublishPackDialog";
 import { usePublishPack } from "@/hooks/use-publish-pack";
+import { useMergeApprovedPack } from "@/hooks/use-merge-approved-pack";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -85,6 +87,7 @@ function PackChanges({
   );
 
   const publish = usePublishPack();
+  const mergeApproved = useMergeApprovedPack();
 
   const discard = useMutation({
     mutationFn: (change: FileStatus) =>
@@ -106,6 +109,11 @@ function PackChanges({
       void queryClient.invalidateQueries({
         queryKey: queryKeys.fileDiff(pack.pack_id, change.path),
       });
+      if (change.kind === "image") {
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.vaultImage(change.path),
+        });
+      }
       toast.success("Change discarded");
     },
     onError: (error: Error) =>
@@ -113,8 +121,6 @@ function PackChanges({
         description: error.message,
       }),
   });
-
-  if (statuses.length === 0) return null;
 
   return (
     <section className="space-y-1">
@@ -124,7 +130,7 @@ function PackChanges({
         <span className="shrink-0 font-normal normal-case tracking-normal opacity-70">
           ({statuses.length})
         </span>
-        {pack.pending_version && (
+        {pack.publish_review_status === "pending" && pack.pending_version && (
           <Badge
             variant="accent"
             className="shrink-0 normal-case tracking-normal"
@@ -132,6 +138,15 @@ function PackChanges({
             v{pack.pending_version} under review
           </Badge>
         )}
+        {pack.publish_review_status === "approved_awaiting_merge" &&
+          pack.pending_version && (
+            <Badge
+              variant="update"
+              className="shrink-0 normal-case tracking-normal"
+            >
+              v{pack.pending_version} approved
+            </Badge>
+          )}
         {recentlyRejected && !pack.pending_version && (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -173,13 +188,43 @@ function PackChanges({
           </TooltipTrigger>
           <TooltipContent side="right">
             {pack.pending_version
-              ? `v${pack.pending_version} is awaiting review`
+              ? pack.publish_review_status === "approved_awaiting_merge"
+                ? `v${pack.pending_version} is approved and ready to merge`
+                : `v${pack.pending_version} is awaiting review`
               : authenticated
                 ? "Publish pack"
                 : "Sign in to publish"}
           </TooltipContent>
         </Tooltip>
       </SectionLabel>
+      {pack.publish_review_status === "approved_awaiting_merge" &&
+        pack.pending_request_id && (
+          <div className="mx-3 mb-2 rounded-md border border-success/30 bg-success/5 p-2.5">
+            <p className="text-xs leading-5 text-muted-foreground">
+              The reviewed Hub release is ready to become this pack’s remote
+              baseline. Local files will be preserved.
+            </p>
+            <Button
+              size="sm"
+              className="mt-2 w-full"
+              disabled={mergeApproved.isPending}
+              onClick={() =>
+                mergeApproved.mutate({
+                  packId: pack.pack_id,
+                  requestId: pack.pending_request_id!,
+                })
+              }
+            >
+              {mergeApproved.isPending ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Merge className="size-4" />
+              )}
+              Merge with remote
+            </Button>
+          </div>
+        )}
+      {statuses.length > 0 && (
       <div className="ml-3 border-l border-border/60 pb-2">
         {statuses.map((s) => {
           const relativePath = s.path.startsWith(`${pack.local_path}/`)
@@ -269,7 +314,10 @@ function PackChanges({
                   Open Changes
                 </ContextMenuItem>
                 <ContextMenuItem
-                  disabled={s.status === "deleted"}
+                  disabled={
+                    s.status === "deleted" ||
+                    !s.path.toLowerCase().endsWith(".md")
+                  }
                   onSelect={() => openFileTab(s.path, { preview: false })}
                 >
                   <FileText className="size-3.5" />
@@ -289,6 +337,7 @@ function PackChanges({
           );
         })}
       </div>
+      )}
       <PublishPackDialog
         open={publishDialogOpen}
         onOpenChange={setPublishDialogOpen}
@@ -359,7 +408,11 @@ export function SourceControlPanel({
 
   const sections = editablePacks
     .map((pack, i) => ({ pack, statuses: statusQueries[i]?.data ?? [] }))
-    .filter((s) => s.statuses.length > 0);
+    .filter(
+      (s) =>
+        s.statuses.length > 0 ||
+        s.pack.publish_review_status === "approved_awaiting_merge",
+    );
 
   const refreshCloudStatus = async () => {
     const refreshedPacks = await api.hubReconcilePublishRequests();

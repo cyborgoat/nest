@@ -32,8 +32,8 @@ Cookies are marked `Secure` only for HTTPS requests.
 
 ## Local changes look stale
 
-Save the editor, then use Source Control refresh. If a remote review recently
-resolved, refreshing updates the pending state and approved baseline.
+Save the editor, then use Source Control refresh. If a remote review was
+approved, refresh and choose **Merge with remote** to update the baseline.
 
 ## A local image does not render
 

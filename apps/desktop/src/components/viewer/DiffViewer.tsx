@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { GitCompare } from "lucide-react";
+import { FileQuestion, GitCompare, Image as ImageIcon } from "lucide-react";
 import { PanelHeader } from "@/components/ui/panel-header";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { api } from "@/lib/api";
@@ -51,7 +51,7 @@ export function DiffViewer({ packId, path }: { packId: string; path: string }) {
     queryFn: () => api.hubPackFileDiff(packId, path),
   });
 
-  const rows = diffQuery.data
+  const rows = diffQuery.data?.kind === "text"
     ? buildSideBySideRows(diffQuery.data.old ?? "", diffQuery.data.new ?? "")
     : [];
 
@@ -67,6 +67,16 @@ export function DiffViewer({ packId, path }: { packId: string; path: string }) {
         <p className="p-4 text-sm text-destructive">
           {(diffQuery.error as Error).message}
         </p>
+      ) : diffQuery.data?.kind === "image" ? (
+        <div className="grid min-h-0 flex-1 grid-cols-2 divide-x">
+          <ImageSide label="Remote baseline" src={diffQuery.data.old} />
+          <ImageSide label="Local working copy" src={diffQuery.data.new} />
+        </div>
+      ) : diffQuery.data?.kind === "binary" ? (
+        <div className="grid min-h-0 flex-1 grid-cols-2 divide-x">
+          <BinarySide label="Remote baseline" value={diffQuery.data.old} />
+          <BinarySide label="Local working copy" value={diffQuery.data.new} />
+        </div>
       ) : (
         <div className="flex min-h-0 flex-1">
           <DiffColumn rows={rows} side="old" />
@@ -74,5 +84,50 @@ export function DiffViewer({ packId, path }: { packId: string; path: string }) {
         </div>
       )}
     </div>
+  );
+}
+
+function ImageSide({ label, src }: { label: string; src: string | null }) {
+  return (
+    <section className="flex min-w-0 flex-col">
+      <p className="border-b px-3 py-2 text-xs font-medium text-muted-foreground">
+        {label}
+      </p>
+      <div className="grid min-h-0 flex-1 place-items-center overflow-auto bg-muted/20 p-4">
+        {src ? (
+          <img src={src} alt={label} className="max-h-full max-w-full object-contain" />
+        ) : (
+          <div className="text-center text-sm text-muted-foreground">
+            <ImageIcon className="mx-auto mb-2 size-7" />
+            File not present
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function BinarySide({
+  label,
+  value,
+}: {
+  label: string;
+  value: { size: number; checksum: string } | null;
+}) {
+  return (
+    <section className="grid min-w-0 place-items-center p-6 text-center">
+      <div>
+        <FileQuestion className="mx-auto mb-3 size-8 text-muted-foreground" />
+        <p className="text-sm font-medium">{label}</p>
+        {value ? (
+          <dl className="mt-3 space-y-1 text-xs text-muted-foreground">
+            <div>{value.size.toLocaleString()} bytes</div>
+            <div className="font-mono">{value.checksum}</div>
+          </dl>
+        ) : (
+          <p className="mt-2 text-sm text-muted-foreground">File not present</p>
+        )}
+      </div>
+    </section>
   );
 }

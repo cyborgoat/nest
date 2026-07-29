@@ -14,6 +14,8 @@ import {
   CloudUpload,
   Eye,
   Trash2,
+  Merge,
+  Loader2,
   type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -41,7 +43,8 @@ import { api } from "@/lib/api";
 import { appErrorMessage } from "@/lib/errors";
 import { queryKeys } from "@/lib/query-keys";
 import { useUiStore } from "@/stores/ui";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useMergeApprovedPack } from "@/hooks/use-merge-approved-pack";
 
 const MESSAGE_KIND_STYLES: Partial<
   Record<HubMessageKind, { Icon: LucideIcon; iconClass: string }>
@@ -81,6 +84,12 @@ export function MessagesPanel() {
   const openAccountSettingsTab = useUiStore(
     (state) => state.openAccountSettingsTab,
   );
+  const requestedPublishMessageId = useUiStore(
+    (state) => state.requestedPublishMessageId,
+  );
+  const clearRequestedPublishMessage = useUiStore(
+    (state) => state.clearRequestedPublishMessage,
+  );
   const auth = useQuery({ queryKey: queryKeys.hubAuth, queryFn: api.hubAuthState });
   const messages = useInfiniteQuery({
     queryKey: queryKeys.messagesFor(filter),
@@ -91,12 +100,25 @@ export function MessagesPanel() {
     enabled: auth.data?.authenticated === true,
     refetchInterval: 30_000,
   });
+  const installed = useQuery({
+    queryKey: queryKeys.installedPacks,
+    queryFn: api.hubListInstalled,
+  });
+  const mergeApproved = useMergeApprovedPack();
   const refresh = async () => {
+    const reconciled = await api.hubReconcilePublishRequests();
+    queryClient.setQueryData(queryKeys.installedPacks, reconciled);
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: queryKeys.messages }),
       queryClient.invalidateQueries({ queryKey: queryKeys.messageCount }),
+      queryClient.invalidateQueries({ queryKey: ["pack-status"] }),
     ]);
   };
+  useEffect(() => {
+    if (auth.data?.authenticated) void refresh();
+    // Refresh once when the signed-in Messages view opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [auth.data?.authenticated]);
   const action = useMutation({
     mutationFn: async (input: { type: "read" | "delete"; id: string }) =>
       input.type === "read"
@@ -120,6 +142,40 @@ export function MessagesPanel() {
       }),
   });
   const items = messages.data?.pages.flatMap((page) => page.items) ?? [];
+  useEffect(() => {
+    if (!requestedPublishMessageId) return;
+    const match = items.find(
+      (message) => message.publish_request_id === requestedPublishMessageId,
+    );
+    if (match) {
+      setSelectedMessage(match);
+      clearRequestedPublishMessage();
+      return;
+    }
+    if (messages.hasNextPage && !messages.isFetchingNextPage) {
+      void messages.fetchNextPage();
+    }
+  }, [
+    clearRequestedPublishMessage,
+    items,
+    messages,
+    requestedPublishMessageId,
+  ]);
+
+  const mergeInputFor = (message: HubMessage) => {
+    if (message.kind !== "publish_approved" || !message.publish_request_id) {
+      return null;
+    }
+    const pack = (installed.data ?? []).find(
+      (candidate) =>
+        candidate.pack_id === message.pack_id &&
+        candidate.pending_request_id === message.publish_request_id &&
+        candidate.publish_review_status === "approved_awaiting_merge",
+    );
+    return pack
+      ? { packId: pack.pack_id, requestId: message.publish_request_id }
+      : null;
+  };
 
   return (
     <div className="flex h-full flex-col">
@@ -214,6 +270,12 @@ export function MessagesPanel() {
                         action.mutate({ type: "delete", id: message.id })
                       }
                       onView={() => setSelectedMessage(message)}
+                      onMerge={
+                        mergeInputFor(message)
+                          ? () => mergeApproved.mutate(mergeInputFor(message)!)
+                          : undefined
+                      }
+                      merging={mergeApproved.isPending}
                     />
                   ))}
                 </div>
@@ -235,6 +297,12 @@ export function MessagesPanel() {
       )}
       <MessageDetailsDialog
         message={selectedMessage}
+        onMerge={
+          selectedMessage && mergeInputFor(selectedMessage)
+            ? () => mergeApproved.mutate(mergeInputFor(selectedMessage)!)
+            : undefined
+        }
+        merging={mergeApproved.isPending}
         onOpenChange={(open) => {
           if (!open) setSelectedMessage(null);
         }}
@@ -249,12 +317,16 @@ function MessageRow({
   onRead,
   onDelete,
   onView,
+  onMerge,
+  merging,
 }: {
   message: HubMessage;
   busy: boolean;
   onRead: () => void;
   onDelete: () => void;
   onView: () => void;
+  onMerge?: () => void;
+  merging: boolean;
 }) {
   const unread = !message.read_at;
   const { Icon, iconClass } =
@@ -292,6 +364,28 @@ function MessageRow({
         </div>
       </div>
       <div className="flex shrink-0 gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+        {onMerge && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={merging}
+                onClick={onMerge}
+              >
+                {merging ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <Merge className="size-4" />
+                )}
+                Merge
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              Merge reviewed release with local pack
+            </TooltipContent>
+          </Tooltip>
+        )}
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -343,9 +437,13 @@ function MessageRow({
 function MessageDetailsDialog({
   message,
   onOpenChange,
+  onMerge,
+  merging,
 }: {
   message: HubMessage | null;
   onOpenChange: (open: boolean) => void;
+  onMerge?: () => void;
+  merging: boolean;
 }) {
   return (
     <Dialog open={message != null} onOpenChange={onOpenChange}>
@@ -380,6 +478,20 @@ function MessageDetailsDialog({
                   </div>
                 )}
               </dl>
+            )}
+            {onMerge && (
+              <Button
+                className="w-full"
+                disabled={merging}
+                onClick={onMerge}
+              >
+                {merging ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <Merge className="size-4" />
+                )}
+                Merge with remote
+              </Button>
             )}
           </div>
         )}

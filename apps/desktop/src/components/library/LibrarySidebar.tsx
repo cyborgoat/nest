@@ -1,6 +1,7 @@
 import type { InstalledPack, TreeNode } from "@nest/shared";
 import { ExplorerPanel } from "@/components/library/ExplorerPanel";
 import { SourceControlPanel } from "@/components/library/SourceControlPanel";
+import { UnderReviewPanel } from "@/components/library/UnderReviewPanel";
 import { useUiStore } from "@/stores/ui";
 
 export function LibrarySidebar({
@@ -25,8 +26,10 @@ export function LibrarySidebar({
           loading={loading}
           error={error}
         />
-      ) : (
+      ) : view === "source-control" ? (
         <SourceControlPanel installed={installed} />
+      ) : (
+        <UnderReviewPanel installed={installed} tree={tree} />
       )}
     </aside>
   );

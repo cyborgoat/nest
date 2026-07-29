@@ -31,7 +31,7 @@ Restricted projects are available to their owner, explicitly granted users, admi
 | `POST` | `/api/auth/password` | User | Change password and rotate sessions (managed superuser forbidden) |
 | `POST` | `/api/publish-requests` | User | Submit multipart field `file` containing a pack ZIP |
 | `GET` | `/api/publish-requests/mine` | User | Author's submissions |
-| `GET` | `/api/publish-requests/:id` | Owner or registry admin | One submission |
+| `GET` | `/api/publish-requests/:id` | Submitter, pack maintainer, or registry admin | One submission |
 
 Account IDs cannot be changed. The desktop surfaces Hub validation responses directly and keeps authentication errors inside the account dialog.
 

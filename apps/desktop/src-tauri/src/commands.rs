@@ -156,7 +156,7 @@ pub fn hub_download_conflict(
 }
 
 /// Resolve a pack's working directory and its current snapshot directory
-/// (baseline last written at download/sync or successful publish time), plus
+/// (baseline last written at download/sync or approved-release merge time), plus
 /// the pack's vault-relative prefix (its `local_path`).
 ///
 /// `snapshot`'s functions work with paths relative to the pack directory
@@ -1416,7 +1416,13 @@ pub async fn hub_publish_pack(
         // now has an unresolved submission; hub_reconcile_publish_requests
         // is what advances things once the Hub actually resolves it.
         let conn = state.db.lock();
-        db::set_pending_publish(&conn, &pack.id, &request.id, &pack.version)?;
+        db::set_pending_publish(
+            &conn,
+            &pack.id,
+            &request.id,
+            &pack.version,
+            Some(&request.created_at),
+        )?;
     }
     result
 }
@@ -1441,12 +1447,11 @@ pub async fn hub_reconcile_publish_requests(
         let conn = state.db.lock();
         db::list_sync_state(&conn)?
     };
-    let vault = state.vault_path();
     for pack in installed
         .iter()
         .filter(|p| p.origin == "local" || p.origin == "registry")
     {
-        reconcile_one_pack(&state, &settings, &token, &vault, pack).await;
+        reconcile_one_pack(&state, &settings, &token, pack).await;
     }
     let conn = state.db.lock();
     db::list_sync_state(&conn)
@@ -1459,9 +1464,14 @@ async fn reconcile_one_pack(
     state: &SharedState,
     settings: &AppSettings,
     token: &str,
-    vault: &std::path::Path,
     pack: &InstalledPack,
 ) {
+    // Preserve an approved action until the user explicitly merges it. A
+    // newer pack-wide request must not overwrite the exact release this
+    // device still needs to baseline.
+    if pack.publish_review_status.as_deref() == Some("approved_awaiting_merge") {
+        return;
+    }
     let Ok(remote_pending) = hub::get_pack_pending_remote(
         &settings.hub_base_url,
         settings.effective_proxy_url(),
@@ -1477,7 +1487,13 @@ async fn reconcile_one_pack(
         // Hub says pending — possibly a request this device didn't submit
         // itself (a teammate/admin publishing the same pack elsewhere).
         let conn = state.db.lock();
-        let _ = db::set_pending_publish(&conn, &pack.pack_id, &remote.id, &remote.version);
+        let _ = db::set_pending_publish(
+            &conn,
+            &pack.pack_id,
+            &remote.id,
+            &remote.version,
+            Some(&remote.created_at),
+        );
         return;
     }
 
@@ -1487,35 +1503,152 @@ async fn reconcile_one_pack(
     // We locally thought this pack still had a pending request; the Hub now
     // says it doesn't, so it just resolved. Learn the outcome to decide
     // whether to advance the version/snapshot baseline.
-    let resolved = hub::get_publish_request_remote(
+    let Ok(resolved) = hub::get_publish_request_remote(
         &settings.hub_base_url,
         settings.effective_proxy_url(),
         token,
         request_id,
     )
     .await
-    .ok();
-    if let hub::ResolvedOutcome::Approved { version } = hub::resolved_outcome(resolved.as_ref()) {
-        let approved = PackMeta {
-            id: pack.pack_id.clone(),
-            name: pack.name.clone(),
-            description: pack.description.clone(),
-            version,
-            path: pack.local_path.clone(),
-        };
-        let _ = crate::snapshot::write_snapshot(
-            &state.app_data_dir,
-            &approved.id,
-            &approved.version,
-            &vault.join(&approved.path),
-        );
+    else {
+        // Keep the local marker when the resolution cannot be confirmed.
+        // A transient network/auth failure must never discard a merge action.
+        return;
+    };
+    if resolved.status == "approved" {
         let conn = state.db.lock();
-        let _ = hub::record_sync(&conn, &approved, &pack.origin, pack.owner_id.as_deref());
+        let _ = db::set_publish_approved_awaiting_merge(
+            &conn,
+            &pack.pack_id,
+            request_id,
+            &resolved.version,
+        );
+        return;
     }
-    // Rejected (or approved) both release the lock; only an approval also
-    // advances the version/snapshot above.
+    if resolved.status != "rejected" {
+        return;
+    }
+    // Rejection releases the lock while retaining every local edit.
     let conn = state.db.lock();
     let _ = db::clear_pending_publish(&conn, &pack.pack_id);
+}
+
+/// Promote an approved publish request to the local remote-synced baseline.
+/// The working directory is deliberately untouched: any edits made after
+/// submission become ordinary Source Control differences.
+#[tauri::command]
+pub async fn hub_merge_approved_pack(
+    state: State<'_, SharedState>,
+    pack_id: String,
+    request_id: String,
+) -> AppResult<InstalledPack> {
+    let settings = {
+        let conn = state.db.lock();
+        db::get_settings(&conn)?
+    };
+    let token = ensure_hub_access(state.inner(), &settings, false)
+        .await?
+        .ok_or_else(|| AppError::msg("Sign in to merge an approved knowledge pack"))?;
+    let installed = {
+        let conn = state.db.lock();
+        require_installed_pack(&conn, &pack_id)?
+    };
+
+    let request = hub::get_publish_request_remote(
+        &settings.hub_base_url,
+        settings.effective_proxy_url(),
+        &token,
+        &request_id,
+    )
+    .await?;
+    if request.pack_id != pack_id {
+        return Err(AppError::msg("The approval does not belong to this pack"));
+    }
+    if request.status != "approved" {
+        return Err(AppError::msg(
+            "Only an approved publish request can be merged",
+        ));
+    }
+    if installed.origin == "registry"
+        && installed.version == request.version
+        && installed.publish_review_status.is_none()
+    {
+        return Ok(installed);
+    }
+    if installed.pending_request_id.as_deref() != Some(request_id.as_str())
+        || installed.publish_review_status.as_deref() != Some("approved_awaiting_merge")
+    {
+        return Err(AppError::msg(
+            "This approval is not awaiting merge on the local pack",
+        ));
+    }
+
+    let staging = std::env::temp_dir().join(format!(
+        "nest-approved-merge-{}-{}",
+        pack_id,
+        uuid::Uuid::new_v4()
+    ));
+    fs::create_dir_all(&staging)?;
+    let downloaded = hub::download_pack_remote(
+        &settings.hub_base_url,
+        settings.effective_proxy_url(),
+        &pack_id,
+        Some(&request.version),
+        &staging,
+        Some(&token),
+    )
+    .await;
+    let approved = match downloaded {
+        Ok(pack) => pack,
+        Err(error) => {
+            let _ = fs::remove_dir_all(&staging);
+            return Err(error);
+        }
+    };
+    if approved.id != pack_id || approved.version != request.version {
+        let _ = fs::remove_dir_all(&staging);
+        return Err(AppError::msg(
+            "The downloaded Hub release does not match the approval",
+        ));
+    }
+    let approved_dir = staging.join(&approved.path);
+    let snapshot_result = crate::snapshot::write_snapshot(
+        &state.app_data_dir,
+        &approved.id,
+        &approved.version,
+        &approved_dir,
+    );
+    if let Err(error) = snapshot_result {
+        let _ = fs::remove_dir_all(&staging);
+        return Err(error);
+    }
+
+    let remote_owner_id = hub::list_packs_remote(
+        &settings.hub_base_url,
+        settings.effective_proxy_url(),
+        Some(&token),
+    )
+    .await
+    .ok()
+    .and_then(|projects| {
+        projects
+            .into_iter()
+            .find(|project| project.id == pack_id)
+            .and_then(|project| project.owner_id)
+    });
+    let result = (|| -> AppResult<InstalledPack> {
+        let mut conn = state.db.lock();
+        let transaction = conn.transaction()?;
+        let owner_id = remote_owner_id.as_deref().or(installed.owner_id.as_deref());
+        hub::record_sync(&transaction, &approved, "registry", owner_id)?;
+        db::clear_pending_publish(&transaction, &pack_id)?;
+        let merged = db::get_sync_state(&transaction, &pack_id)?
+            .ok_or_else(|| AppError::msg("Merged pack state was not saved"))?;
+        transaction.commit()?;
+        Ok(merged)
+    })();
+    let _ = fs::remove_dir_all(&staging);
+    result
 }
 
 /// Local sanity gate only — real ownership is enforced by the hub itself
@@ -1784,6 +1917,8 @@ mod publishing_origin_tests {
             description: String::new(),
             pending_version: None,
             pending_request_id: None,
+            publish_review_status: None,
+            publish_review_created_at: None,
         }
     }
 

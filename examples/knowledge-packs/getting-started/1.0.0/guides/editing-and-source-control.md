@@ -35,6 +35,8 @@ discarding because unsaved intent cannot be reconstructed afterward.
 ## Synchronize review state
 
 Use the Source Control refresh button after publishing. An approved request
-advances the baseline and clears resolved changes. A rejected request releases
-the pending lock and displays a rejection badge; open Messages from that badge
-to read the review comment.
+shows a **Merge with remote** action. Merging makes the exact reviewed Hub
+release the new baseline while preserving the working folder, so edits made
+after submission remain visible. A rejected request releases the pending lock
+and displays a rejection badge; open Messages from that badge to read the
+review comment.

@@ -554,27 +554,6 @@ pub async fn get_pack_pending_remote(
     Ok(status.pending)
 }
 
-/// What a resolved (no-longer-pending) publish request means for the local
-/// baseline. Pure and separate from the network call so it's unit-testable:
-/// only an explicit `approved` status advances anything; anything else
-/// (rejected, or the request couldn't be confirmed at all, e.g. because this
-/// device isn't the submitter/admin and the Hub 403/404s the lookup) is
-/// treated the same — never guess an advance.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ResolvedOutcome {
-    Approved { version: String },
-    NotApproved,
-}
-
-pub fn resolved_outcome(resolved: Option<&PublishRequest>) -> ResolvedOutcome {
-    match resolved {
-        Some(request) if request.status == "approved" => ResolvedOutcome::Approved {
-            version: request.version.clone(),
-        },
-        _ => ResolvedOutcome::NotApproved,
-    }
-}
-
 async fn message_request(
     hub_base_url: &str,
     proxy_url: &str,
@@ -1536,40 +1515,5 @@ mod local_pack_tests {
 
         assert!(rename_pack_folder(&vault, "Original Name", "   ").is_err());
         let _ = fs::remove_dir_all(root);
-    }
-
-    fn sample_request(status: &str, version: &str) -> PublishRequest {
-        PublishRequest {
-            id: "req-1".into(),
-            pack_id: "sample".into(),
-            version: version.into(),
-            name: "Sample".into(),
-            description: String::new(),
-            status: status.into(),
-            review_note: None,
-            created_at: "2026-01-01T00:00:00Z".into(),
-            reviewed_at: Some("2026-01-02T00:00:00Z".into()),
-        }
-    }
-
-    #[test]
-    fn resolved_outcome_advances_only_on_approved() {
-        assert_eq!(
-            resolved_outcome(Some(&sample_request("approved", "1.1.0"))),
-            ResolvedOutcome::Approved {
-                version: "1.1.0".into()
-            },
-        );
-        assert_eq!(
-            resolved_outcome(Some(&sample_request("rejected", "1.1.0"))),
-            ResolvedOutcome::NotApproved,
-        );
-    }
-
-    #[test]
-    fn resolved_outcome_treats_an_unconfirmed_lookup_as_not_approved() {
-        // A device that can't read the resolved request (e.g. not the
-        // submitter/admin) must never guess an advance.
-        assert_eq!(resolved_outcome(None), ResolvedOutcome::NotApproved);
     }
 }

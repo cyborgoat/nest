@@ -226,6 +226,10 @@ export type InstalledPack = {
    *  above stays at the last-approved value while this is set. */
   pending_version: string | null;
   pending_request_id: string | null;
+  /** Resolution state for the locally tracked publish request. Approved
+   * requests stay actionable until their exact Hub release is merged. */
+  publish_review_status: "pending" | "approved_awaiting_merge" | null;
+  publish_review_created_at: string | null;
 };
 
 export type PackInstallConflict = {
@@ -276,13 +280,34 @@ export type FileChangeStatus = "modified" | "new" | "deleted";
 export type FileStatus = {
   path: string;
   status: FileChangeStatus;
+  kind: "text" | "image" | "binary";
 };
 
-/** Old (snapshot) vs. new (working) content for one file's diff view. */
-export type DiffPair = {
+export type TextDiffPair = {
+  kind: "text";
   old: string | null;
   new: string | null;
 };
+
+export type ImageDiffPair = {
+  kind: "image";
+  old: string | null;
+  new: string | null;
+};
+
+export type BinaryDiffSide = {
+  size: number;
+  checksum: string;
+};
+
+export type BinaryDiffPair = {
+  kind: "binary";
+  old: BinaryDiffSide | null;
+  new: BinaryDiffSide | null;
+};
+
+/** Old (snapshot) vs. new (working) content for one file's diff view. */
+export type DiffPair = TextDiffPair | ImageDiffPair | BinaryDiffPair;
 
 export type AppSettings = {
   llm_base_url: string;

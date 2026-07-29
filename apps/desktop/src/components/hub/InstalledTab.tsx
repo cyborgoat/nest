@@ -177,7 +177,9 @@ function InstalledPackRow({
   renaming?: boolean;
 }) {
   const updateAvailable =
-    catalogEntry != null && catalogEntry.latest_version !== pack.version;
+    catalogEntry != null &&
+    catalogEntry.latest_version !== pack.version &&
+    !pack.pending_version;
   const [publishDialogOpen, setPublishDialogOpen] = useState(false);
   const [renameDialogOpen, setRenameDialogOpen] = useState(false);
 
@@ -208,7 +210,9 @@ function InstalledPackRow({
             : undefined
         }
         publishLabel={
-          pack.pending_version
+          pack.publish_review_status === "approved_awaiting_merge"
+            ? `v${pack.pending_version} ready to merge`
+            : pack.pending_version
             ? `v${pack.pending_version} awaiting review`
             : authenticated
               ? "Publish"
@@ -253,9 +257,15 @@ function InstalledPackRow({
           />
           <h3 className="font-medium">{pack.name}</h3>
           <span className="text-xs text-muted-foreground">v{pack.version}</span>
-          {pack.pending_version && (
+          {pack.publish_review_status === "pending" && pack.pending_version && (
             <Badge variant="accent">v{pack.pending_version} under review</Badge>
           )}
+          {pack.publish_review_status === "approved_awaiting_merge" &&
+            pack.pending_version && (
+              <Badge variant="update">
+                v{pack.pending_version} ready to merge
+              </Badge>
+            )}
           {pack.origin === "local" && (
             <Badge variant="accent">{t("hub.importedLocally")}</Badge>
           )}

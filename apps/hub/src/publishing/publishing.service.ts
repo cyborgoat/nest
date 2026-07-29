@@ -461,7 +461,16 @@ export class PublishingService {
 
   getRequest(id: string, user: AuthUser): PublishRequestView {
     const row = this.requestRow(id);
-    if (!isRegistryAdmin(user) && row.submitter_uuid !== user.uuid)
+    const isMaintainer = this.database.db
+      .prepare(
+        'SELECT 1 FROM pack_maintainers WHERE pack_id = ? AND user_uuid = ?',
+      )
+      .get(row.pack_id, user.uuid);
+    if (
+      !isRegistryAdmin(user) &&
+      row.submitter_uuid !== user.uuid &&
+      !isMaintainer
+    )
       throw new NotFoundException('Publish request not found');
     return this.toView(row);
   }
@@ -481,13 +490,15 @@ export class PublishingService {
       )
       .get(packId) as PublishRequestRow | undefined;
     if (!row) return null;
-    const pack = this.database.db
-      .prepare('SELECT owner_uuid FROM packs WHERE id = ?')
-      .get(packId) as { owner_uuid: string | null } | undefined;
+    const isMaintainer = this.database.db
+      .prepare(
+        'SELECT 1 FROM pack_maintainers WHERE pack_id = ? AND user_uuid = ?',
+      )
+      .get(packId, user.uuid);
     const visible =
       isRegistryAdmin(user) ||
       row.submitter_uuid === user.uuid ||
-      pack?.owner_uuid === user.uuid;
+      Boolean(isMaintainer);
     return visible ? this.toView(row) : null;
   }
 

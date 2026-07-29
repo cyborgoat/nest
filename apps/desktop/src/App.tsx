@@ -107,6 +107,11 @@ export default function App() {
   });
   const hasSourceControlChanges = packStatusQueries.some(
     (query) => (query.data?.length ?? 0) > 0,
+  ) || editablePacks.some(
+    (pack) => pack.publish_review_status === "approved_awaiting_merge",
+  );
+  const hasPacksUnderReview = (installedQuery.data ?? []).some(
+    (pack) => pack.publish_review_status === "pending",
   );
   const messageCountQuery = useQuery({
     queryKey: queryKeys.messageCount,
@@ -290,7 +295,10 @@ export default function App() {
         </header>
 
         <div className="flex min-h-0 flex-1">
-          <ActivityBar hasSourceControlChanges={hasSourceControlChanges} />
+          <ActivityBar
+            hasSourceControlChanges={hasSourceControlChanges}
+            hasPacksUnderReview={hasPacksUnderReview}
+          />
           <ResizablePanelGroup orientation="horizontal" className="h-full flex-1">
             <ResizablePanel
               id="library"

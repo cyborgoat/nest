@@ -281,7 +281,9 @@ function TreeItem({
   const publishReason = !canEdit
     ? "You don't have edit access to this pack."
     : publishLocked
-      ? `v${installedPack?.pending_version} is already awaiting review.`
+      ? installedPack?.publish_review_status === "approved_awaiting_merge"
+        ? `v${installedPack?.pending_version} is approved and must be merged first.`
+        : `v${installedPack?.pending_version} is already awaiting review.`
       : undefined;
   const origin = installedPack?.origin;
   // Packs downloaded from the hub get a distinct stroke color in the tree.

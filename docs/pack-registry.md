@@ -68,7 +68,8 @@ yank state, and publishing history remain database-owned.
 - Install one version per pack id at `vault/<id>/` (replace on upgrade), like `pip install pkg==x.y.z`.
 - Do **not** stack `vault/<id>/<version>/` for RAG (avoids duplicate citations).
 - `sync_state` stores `pack_id`, installed `version`, and **`active`** (RAG inclusion; default `true` on install).
-- `sync_state.origin` records `local`, `registry`, `bundled`, or `unknown`; legacy rows migrate to `unknown`, and only `local` packs may be submitted for publishing.
+- `sync_state.origin` records `local`, `registry`, `bundled`, or `unknown`; legacy rows migrate to `unknown`. Local packs and editable registry packs may be submitted.
+- Approved requests remain locally actionable until **Merge with remote** downloads the exact release as the source-control baseline. The working pack is preserved and its differences are shown normally.
 - Local zip import still installs from embedded `pack.json`.
 - Importing or creating a local pack whose ID is already installed requires confirmation and atomically replaces the single installed version.
 - The repository example registry contains only the canonical

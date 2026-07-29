@@ -177,6 +177,8 @@ export const api = {
     invoke<InstalledPack>("hub_rename_pack", { packId, name }),
   hubReconcilePublishRequests: () =>
     invoke<InstalledPack[]>("hub_reconcile_publish_requests"),
+  hubMergeApprovedPack: (packId: string, requestId: string) =>
+    invoke<InstalledPack>("hub_merge_approved_pack", { packId, requestId }),
   hubListMessages: (filter: "all" | "unread", cursor?: string) =>
     invoke<HubMessagePage>("hub_list_messages", {
       filter,

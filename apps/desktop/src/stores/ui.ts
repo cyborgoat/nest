@@ -5,7 +5,7 @@ export const HUB_TAB_ID = "__hub__";
 export const SETTINGS_TAB_ID = "__settings__";
 export const MESSAGES_TAB_ID = "__messages__";
 export type SettingsSection = "general" | "account";
-export type ActivitySidebarView = "explorer" | "source-control";
+export type ActivitySidebarView = "explorer" | "source-control" | "reviews";
 
 const DIFF_TAB_PREFIX = "diff:";
 
@@ -37,6 +37,7 @@ type UiState = {
   openMainTabs: string[];
   activeMainTabId: string | null;
   settingsSection: SettingsSection;
+  requestedPublishMessageId: string | null;
   /** VS Code-style "preview" tab: at most one, replaced (not appended) by the
    * next single-clicked file until it's promoted to a permanent tab. */
   previewMainTabId: string | null;
@@ -55,6 +56,8 @@ type UiState = {
   openAccountSettingsTab: () => void;
   setSettingsSection: (section: SettingsSection) => void;
   openMessagesTab: () => void;
+  openPublishMessage: (requestId: string) => void;
+  clearRequestedPublishMessage: () => void;
   closeMainTab: (id: string) => void;
   pruneMainFileTabs: (validPaths: Set<string>) => void;
 };
@@ -129,6 +132,7 @@ export const useUiStore = create<UiState>()(
       openMainTabs: [],
       activeMainTabId: null,
       settingsSection: "general",
+      requestedPublishMessageId: null,
       previewMainTabId: null,
       setActiveMainTab: (id) => {
         const { openMainTabs } = get();
@@ -267,6 +271,19 @@ export const useUiStore = create<UiState>()(
           activeMainTabId: MESSAGES_TAB_ID,
         });
       },
+      openPublishMessage: (requestId) => {
+        const { openMainTabs } = get();
+        const cleaned = closeEphemeralExcept(openMainTabs, MESSAGES_TAB_ID);
+        set({
+          openMainTabs: cleaned.includes(MESSAGES_TAB_ID)
+            ? cleaned
+            : [...cleaned, MESSAGES_TAB_ID],
+          activeMainTabId: MESSAGES_TAB_ID,
+          requestedPublishMessageId: requestId,
+        });
+      },
+      clearRequestedPublishMessage: () =>
+        set({ requestedPublishMessageId: null }),
       closeMainTab: (id) => {
         const { openMainTabs, activeMainTabId, previewMainTabId } = get();
         const nextTabs = openMainTabs.filter((t) => t !== id);

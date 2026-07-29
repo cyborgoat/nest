@@ -170,6 +170,10 @@ pub struct InstalledPack {
     pub pending_version: Option<String>,
     #[serde(default)]
     pub pending_request_id: Option<String>,
+    #[serde(default)]
+    pub publish_review_status: Option<String>,
+    #[serde(default)]
+    pub publish_review_created_at: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -280,6 +284,24 @@ fn ensure_sync_state_pending_columns(conn: &Connection) -> AppResult<()> {
             [],
         )?;
     }
+    if !table_has_column(conn, "sync_state", "publish_review_status")? {
+        conn.execute(
+            "ALTER TABLE sync_state ADD COLUMN publish_review_status TEXT",
+            [],
+        )?;
+    }
+    if !table_has_column(conn, "sync_state", "publish_review_created_at")? {
+        conn.execute(
+            "ALTER TABLE sync_state ADD COLUMN publish_review_created_at TEXT",
+            [],
+        )?;
+    }
+    conn.execute(
+        "UPDATE sync_state
+         SET publish_review_status = 'pending'
+         WHERE pending_request_id IS NOT NULL AND publish_review_status IS NULL",
+        [],
+    )?;
     Ok(())
 }
 
@@ -942,7 +964,7 @@ pub fn list_active_pack_roots(conn: &Connection) -> AppResult<Vec<String>> {
 
 pub fn list_sync_state(conn: &Connection) -> AppResult<Vec<InstalledPack>> {
     let mut stmt = conn.prepare(
-        "SELECT pack_id, name, local_path, version, last_synced, COALESCE(active, 1), COALESCE(origin, 'unknown'), owner_id, COALESCE(description, ''), pending_version, pending_request_id
+        "SELECT pack_id, name, local_path, version, last_synced, COALESCE(active, 1), COALESCE(origin, 'unknown'), owner_id, COALESCE(description, ''), pending_version, pending_request_id, publish_review_status, publish_review_created_at
          FROM sync_state ORDER BY name",
     )?;
     let rows = stmt.query_map([], |row| {
@@ -958,6 +980,8 @@ pub fn list_sync_state(conn: &Connection) -> AppResult<Vec<InstalledPack>> {
             description: row.get(8)?,
             pending_version: row.get(9)?,
             pending_request_id: row.get(10)?,
+            publish_review_status: row.get(11)?,
+            publish_review_created_at: row.get(12)?,
         })
     })?;
     Ok(rows.filter_map(|r| r.ok()).collect())
@@ -965,7 +989,7 @@ pub fn list_sync_state(conn: &Connection) -> AppResult<Vec<InstalledPack>> {
 
 pub fn get_sync_state(conn: &Connection, pack_id: &str) -> AppResult<Option<InstalledPack>> {
     conn.query_row(
-        "SELECT pack_id, name, local_path, version, last_synced, COALESCE(active, 1), COALESCE(origin, 'unknown'), owner_id, COALESCE(description, ''), pending_version, pending_request_id
+        "SELECT pack_id, name, local_path, version, last_synced, COALESCE(active, 1), COALESCE(origin, 'unknown'), owner_id, COALESCE(description, ''), pending_version, pending_request_id, publish_review_status, publish_review_created_at
          FROM sync_state WHERE pack_id = ?1",
         params![pack_id],
         |row| {
@@ -981,6 +1005,8 @@ pub fn get_sync_state(conn: &Connection, pack_id: &str) -> AppResult<Option<Inst
                 description: row.get(8)?,
                 pending_version: row.get(9)?,
                 pending_request_id: row.get(10)?,
+                publish_review_status: row.get(11)?,
+                publish_review_created_at: row.get(12)?,
             })
         },
     )
@@ -996,9 +1022,30 @@ pub fn set_pending_publish(
     pack_id: &str,
     request_id: &str,
     version: &str,
+    created_at: Option<&str>,
 ) -> AppResult<()> {
     conn.execute(
-        "UPDATE sync_state SET pending_request_id = ?1, pending_version = ?2 WHERE pack_id = ?3",
+        "UPDATE sync_state
+         SET pending_request_id = ?1, pending_version = ?2,
+             publish_review_status = 'pending',
+             publish_review_created_at = COALESCE(?3, publish_review_created_at)
+         WHERE pack_id = ?4",
+        params![request_id, version, created_at, pack_id],
+    )?;
+    Ok(())
+}
+
+pub fn set_publish_approved_awaiting_merge(
+    conn: &Connection,
+    pack_id: &str,
+    request_id: &str,
+    version: &str,
+) -> AppResult<()> {
+    conn.execute(
+        "UPDATE sync_state
+         SET pending_request_id = ?1, pending_version = ?2,
+             publish_review_status = 'approved_awaiting_merge'
+         WHERE pack_id = ?3",
         params![request_id, version, pack_id],
     )?;
     Ok(())
@@ -1009,7 +1056,10 @@ pub fn set_pending_publish(
 /// resolution also advances those (see `hub_reconcile_publish_requests`).
 pub fn clear_pending_publish(conn: &Connection, pack_id: &str) -> AppResult<()> {
     conn.execute(
-        "UPDATE sync_state SET pending_request_id = NULL, pending_version = NULL WHERE pack_id = ?1",
+        "UPDATE sync_state
+         SET pending_request_id = NULL, pending_version = NULL,
+             publish_review_status = NULL, publish_review_created_at = NULL
+         WHERE pack_id = ?1",
         params![pack_id],
     )?;
     Ok(())
@@ -1249,20 +1299,32 @@ mod sync_state_tests {
     fn pending_publish_round_trips_through_get_and_list_sync_state() {
         let conn = seeded_conn();
 
-        set_pending_publish(&conn, "sample", "req-1", "1.1.0").unwrap();
+        set_pending_publish(&conn, "sample", "req-1", "1.1.0", Some("now")).unwrap();
         let pending = get_sync_state(&conn, "sample").unwrap().unwrap();
         assert_eq!(pending.pending_request_id.as_deref(), Some("req-1"));
         assert_eq!(pending.pending_version.as_deref(), Some("1.1.0"));
+        assert_eq!(pending.publish_review_status.as_deref(), Some("pending"));
+        assert_eq!(pending.publish_review_created_at.as_deref(), Some("now"));
         // `version` (the last-approved value) must stay untouched by a pending marker.
         assert_eq!(pending.version, "1.0.0");
         let listed = list_sync_state(&conn).unwrap();
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].pending_request_id.as_deref(), Some("req-1"));
 
+        set_publish_approved_awaiting_merge(&conn, "sample", "req-1", "1.1.0").unwrap();
+        let approved = get_sync_state(&conn, "sample").unwrap().unwrap();
+        assert_eq!(
+            approved.publish_review_status.as_deref(),
+            Some("approved_awaiting_merge")
+        );
+        assert_eq!(approved.version, "1.0.0");
+
         clear_pending_publish(&conn, "sample").unwrap();
         let cleared = get_sync_state(&conn, "sample").unwrap().unwrap();
         assert_eq!(cleared.pending_request_id, None);
         assert_eq!(cleared.pending_version, None);
+        assert_eq!(cleared.publish_review_status, None);
+        assert_eq!(cleared.publish_review_created_at, None);
         assert_eq!(cleared.version, "1.0.0", "clearing must not touch version");
     }
 }

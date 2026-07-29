@@ -671,6 +671,8 @@ mod tests {
             description: String::new(),
             pending_version: None,
             pending_request_id: None,
+            publish_review_status: None,
+            publish_review_created_at: None,
         };
         let preamble = agent_preamble_with_retrieval(&[], false, &[pack]);
         assert!(preamble.contains("Cooking Basics"));
