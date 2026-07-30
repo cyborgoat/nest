@@ -156,7 +156,7 @@ pub async fn update_profile_remote(
     access_token: &str,
     name: &str,
 ) -> AppResult<HubUser> {
-    let response = http::build_client(proxy_url)?
+    let response = http::build_hub_client(proxy_url)?
         .patch(format!(
             "{}/api/auth/profile",
             hub_base_url.trim_end_matches('/')
@@ -176,7 +176,7 @@ pub async fn change_password_remote(
     current_password: &str,
     new_password: &str,
 ) -> AppResult<AuthSession> {
-    let response = http::build_client(proxy_url)?
+    let response = http::build_hub_client(proxy_url)?
         .post(format!(
             "{}/api/auth/password",
             hub_base_url.trim_end_matches('/')
@@ -215,7 +215,7 @@ async fn auth_request<T: Serialize + ?Sized>(
         ));
     }
     let url = format!("{}/api/auth/{action}", hub_base_url.trim_end_matches('/'));
-    let response = http::build_client(proxy_url)?
+    let response = http::build_hub_client(proxy_url)?
         .post(url)
         .json(body)
         .send()
@@ -231,7 +231,46 @@ async fn parse_hub_response<T: serde::de::DeserializeOwned>(
     if response.status().is_success() {
         return Ok(response.json().await?);
     }
+    Err(hub_error_from_response(response, label).await)
+}
+
+/// A 3xx from the Hub means a proxy/load-balancer redirected the request
+/// instead of a plain success/failure — since Hub calls use a client with
+/// redirects disabled (see `http::build_hub_client`), this always indicates
+/// a URL/infra mismatch (commonly an http vs https scheme mismatch) rather
+/// than a normal HTTP outcome, and is worth calling out explicitly: a
+/// followed redirect would otherwise have silently dropped the
+/// Authorization header and/or the POST body.
+fn redirect_message(
+    status: reqwest::StatusCode,
+    headers: &reqwest::header::HeaderMap,
+) -> Option<String> {
+    if !status.is_redirection() {
+        return None;
+    }
+    let location = headers
+        .get(reqwest::header::LOCATION)
+        .and_then(|value| value.to_str().ok());
+    Some(match location {
+        Some(location) => format!(
+            "Hub redirected ({status}) to {location}. Check that the Hub URL in Settings uses the correct scheme (http vs https)."
+        ),
+        None => format!("Hub returned a redirect ({status}) with no Location header."),
+    })
+}
+
+/// Turn a non-2xx Hub response into an `AppError`, reading a `{"message": ...}`
+/// body when present (Nest's default error shape) and logging the outcome via
+/// `nest_debug!` so `NEST_DEBUG=1` actually shows something for these
+/// failures instead of nothing.
+async fn hub_error_from_response(response: reqwest::Response, label: &str) -> AppError {
     let status = response.status();
+    let url = response.url().to_string();
+    if let Some(redirect_detail) = redirect_message(status, response.headers()) {
+        let detail = format!("{label} failed: {redirect_detail}");
+        crate::nest_debug!("hub", "{detail} request_url={url}");
+        return AppError::hub_response(status.as_u16(), detail);
+    }
     let message = response
         .json::<serde_json::Value>()
         .await
@@ -249,22 +288,50 @@ async fn parse_hub_response<T: serde::de::DeserializeOwned>(
                     .join(". ")
             })
         });
-    Err(AppError::msg(message.unwrap_or_else(|| {
-        format!("{label} failed: HTTP {status}")
-    })))
+    let detail = message.unwrap_or_else(|| format!("{label} failed: HTTP {status}"));
+    crate::nest_debug!(
+        "hub",
+        "{label} failed status={status} request_url={url} message={detail}"
+    );
+    AppError::hub_response(status.as_u16(), detail)
 }
 
 fn map_hub_http_error(label: &str, err: reqwest::Error) -> AppError {
+    let url = err
+        .url()
+        .map(|url| url.to_string())
+        .unwrap_or_else(|| "?".into());
     if err.is_timeout() {
-        return AppError::msg(format!(
+        let detail = format!(
             "{label} timed out after {}s",
             http::DEFAULT_HTTP_TIMEOUT.as_secs()
-        ));
+        );
+        crate::nest_debug!("hub", "{detail} request_url={url}");
+        return AppError::msg(detail);
     }
     if let Some(status) = err.status() {
-        return AppError::msg(format!("{label} failed: HTTP {status}"));
+        let detail = format!("{label} failed: HTTP {status}");
+        crate::nest_debug!("hub", "{detail} request_url={url}");
+        return AppError::msg(detail);
     }
-    AppError::msg(format!("{label} failed: {err}"))
+    let detail = format!("{label} failed: {}", describe_error_chain(&err));
+    crate::nest_debug!("hub", "{detail} request_url={url}");
+    AppError::msg(detail)
+}
+
+/// reqwest::Error's own Display is often shallow (e.g. just "error sending
+/// request for url (...)") for connection/TLS failures — the useful part
+/// (DNS failure, certificate error, connection refused, ...) lives deeper in
+/// the `source()` chain. Walk it so cloud-deployment issues like a bad/self-
+/// signed certificate are actually visible instead of a generic message.
+fn describe_error_chain(err: &dyn std::error::Error) -> String {
+    let mut parts = vec![err.to_string()];
+    let mut cause = err.source();
+    while let Some(source) = cause {
+        parts.push(source.to_string());
+        cause = source.source();
+    }
+    parts.join(" — caused by: ")
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -319,7 +386,7 @@ pub async fn list_packs_remote(
         ));
     }
     let url = format!("{}/packs", hub_base_url.trim_end_matches('/'));
-    let client = http::build_client(proxy_url)?;
+    let client = http::build_hub_client(proxy_url)?;
     let mut request = client.get(&url);
     if let Some(token) = access_token {
         request = request.bearer_auth(token);
@@ -329,10 +396,7 @@ pub async fn list_packs_remote(
         .await
         .map_err(|e| map_hub_http_error("Hub list", e))?;
     if !resp.status().is_success() {
-        return Err(AppError::msg(format!(
-            "Hub list failed: HTTP {}",
-            resp.status()
-        )));
+        return Err(hub_error_from_response(resp, "Hub list").await);
     }
     Ok(resp.json().await?)
 }
@@ -348,7 +412,7 @@ pub async fn get_release_remote(
         "{}/packs/{pack_id}/{version}",
         hub_base_url.trim_end_matches('/')
     );
-    let response = http::build_client(proxy_url)?
+    let response = http::build_hub_client(proxy_url)?
         .get(url)
         .bearer_auth(access_token)
         .send()
@@ -405,7 +469,7 @@ pub async fn check_hub_status(hub_base_url: &str, proxy_url: &str) -> HubConnect
         };
     }
     let url = format!("{base}/health");
-    let client = match http::build_client(proxy_url) {
+    let client = match http::build_hub_client(proxy_url) {
         Ok(client) => client,
         Err(e) => {
             return HubConnectionStatus {
@@ -421,11 +485,17 @@ pub async fn check_hub_status(hub_base_url: &str, proxy_url: &str) -> HubConnect
             hub_base_url: base,
             message: None,
         },
-        Ok(resp) => HubConnectionStatus {
-            online: false,
-            hub_base_url: base,
-            message: Some(format!("Hub is not accessible (HTTP {})", resp.status())),
-        },
+        Ok(resp) => {
+            let status = resp.status();
+            let message = redirect_message(status, resp.headers())
+                .unwrap_or_else(|| format!("Hub is not accessible (HTTP {status})"));
+            crate::nest_debug!("hub", "health check failed status={status} url={url}");
+            HubConnectionStatus {
+                online: false,
+                hub_base_url: base,
+                message: Some(message),
+            }
+        }
         Err(e) => HubConnectionStatus {
             online: false,
             hub_base_url: base,
@@ -453,7 +523,7 @@ pub async fn download_pack_remote(
         Some(v) => format!("{base}/packs/{pack_id}/{v}/download"),
         None => format!("{base}/packs/{pack_id}/download"),
     };
-    let client = http::build_client(proxy_url)?;
+    let client = http::build_hub_client(proxy_url)?;
     let mut request = client.get(&url);
     if let Some(token) = access_token {
         request = request.bearer_auth(token);
@@ -463,11 +533,9 @@ pub async fn download_pack_remote(
         .await
         .map_err(|e| map_hub_http_error("Hub download", e))?;
     if !resp.status().is_success() {
-        return Err(AppError::msg(format!(
-            "Hub download failed: HTTP {}",
-            resp.status()
-        )));
+        return Err(hub_error_from_response(resp, "Hub download").await);
     }
+    crate::nest_debug!("hub", "download start pack_id={pack_id} url={url}");
     let patch_revision = resp
         .headers()
         .get("x-pack-patch-revision")
@@ -585,36 +653,20 @@ async fn upload_publish_archive(
         .file_name(format!("{}-{}.zip", pack.id, pack.version))
         .mime_str("application/zip")?;
     let form = reqwest::multipart::Form::new().part("file", part);
-    let response = http::build_client(proxy_url)?
-        .post(endpoint)
+    crate::nest_debug!(
+        "hub",
+        "{label} start pack_id={} endpoint={endpoint}",
+        pack.id
+    );
+    let response = http::build_hub_client(proxy_url)?
+        .post(&endpoint)
         .bearer_auth(access_token)
         .multipart(form)
         .send()
         .await
         .map_err(|e| map_hub_http_error(label, e))?;
     if !response.status().is_success() {
-        let status = response.status();
-        let message = response
-            .json::<serde_json::Value>()
-            .await
-            .ok()
-            .and_then(|v| {
-                v.get("message").and_then(|message| match message {
-                    serde_json::Value::String(value) => Some(value.clone()),
-                    serde_json::Value::Array(values) => Some(
-                        values
-                            .iter()
-                            .filter_map(|value| value.as_str())
-                            .collect::<Vec<_>>()
-                            .join(". "),
-                    ),
-                    _ => None,
-                })
-            });
-        return Err(AppError::hub_response(
-            status.as_u16(),
-            message.unwrap_or_else(|| format!("{label} failed: HTTP {status}")),
-        ));
+        return Err(hub_error_from_response(response, label).await);
     }
     Ok(response.json().await?)
 }
@@ -630,17 +682,14 @@ pub async fn get_publish_request_remote(
         hub_base_url.trim_end_matches('/'),
         request_id
     );
-    let response = http::build_client(proxy_url)?
+    let response = http::build_hub_client(proxy_url)?
         .get(url)
         .bearer_auth(access_token)
         .send()
         .await
         .map_err(|e| map_hub_http_error("Publish request lookup", e))?;
     if !response.status().is_success() {
-        return Err(AppError::msg(format!(
-            "Publish request lookup failed: HTTP {}",
-            response.status()
-        )));
+        return Err(hub_error_from_response(response, "Publish request lookup").await);
     }
     Ok(response.json().await?)
 }
@@ -664,17 +713,14 @@ pub async fn get_pack_pending_remote(
         hub_base_url.trim_end_matches('/'),
         pack_id
     );
-    let response = http::build_client(proxy_url)?
+    let response = http::build_hub_client(proxy_url)?
         .get(url)
         .bearer_auth(access_token)
         .send()
         .await
         .map_err(|e| map_hub_http_error("Pack pending status", e))?;
     if !response.status().is_success() {
-        return Err(AppError::msg(format!(
-            "Pack pending status failed: HTTP {}",
-            response.status()
-        )));
+        return Err(hub_error_from_response(response, "Pack pending status").await);
     }
     let status: PackPendingStatus = response.json().await?;
     Ok(status.pending)
@@ -692,17 +738,14 @@ async fn message_request(
         hub_base_url.trim_end_matches('/'),
         path
     );
-    let response = http::build_client(proxy_url)?
+    let response = http::build_hub_client(proxy_url)?
         .request(method, url)
         .bearer_auth(access_token)
         .send()
         .await
         .map_err(|e| map_hub_http_error("Hub messages", e))?;
     if !response.status().is_success() {
-        return Err(AppError::msg(format!(
-            "Hub messages failed: HTTP {}",
-            response.status()
-        )));
+        return Err(hub_error_from_response(response, "Hub messages").await);
     }
     Ok(response)
 }
@@ -1788,5 +1831,48 @@ mod local_pack_tests {
 
         assert!(rename_pack_folder(&vault, "Original Name", "   ").is_err());
         let _ = fs::remove_dir_all(root);
+    }
+}
+
+#[cfg(test)]
+mod hub_redirect_tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    /// A cloud Hub sitting behind a reverse proxy that issues a scheme
+    /// upgrade (or trailing-slash) redirect must never be silently followed:
+    /// reqwest's default redirect policy strips the Authorization header on
+    /// any redirect that changes the effective port (http -> https always
+    /// does), so a followed redirect would turn a real request into an
+    /// unauthenticated one with no indication anything went wrong. Assert
+    /// the Hub client reports the redirect explicitly instead.
+    #[tokio::test]
+    async fn list_packs_reports_redirects_instead_of_silently_following_them() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut buf = [0u8; 1024];
+            let _ = socket.read(&mut buf).await;
+            let response = "HTTP/1.1 302 Found\r\nLocation: https://example.invalid/packs\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+            let _ = socket.write_all(response.as_bytes()).await;
+            let _ = socket.shutdown().await;
+        });
+
+        let base = format!("http://{addr}");
+        let result = list_packs_remote(&base, "", None).await;
+        server.await.unwrap();
+
+        let err = result.expect_err("a 302 must be reported, not silently followed");
+        let message = err.to_string();
+        assert!(
+            message.contains("redirected"),
+            "expected a redirect-specific error, got: {message}"
+        );
+        assert!(
+            message.contains("example.invalid"),
+            "expected the Location target to be mentioned, got: {message}"
+        );
     }
 }

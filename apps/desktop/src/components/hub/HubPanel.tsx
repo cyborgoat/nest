@@ -184,8 +184,10 @@ export function HubPanel() {
         toast.success(t("hub.packDownloaded"));
       }
     },
-    onError: (e: Error) =>
-      toast.error(t("hub.downloadFailed"), { description: e.message }),
+    onError: (error: unknown) =>
+      toast.error(t("hub.downloadFailed"), {
+        description: appErrorMessage(error, t("hub.downloadFailed")),
+      }),
   });
 
   const syncPatch = useMutation({

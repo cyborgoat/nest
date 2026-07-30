@@ -21,6 +21,28 @@ pub fn build_client_with_timeout(proxy_url: &str, timeout: Duration) -> AppResul
     Ok(builder.no_proxy().proxy(proxy).build()?)
 }
 
+/// Build an HTTP client for talking to the Nest Hub specifically. Unlike
+/// `build_client`, this never auto-follows redirects: a reverse proxy or
+/// load balancer in front of a cloud-hosted Hub that issues a scheme-upgrade
+/// (http -> https) or trailing-slash redirect would otherwise silently lose
+/// the `Authorization` header (reqwest strips it on any redirect that
+/// changes the effective port, and http->https always does) and drop the
+/// request body on a 301/302 POST — turning a real failure into a
+/// misleading 401/404 with no indication a redirect ever happened. Callers
+/// should treat a 3xx response as an explicit, reportable error instead.
+pub fn build_hub_client(proxy_url: &str) -> AppResult<reqwest::Client> {
+    let proxy = proxy_url.trim();
+    let builder = reqwest::Client::builder()
+        .timeout(DEFAULT_HTTP_TIMEOUT)
+        .redirect(reqwest::redirect::Policy::none());
+    if proxy.is_empty() {
+        return Ok(builder.no_proxy().build()?);
+    }
+    let proxy = reqwest::Proxy::all(proxy)
+        .map_err(|e| AppError::msg(format!("Proxy URL is invalid: {e}")))?;
+    Ok(builder.no_proxy().proxy(proxy).build()?)
+}
+
 /// Validate an optional proxy URL (`http`, `https`, or `socks5`). Empty is ok.
 pub fn validate_proxy_url(value: &str) -> AppResult<()> {
     let value = value.trim();
