@@ -23,6 +23,7 @@ import {
   ItemMedia,
   ItemTitle,
 } from "../components/Item";
+import type { KnowledgePackMeta, LocalPackInspection } from "@nest/shared";
 import { UploadPackDialog } from "../components/UploadPackDialog";
 import { RegistryResyncNotice } from "../components/RegistryResyncNotice";
 import {
@@ -57,10 +58,27 @@ export function PacksPage() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [uploadOpen, setUploadOpen] = useState(false);
   const resync = useRegistryResync();
-  const upload = useMutation({
+  const inspect = useMutation({
     mutationFn: (file: File) => {
       const body = new FormData();
       body.append("file", file);
+      return api<LocalPackInspection>("/api/admin/packs/inspect", {
+        method: "POST",
+        body,
+      });
+    },
+  });
+  const upload = useMutation({
+    mutationFn: ({
+      file,
+      metadata,
+    }: {
+      file: File;
+      metadata?: KnowledgePackMeta;
+    }) => {
+      const body = new FormData();
+      body.append("file", file);
+      if (metadata) body.append("metadata", JSON.stringify(metadata));
       return api("/api/admin/packs/upload", { method: "POST", body });
     },
     onSuccess: () => {
@@ -256,7 +274,8 @@ export function PacksPage() {
         onOpenChange={setUploadOpen}
         busy={upload.isPending}
         error={upload.error}
-        onUpload={(file) => upload.mutate(file)}
+        onInspect={(file) => inspect.mutateAsync(file)}
+        onUpload={(file, metadata) => upload.mutate({ file, metadata })}
       />
     </>
   );

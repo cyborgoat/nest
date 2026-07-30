@@ -21,6 +21,8 @@ import type {
   AdminPublishReviewDetail,
   AdminPublishHistoryPage,
   AdminPublishRequest,
+  KnowledgePackMeta,
+  LocalPackInspection,
   PendingPublishRequest,
   PublishReviewFileDetail,
   PublishRequestType,
@@ -30,6 +32,15 @@ import { PublishReviewService } from './publish-review.service';
 
 const PACK_ID_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const now = () => new Date().toISOString();
+
+function slugifyPackId(value: string): string {
+  const slug = value
+    .trim()
+    .toLowerCase()
+    .replaceAll(/[^a-z0-9]+/g, '-')
+    .replaceAll(/^-+|-+$/g, '');
+  return slug || 'knowledge-pack';
+}
 
 type ValidatedPack = {
   id: string;
@@ -96,9 +107,11 @@ export class PublishingService {
   submitRelease(
     user: AuthUser,
     file: UploadedPackFile,
+    metadata?: KnowledgePackMeta,
   ): Promise<PublishRequestView> {
     return this.submitWithDiagnostics(user, file, {
       requestType: 'release',
+      metadata,
     });
   }
 
@@ -119,7 +132,7 @@ export class PublishingService {
     user: AuthUser,
     file: UploadedPackFile,
     operation:
-      | { requestType: 'release' }
+      | { requestType: 'release'; metadata?: KnowledgePackMeta }
       | {
           requestType: 'live_patch';
           packId: string;
@@ -153,19 +166,18 @@ export class PublishingService {
     user: AuthUser,
     file: UploadedPackFile,
     operation:
-      | { requestType: 'release' }
+      | { requestType: 'release'; metadata?: KnowledgePackMeta }
       | {
           requestType: 'live_patch';
           packId: string;
           targetVersion: string;
         },
   ): Promise<PublishRequestView> {
-    if (!file?.buffer?.length)
-      throw new BadRequestException('A pack ZIP is required');
-    const max = this.config.value.maxPackUploadBytes;
-    if (file.buffer.length > max)
-      throw new BadRequestException('Pack ZIP exceeds the upload limit');
-    const pack = this.validateZip(file.buffer);
+    this.assertUploadable(file);
+    const { pack, buffer } = this.validateZip(
+      file.buffer,
+      operation.requestType === 'release' ? operation.metadata : undefined,
+    );
     const requestType = operation.requestType;
     if (
       requestType === 'live_patch' &&
@@ -242,13 +254,13 @@ export class PublishingService {
     mkdirSync(stagingRoot, { recursive: true });
     const requestId = randomUUID();
     const stagingPath = path.join(stagingRoot, `${requestId}.zip`);
-    await fs.writeFile(stagingPath, file.buffer);
+    await fs.writeFile(stagingPath, buffer);
     let reviewArtifact: Awaited<ReturnType<PublishReviewService['build']>>;
     try {
       reviewArtifact = await this.publishReview.build(
         requestId,
         pack.id,
-        file.buffer,
+        buffer,
         requestType === 'live_patch' ? pack.version : undefined,
       );
       if (requestType === 'live_patch' && reviewArtifact.changedFiles === 0) {
@@ -264,7 +276,7 @@ export class PublishingService {
       await fs.unlink(stagingPath).catch(() => undefined);
       throw error;
     }
-    const checksum = createHash('sha256').update(file.buffer).digest('hex');
+    const checksum = createHash('sha256').update(buffer).digest('hex');
     const timestamp = now();
     try {
       db.transaction(() => {
@@ -436,7 +448,7 @@ export class PublishingService {
     if (request.status !== 'pending')
       throw new ConflictException('Request has already been reviewed');
     const zipBytes = await fs.readFile(request.staging_path);
-    const validated = this.validateZip(zipBytes);
+    const { pack: validated } = this.validateZip(zipBytes);
     const root = this.config.value.registryPath;
     const projectDir = path.join(root, validated.id);
     const destination = path.join(projectDir, validated.version);
@@ -849,7 +861,18 @@ export class PublishingService {
     return this.publishReview.image(artifactPath, filePath, side);
   }
 
-  private validateZip(buffer: Buffer): ValidatedPack {
+  private assertUploadable(file: UploadedPackFile): void {
+    if (!file?.buffer?.length)
+      throw new BadRequestException('A pack ZIP is required');
+    const max = this.config.value.maxPackUploadBytes;
+    if (file.buffer.length > max)
+      throw new BadRequestException('Pack ZIP exceeds the upload limit');
+  }
+
+  private readEntries(buffer: Buffer): {
+    zip: AdmZip;
+    entries: AdmZip.IZipEntry[];
+  } {
     let zip: AdmZip;
     try {
       zip = new AdmZip(buffer);
@@ -870,41 +893,54 @@ export class PublishingService {
     }
     if (uncompressed > 500 * 1024 * 1024)
       throw new BadRequestException('Expanded pack exceeds 500 MB');
-    const roots = new Set(
+    return { zip, entries };
+  }
+
+  private topLevelRoots(entries: AdmZip.IZipEntry[]): Set<string> {
+    return new Set(
       entries.map((entry) => entry.entryName.split('/')[0]).filter(Boolean),
     );
-    if (roots.size !== 1)
-      throw new BadRequestException(
-        'ZIP must contain exactly one top-level pack folder',
-      );
-    const root = [...roots][0];
-    const manifest = zip.getEntry(`${root}/pack.json`);
-    if (!manifest)
-      throw new BadRequestException('pack.json is required at the pack root');
-    let raw: Record<string, unknown>;
-    try {
-      raw = JSON.parse(manifest.getData().toString('utf8')) as Record<
-        string,
-        unknown
-      >;
-    } catch {
-      throw new BadRequestException('pack.json is invalid JSON');
-    }
+  }
+
+  /**
+   * Inspect an uploaded ZIP without staging it. Packs that already contain
+   * pack.json report their manifest values; packs that are just loose
+   * Markdown files report computed defaults so the admin UI can collect the
+   * missing metadata before submission — mirrors the desktop app's
+   * `hub_inspect_local_pack` flow.
+   */
+  inspectUpload(file: UploadedPackFile): LocalPackInspection {
+    this.assertUploadable(file);
+    const { zip, entries } = this.readEntries(file.buffer);
+    const roots = this.topLevelRoots(entries);
     const stringField = (value: unknown) =>
       typeof value === 'string' ? value.trim() : '';
-    const id = stringField(raw.id);
-    const name = stringField(raw.name);
-    const description = stringField(raw.description);
-    const version = stringField(raw.version);
-    if (!PACK_ID_RE.test(id) || id !== root)
-      throw new BadRequestException(
-        'pack.json id must match the top-level folder and use a valid pack ID',
-      );
-    if (!name) throw new BadRequestException('pack.json name is required');
-    if (!isValidSemVer(version))
-      throw new BadRequestException('pack.json version must be valid SemVer');
-    if (raw.path != null && stringField(raw.path) !== id)
-      throw new BadRequestException('pack.json path must equal id');
+
+    if (roots.size === 1) {
+      const root = [...roots][0];
+      const manifest = zip.getEntry(`${root}/pack.json`);
+      if (manifest) {
+        let raw: Record<string, unknown> = {};
+        try {
+          raw = JSON.parse(manifest.getData().toString('utf8')) as Record<
+            string,
+            unknown
+          >;
+        } catch {
+          throw new BadRequestException('pack.json is invalid JSON');
+        }
+        return {
+          needs_metadata: false,
+          metadata: {
+            id: stringField(raw.id) || root,
+            name: stringField(raw.name),
+            description: stringField(raw.description),
+            version: stringField(raw.version),
+          },
+        };
+      }
+    }
+
     const files = entries
       .filter((entry) => !entry.isDirectory)
       .map((entry) => entry.entryName);
@@ -912,7 +948,120 @@ export class PublishingService {
       throw new BadRequestException(
         'Knowledge packs must contain at least one Markdown file',
       );
-    return { id, name, description, version, files };
+    const fallbackName =
+      (file.originalname ?? '').replace(/\.zip$/i, '').trim() ||
+      'knowledge-pack';
+    const name = roots.size === 1 ? [...roots][0] : fallbackName;
+    return {
+      needs_metadata: true,
+      metadata: {
+        id: slugifyPackId(name),
+        name,
+        description: '',
+        version: '1.0.0',
+      },
+    };
+  }
+
+  /**
+   * Validates a ZIP and returns the pack metadata alongside the buffer that
+   * should actually be staged. When the ZIP has no pack.json, `metadata`
+   * (collected via `inspectUpload` + admin UI edits) is used to synthesize
+   * one and the ZIP is rebuilt with it, so everything downstream (staging,
+   * review diff, checksum, and the re-validation in `approve()`) sees a
+   * normal, self-contained pack ZIP.
+   */
+  private validateZip(
+    buffer: Buffer,
+    metadata?: KnowledgePackMeta,
+  ): { pack: ValidatedPack; buffer: Buffer } {
+    const { zip, entries } = this.readEntries(buffer);
+    const roots = this.topLevelRoots(entries);
+    const stringField = (value: unknown) =>
+      typeof value === 'string' ? value.trim() : '';
+
+    if (roots.size === 1) {
+      const root = [...roots][0];
+      const manifest = zip.getEntry(`${root}/pack.json`);
+      if (manifest) {
+        let raw: Record<string, unknown>;
+        try {
+          raw = JSON.parse(manifest.getData().toString('utf8')) as Record<
+            string,
+            unknown
+          >;
+        } catch {
+          throw new BadRequestException('pack.json is invalid JSON');
+        }
+        const id = stringField(raw.id);
+        const name = stringField(raw.name);
+        const description = stringField(raw.description);
+        const version = stringField(raw.version);
+        if (!PACK_ID_RE.test(id) || id !== root)
+          throw new BadRequestException(
+            'pack.json id must match the top-level folder and use a valid pack ID',
+          );
+        if (!name) throw new BadRequestException('pack.json name is required');
+        if (!isValidSemVer(version))
+          throw new BadRequestException(
+            'pack.json version must be valid SemVer',
+          );
+        if (raw.path != null && stringField(raw.path) !== id)
+          throw new BadRequestException('pack.json path must equal id');
+        const files = entries
+          .filter((entry) => !entry.isDirectory)
+          .map((entry) => entry.entryName);
+        if (!files.some((file) => file.toLowerCase().endsWith('.md')))
+          throw new BadRequestException(
+            'Knowledge packs must contain at least one Markdown file',
+          );
+        return { pack: { id, name, description, version, files }, buffer };
+      }
+    }
+
+    if (!metadata)
+      throw new BadRequestException('pack.json is required at the pack root');
+    const id = stringField(metadata.id);
+    const name = stringField(metadata.name);
+    const description = stringField(metadata.description);
+    const version = stringField(metadata.version);
+    if (!PACK_ID_RE.test(id))
+      throw new BadRequestException(
+        'Pack ID must be lowercase letters, numbers, and hyphens',
+      );
+    if (!name) throw new BadRequestException('Pack name is required');
+    if (!isValidSemVer(version))
+      throw new BadRequestException('Pack version must be valid SemVer');
+
+    const contentPrefix = roots.size === 1 ? `${[...roots][0]}/` : '';
+    const rebuilt = new AdmZip();
+    for (const entry of entries) {
+      if (entry.isDirectory) continue;
+      const relative =
+        contentPrefix && entry.entryName.startsWith(contentPrefix)
+          ? entry.entryName.slice(contentPrefix.length)
+          : entry.entryName;
+      if (!relative) continue;
+      rebuilt.addFile(`${id}/${relative}`, entry.getData());
+    }
+    const manifestJson = `${JSON.stringify(
+      { id, name, description, version },
+      null,
+      2,
+    )}\n`;
+    rebuilt.addFile(`${id}/pack.json`, Buffer.from(manifestJson, 'utf8'));
+    const files = rebuilt
+      .getEntries()
+      .filter((entry) => !entry.isDirectory)
+      .map((entry) => entry.entryName);
+    if (!files.some((file) => file.toLowerCase().endsWith('.md')))
+      throw new BadRequestException(
+        'Knowledge packs must contain at least one Markdown file',
+      );
+    return {
+      pack: { id, name, description, version, files },
+      buffer: rebuilt.toBuffer(),
+    };
   }
 
   private async readReleaseManifest(

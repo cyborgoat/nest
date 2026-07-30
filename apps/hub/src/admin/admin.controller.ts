@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -17,6 +18,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Request, Response } from 'express';
+import type { KnowledgePackMeta } from '@nest/shared';
 import { RegistryAdminGuard } from '../auth/auth.guard';
 import type { UserRole } from '../auth/auth.types';
 import { PacksService } from '../packs/packs.service';
@@ -25,6 +27,23 @@ import {
   type UploadedPackFile,
 } from '../publishing/publishing.service';
 import { AdminService, type PackPatch } from './admin.service';
+
+function parseUploadMetadata(raw: unknown): KnowledgePackMeta | undefined {
+  if (typeof raw !== 'string' || !raw.trim()) return undefined;
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    throw new BadRequestException('metadata must be valid JSON');
+  }
+  const field = (value: unknown) => (typeof value === 'string' ? value : '');
+  return {
+    id: field(parsed.id),
+    name: field(parsed.name),
+    description: field(parsed.description),
+    version: field(parsed.version),
+  };
+}
 
 @Controller('api/admin')
 @UseGuards(RegistryAdminGuard)
@@ -206,9 +225,22 @@ export class AdminController {
   ) {
     return this.admin.removeRelease(req.authUser!, id, version);
   }
+  @Post('packs/inspect')
+  @UseInterceptors(FileInterceptor('file'))
+  inspect(@UploadedFile() file: UploadedPackFile) {
+    return this.publishing.inspectUpload(file);
+  }
   @Post('packs/upload')
   @UseInterceptors(FileInterceptor('file'))
-  upload(@Req() req: Request, @UploadedFile() file: UploadedPackFile) {
-    return this.publishing.submitRelease(req.authUser!, file);
+  upload(
+    @Req() req: Request,
+    @UploadedFile() file: UploadedPackFile,
+    @Body('metadata') metadata?: string,
+  ) {
+    return this.publishing.submitRelease(
+      req.authUser!,
+      file,
+      parseUploadMetadata(metadata),
+    );
   }
 }
