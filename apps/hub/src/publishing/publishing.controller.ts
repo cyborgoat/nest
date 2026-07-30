@@ -17,10 +17,34 @@ import { PublishingService, type UploadedPackFile } from './publishing.service';
 @UseGuards(AuthGuard)
 export class PublishingController {
   constructor(private readonly publishing: PublishingService) {}
+
+  /** Legacy compatibility: the generic endpoint is release-only. */
   @Post()
   @UseInterceptors(FileInterceptor('file', { storage: undefined }))
-  submit(@Req() req: Request, @UploadedFile() file: UploadedPackFile) {
-    return this.publishing.submit(req.authUser!, file);
+  submitLegacy(@Req() req: Request, @UploadedFile() file: UploadedPackFile) {
+    return this.publishing.submitRelease(req.authUser!, file);
+  }
+
+  @Post('releases')
+  @UseInterceptors(FileInterceptor('file', { storage: undefined }))
+  submitRelease(@Req() req: Request, @UploadedFile() file: UploadedPackFile) {
+    return this.publishing.submitRelease(req.authUser!, file);
+  }
+
+  @Post('live-patches/:packId/:version')
+  @UseInterceptors(FileInterceptor('file', { storage: undefined }))
+  submitLivePatch(
+    @Req() req: Request,
+    @Param('packId') packId: string,
+    @Param('version') version: string,
+    @UploadedFile() file: UploadedPackFile,
+  ) {
+    return this.publishing.submitLivePatch(
+      req.authUser!,
+      file,
+      packId,
+      version,
+    );
   }
   @Get('mine') mine(@Req() req: Request) {
     return this.publishing.listMine(req.authUser!);

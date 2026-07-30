@@ -153,6 +153,8 @@ pub struct InstalledPack {
     pub name: String,
     pub local_path: String,
     pub version: String,
+    #[serde(default)]
+    pub patch_revision: i64,
     pub last_synced: Option<String>,
     #[serde(default = "default_true")]
     pub active: bool,
@@ -168,6 +170,10 @@ pub struct InstalledPack {
     /// the Hub approves it.
     #[serde(default)]
     pub pending_version: Option<String>,
+    #[serde(default)]
+    pub pending_request_type: Option<String>,
+    #[serde(default)]
+    pub pending_patch_revision: Option<i64>,
     #[serde(default)]
     pub pending_request_id: Option<String>,
     #[serde(default)]
@@ -271,6 +277,29 @@ fn migrate(conn: &Connection) -> AppResult<()> {
     ensure_sync_state_owner_id_column(conn)?;
     ensure_sync_state_description_column(conn)?;
     ensure_sync_state_pending_columns(conn)?;
+    ensure_sync_state_patch_columns(conn)?;
+    Ok(())
+}
+
+fn ensure_sync_state_patch_columns(conn: &Connection) -> AppResult<()> {
+    if !table_has_column(conn, "sync_state", "patch_revision")? {
+        conn.execute(
+            "ALTER TABLE sync_state ADD COLUMN patch_revision INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+    }
+    if !table_has_column(conn, "sync_state", "pending_request_type")? {
+        conn.execute(
+            "ALTER TABLE sync_state ADD COLUMN pending_request_type TEXT",
+            [],
+        )?;
+    }
+    if !table_has_column(conn, "sync_state", "pending_patch_revision")? {
+        conn.execute(
+            "ALTER TABLE sync_state ADD COLUMN pending_patch_revision INTEGER",
+            [],
+        )?;
+    }
     Ok(())
 }
 
@@ -911,6 +940,7 @@ pub struct SyncStateUpsert<'a> {
     pub origin: &'a str,
     pub owner_id: Option<&'a str>,
     pub description: &'a str,
+    pub patch_revision: i64,
 }
 
 pub fn upsert_sync_state(conn: &Connection, values: SyncStateUpsert<'_>) -> AppResult<()> {
@@ -920,8 +950,8 @@ pub fn upsert_sync_state(conn: &Connection, values: SyncStateUpsert<'_>) -> AppR
     // re-sync/import that doesn't have owner info shouldn't clobber a
     // previously-recorded owner with NULL.
     conn.execute(
-        "INSERT INTO sync_state (pack_id, name, version, local_path, last_synced, active, origin, owner_id, description)
-         VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?7, ?8)
+        "INSERT INTO sync_state (pack_id, name, version, local_path, last_synced, active, origin, owner_id, description, patch_revision)
+         VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?7, ?8, ?9)
          ON CONFLICT(pack_id) DO UPDATE SET
            name = excluded.name,
            version = excluded.version,
@@ -929,7 +959,8 @@ pub fn upsert_sync_state(conn: &Connection, values: SyncStateUpsert<'_>) -> AppR
            last_synced = excluded.last_synced,
            origin = excluded.origin,
            owner_id = COALESCE(excluded.owner_id, sync_state.owner_id),
-           description = excluded.description",
+           description = excluded.description,
+           patch_revision = excluded.patch_revision",
         params![
             values.pack_id,
             values.name,
@@ -938,7 +969,8 @@ pub fn upsert_sync_state(conn: &Connection, values: SyncStateUpsert<'_>) -> AppR
             now,
             values.origin,
             values.owner_id,
-            values.description
+            values.description,
+            values.patch_revision
         ],
     )?;
     Ok(())
@@ -964,7 +996,7 @@ pub fn list_active_pack_roots(conn: &Connection) -> AppResult<Vec<String>> {
 
 pub fn list_sync_state(conn: &Connection) -> AppResult<Vec<InstalledPack>> {
     let mut stmt = conn.prepare(
-        "SELECT pack_id, name, local_path, version, last_synced, COALESCE(active, 1), COALESCE(origin, 'unknown'), owner_id, COALESCE(description, ''), pending_version, pending_request_id, publish_review_status, publish_review_created_at
+        "SELECT pack_id, name, local_path, version, last_synced, COALESCE(active, 1), COALESCE(origin, 'unknown'), owner_id, COALESCE(description, ''), pending_version, pending_request_id, publish_review_status, publish_review_created_at, COALESCE(patch_revision, 0), pending_request_type, pending_patch_revision
          FROM sync_state ORDER BY name",
     )?;
     let rows = stmt.query_map([], |row| {
@@ -973,12 +1005,15 @@ pub fn list_sync_state(conn: &Connection) -> AppResult<Vec<InstalledPack>> {
             name: row.get(1)?,
             local_path: row.get(2)?,
             version: row.get(3)?,
+            patch_revision: row.get(13)?,
             last_synced: row.get(4)?,
             active: row.get::<_, i64>(5)? != 0,
             origin: row.get(6)?,
             owner_id: row.get(7)?,
             description: row.get(8)?,
             pending_version: row.get(9)?,
+            pending_request_type: row.get(14)?,
+            pending_patch_revision: row.get(15)?,
             pending_request_id: row.get(10)?,
             publish_review_status: row.get(11)?,
             publish_review_created_at: row.get(12)?,
@@ -989,7 +1024,7 @@ pub fn list_sync_state(conn: &Connection) -> AppResult<Vec<InstalledPack>> {
 
 pub fn get_sync_state(conn: &Connection, pack_id: &str) -> AppResult<Option<InstalledPack>> {
     conn.query_row(
-        "SELECT pack_id, name, local_path, version, last_synced, COALESCE(active, 1), COALESCE(origin, 'unknown'), owner_id, COALESCE(description, ''), pending_version, pending_request_id, publish_review_status, publish_review_created_at
+        "SELECT pack_id, name, local_path, version, last_synced, COALESCE(active, 1), COALESCE(origin, 'unknown'), owner_id, COALESCE(description, ''), pending_version, pending_request_id, publish_review_status, publish_review_created_at, COALESCE(patch_revision, 0), pending_request_type, pending_patch_revision
          FROM sync_state WHERE pack_id = ?1",
         params![pack_id],
         |row| {
@@ -998,12 +1033,15 @@ pub fn get_sync_state(conn: &Connection, pack_id: &str) -> AppResult<Option<Inst
                 name: row.get(1)?,
                 local_path: row.get(2)?,
                 version: row.get(3)?,
+                patch_revision: row.get(13)?,
                 last_synced: row.get(4)?,
                 active: row.get::<_, i64>(5)? != 0,
                 origin: row.get(6)?,
                 owner_id: row.get(7)?,
                 description: row.get(8)?,
                 pending_version: row.get(9)?,
+                pending_request_type: row.get(14)?,
+                pending_patch_revision: row.get(15)?,
                 pending_request_id: row.get(10)?,
                 publish_review_status: row.get(11)?,
                 publish_review_created_at: row.get(12)?,
@@ -1016,21 +1054,31 @@ pub fn get_sync_state(conn: &Connection, pack_id: &str) -> AppResult<Option<Inst
 
 /// Records that `pack_id` has an unresolved publish request awaiting Hub
 /// review. `version`/snapshot baseline are deliberately left untouched —
-/// see `hub_publish_pack` for why.
+/// see the explicit publish commands for why.
 pub fn set_pending_publish(
     conn: &Connection,
     pack_id: &str,
     request_id: &str,
     version: &str,
     created_at: Option<&str>,
+    request_type: &str,
+    patch_revision: Option<i64>,
 ) -> AppResult<()> {
     conn.execute(
         "UPDATE sync_state
          SET pending_request_id = ?1, pending_version = ?2,
              publish_review_status = 'pending',
+             pending_request_type = ?4, pending_patch_revision = ?5,
              publish_review_created_at = COALESCE(?3, publish_review_created_at)
-         WHERE pack_id = ?4",
-        params![request_id, version, created_at, pack_id],
+         WHERE pack_id = ?6",
+        params![
+            request_id,
+            version,
+            created_at,
+            request_type,
+            patch_revision,
+            pack_id
+        ],
     )?;
     Ok(())
 }
@@ -1058,6 +1106,7 @@ pub fn clear_pending_publish(conn: &Connection, pack_id: &str) -> AppResult<()> 
     conn.execute(
         "UPDATE sync_state
          SET pending_request_id = NULL, pending_version = NULL,
+             pending_request_type = NULL, pending_patch_revision = NULL,
              publish_review_status = NULL, publish_review_created_at = NULL
          WHERE pack_id = ?1",
         params![pack_id],
@@ -1249,6 +1298,7 @@ mod sync_state_tests {
                 origin: "local",
                 owner_id: None,
                 description: "An updated description",
+                patch_revision: 0,
             },
         )
         .unwrap();
@@ -1274,6 +1324,7 @@ mod sync_state_tests {
                 origin: "local",
                 owner_id: None,
                 description: "",
+                patch_revision: 0,
             },
         )
         .unwrap();
@@ -1299,10 +1350,21 @@ mod sync_state_tests {
     fn pending_publish_round_trips_through_get_and_list_sync_state() {
         let conn = seeded_conn();
 
-        set_pending_publish(&conn, "sample", "req-1", "1.1.0", Some("now")).unwrap();
+        set_pending_publish(
+            &conn,
+            "sample",
+            "req-1",
+            "1.1.0",
+            Some("now"),
+            "release",
+            None,
+        )
+        .unwrap();
         let pending = get_sync_state(&conn, "sample").unwrap().unwrap();
         assert_eq!(pending.pending_request_id.as_deref(), Some("req-1"));
         assert_eq!(pending.pending_version.as_deref(), Some("1.1.0"));
+        assert_eq!(pending.pending_request_type.as_deref(), Some("release"));
+        assert_eq!(pending.pending_patch_revision, None);
         assert_eq!(pending.publish_review_status.as_deref(), Some("pending"));
         assert_eq!(pending.publish_review_created_at.as_deref(), Some("now"));
         // `version` (the last-approved value) must stay untouched by a pending marker.

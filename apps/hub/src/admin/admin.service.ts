@@ -168,7 +168,9 @@ export class AdminService {
       .all() as PackRow[];
     const releases = this.database.db
       .prepare(
-        'SELECT pack_id, version, yanked, checksum, published_at FROM releases ORDER BY pack_id, published_at DESC',
+        `SELECT pack_id, version, yanked, checksum, published_at,
+                patch_revision, patched_at
+         FROM releases ORDER BY pack_id, published_at DESC`,
       )
       .all() as ReleaseRow[];
     const grants = this.database.db

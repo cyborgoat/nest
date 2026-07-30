@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Spinner } from "@/components/ui/spinner";
 import { useI18n } from "@/lib/i18n";
+import { afterMenuClose } from "@/lib/menu-actions";
 import { cn } from "@/lib/utils";
 
 export function RemovePackButton({
@@ -75,7 +76,7 @@ export function RemovePackButton({
               <>
                 <DropdownMenuItem
                   disabled={disabled || publishDisabled}
-                  onSelect={() => void onPublish()}
+                  onSelect={() => afterMenuClose(onPublish)}
                 >
                   <CloudUpload className="size-3.5" />
                   {publishLabel ?? "Publish"}
@@ -84,7 +85,10 @@ export function RemovePackButton({
               </>
             )}
             {onRename && (
-              <DropdownMenuItem disabled={disabled} onSelect={() => onRename()}>
+              <DropdownMenuItem
+                disabled={disabled}
+                onSelect={() => afterMenuClose(onRename)}
+              >
                 <Pencil className="size-3.5" />
                 Rename
               </DropdownMenuItem>
@@ -92,7 +96,7 @@ export function RemovePackButton({
             {onExport && (
               <DropdownMenuItem
                 disabled={disabled}
-                onSelect={() => void onExport()}
+                onSelect={() => afterMenuClose(onExport)}
               >
                 <Download className="size-3.5" />
                 {exportLabel ?? "Export ZIP"}
@@ -101,9 +105,7 @@ export function RemovePackButton({
             <DropdownMenuItem
               className="text-destructive focus:text-destructive"
               disabled={disabled}
-              onSelect={() => {
-                window.setTimeout(() => setDialogOpen(true), 0);
-              }}
+              onSelect={() => afterMenuClose(() => setDialogOpen(true))}
             >
               <Trash2 className="size-3.5" />
               {t("hub.uninstallPack")}

@@ -376,7 +376,7 @@ describe('Hub (e2e)', () => {
     );
     zip.addFile('authored-pack/README.md', Buffer.from('# Reviewed knowledge'));
     const submission = await request(app.getHttpServer())
-      .post('/api/publish-requests')
+      .post('/api/publish-requests/releases')
       .set('Authorization', `Bearer ${authorLogin.body.access_token}`)
       .attach('file', zip.toBuffer(), 'authored-pack.zip')
       .expect(201);
@@ -432,6 +432,100 @@ describe('Hub (e2e)', () => {
       .get('/packs/authored-pack')
       .set('Authorization', `Bearer ${authorLogin.body.access_token}`)
       .expect(200);
+  });
+
+  it('reviews and serves a live patch without changing SemVer', async () => {
+    const authorLogin = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ id: 'pack-author', password: 'a-secure-password' })
+      .expect(201);
+    const adminLogin = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ id: 'role-admin', password: 'role-test-password' })
+      .expect(201);
+    const zip = new AdmZip();
+    zip.addFile(
+      'authored-pack/pack.json',
+      Buffer.from(
+        JSON.stringify({
+          id: 'authored-pack',
+          name: 'Authored Pack',
+          description: 'Review workflow fixture',
+          version: '1.0.0',
+        }),
+      ),
+    );
+    zip.addFile(
+      'authored-pack/README.md',
+      Buffer.from('# Reviewed knowledge\n\nPatched guidance.'),
+    );
+    await request(app.getHttpServer())
+      .post('/api/publish-requests')
+      .set('Authorization', `Bearer ${authorLogin.body.access_token}`)
+      .field('request_type', 'live_patch')
+      .field('target_version', '1.0.0')
+      .attach('file', zip.toBuffer(), 'authored-pack-patch.zip')
+      .expect(409);
+    const submission = await request(app.getHttpServer())
+      .post('/api/publish-requests/live-patches/authored-pack/1.0.0')
+      .set('Authorization', `Bearer ${authorLogin.body.access_token}`)
+      .attach('file', zip.toBuffer(), 'authored-pack-patch.zip')
+      .expect(201);
+    expect(submission.body).toMatchObject({
+      request_type: 'live_patch',
+      version: '1.0.0',
+      base_patch_revision: 0,
+      patch_revision: 1,
+    });
+    const queue = await request(app.getHttpServer())
+      .get('/api/admin/publish-requests')
+      .set('Authorization', `Bearer ${adminLogin.body.access_token}`)
+      .expect(200);
+    expect(queue.body).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: submission.body.id,
+          request_type: 'live_patch',
+          pack_id: 'authored-pack',
+          version: '1.0.0',
+          patch_revision: 1,
+        }),
+      ]),
+    );
+    const review = await request(app.getHttpServer())
+      .get(`/api/admin/publish-requests/${submission.body.id}/review`)
+      .set('Authorization', `Bearer ${adminLogin.body.access_token}`)
+      .expect(200);
+    expect(review.body).toMatchObject({
+      request_type: 'live_patch',
+      base_version: '1.0.0',
+      base_patch_revision: 0,
+      patch_revision: 1,
+      diff_available: true,
+    });
+    await request(app.getHttpServer())
+      .post(`/api/admin/publish-requests/${submission.body.id}/approve`)
+      .set('Authorization', `Bearer ${adminLogin.body.access_token}`)
+      .send({ note: 'Safe live correction.' })
+      .expect(201);
+    const download = await request(app.getHttpServer())
+      .get('/packs/authored-pack/1.0.0/download')
+      .set('Authorization', `Bearer ${authorLogin.body.access_token}`)
+      .expect(200);
+    expect(download.headers['x-pack-patch-revision']).toBe('1');
+    const project = await request(app.getHttpServer())
+      .get('/packs/authored-pack')
+      .set('Authorization', `Bearer ${authorLogin.body.access_token}`)
+      .expect(200);
+    expect(project.body.latest_version).toBe('1.0.0');
+    expect(project.body.releases).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          version: '1.0.0',
+          patch_revision: 1,
+        }),
+      ]),
+    );
   });
 
   it('serves durable browser diffs for text, images, and rejected requests', async () => {

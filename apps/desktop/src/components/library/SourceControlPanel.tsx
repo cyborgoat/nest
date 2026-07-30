@@ -18,8 +18,7 @@ import {
 } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { PublishPackDialog } from "@/components/hub/PublishPackDialog";
-import { usePublishPack } from "@/hooks/use-publish-pack";
+import { PackPublishDialogController } from "@/components/hub/PackPublishDialogController";
 import { useMergeApprovedPack } from "@/hooks/use-merge-approved-pack";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -46,7 +45,7 @@ import {
   STATUS_TEXT_CLASSES,
 } from "@/lib/file-status-ui";
 import { canEditPack } from "@/lib/pack-permissions";
-import { publishDescriptionDefault } from "@/lib/publish-defaults";
+import { pendingPublishVersionLabel } from "@/lib/publish-request-labels";
 import { fileMutationInvalidations, queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
 import { useEditorStore } from "@/stores/editor";
@@ -70,25 +69,11 @@ function PackChanges({
   const closeMainTab = useUiStore((s) => s.closeMainTab);
   const clearPathsUnder = useUiStore((s) => s.clearPathsUnder);
   const activeMainTabId = useUiStore((s) => s.activeMainTabId);
-  const openAccountSettingsTab = useUiStore(
-    (s) => s.openAccountSettingsTab,
-  );
+  const openAccountSettingsTab = useUiStore((s) => s.openAccountSettingsTab);
   const openMessagesTab = useUiStore((s) => s.openMessagesTab);
   const setEditing = useEditorStore((s) => s.setEditing);
   const setDirty = useEditorStore((s) => s.setDirty);
 
-  const catalogQuery = useQuery({
-    queryKey: queryKeys.catalog,
-    queryFn: api.hubListPacks,
-    enabled: publishDialogOpen,
-    retry: 1,
-  });
-  const catalogEntry = catalogQuery.data?.find(
-    (project) => project.id === pack.pack_id,
-  );
-  const isFirstPublish = catalogEntry == null;
-
-  const publish = usePublishPack();
   const mergeApproved = useMergeApprovedPack();
 
   const discard = useMutation({
@@ -102,10 +87,7 @@ function PackChanges({
       } else {
         closeMainTab(diffTabId(pack.pack_id, change.path));
       }
-      for (const key of fileMutationInvalidations(
-        pack.pack_id,
-        change.path,
-      )) {
+      for (const key of fileMutationInvalidations(pack.pack_id, change.path)) {
         void queryClient.invalidateQueries({ queryKey: key });
       }
       void queryClient.invalidateQueries({
@@ -137,7 +119,7 @@ function PackChanges({
             variant="accent"
             className="shrink-0 normal-case tracking-normal"
           >
-            v{pack.pending_version} under review
+            {pendingPublishVersionLabel(pack)} under review
           </Badge>
         )}
         {pack.publish_review_status === "approved_awaiting_merge" &&
@@ -146,7 +128,7 @@ function PackChanges({
               variant="update"
               className="shrink-0 normal-case tracking-normal"
             >
-              v{pack.pending_version} approved
+              {pendingPublishVersionLabel(pack)} approved
             </Badge>
           )}
         {recentlyRejected && !pack.pending_version && (
@@ -174,25 +156,21 @@ function PackChanges({
               size="icon-xs"
               variant="ghost"
               aria-label={authenticated ? "Publish pack" : "Sign in to publish"}
-              disabled={Boolean(pack.pending_version) || publish.isPending}
+              disabled={Boolean(pack.pending_version)}
               className="ml-auto -mr-1 shrink-0"
               onClick={() => {
                 if (authenticated) setPublishDialogOpen(true);
                 else openAccountSettingsTab();
               }}
             >
-              {publish.isPending ? (
-                <Loader2 className="size-3.5 animate-spin" />
-              ) : (
-                <CloudUpload className="size-3.5" />
-              )}
+              <CloudUpload className="size-3.5" />
             </Button>
           </TooltipTrigger>
           <TooltipContent side="right">
             {pack.pending_version
               ? pack.publish_review_status === "approved_awaiting_merge"
-                ? `v${pack.pending_version} is approved and ready to merge`
-                : `v${pack.pending_version} is awaiting review`
+                ? `${pendingPublishVersionLabel(pack)} is approved and ready to merge`
+                : `${pendingPublishVersionLabel(pack)} is awaiting review`
               : authenticated
                 ? "Publish pack"
                 : "Sign in to publish"}
@@ -227,136 +205,123 @@ function PackChanges({
           </div>
         )}
       {statuses.length > 0 && (
-      <div className="ml-3 border-l border-border/60 pb-2">
-        {statuses.map((s) => {
-          const relativePath = s.path.startsWith(`${pack.local_path}/`)
-            ? s.path.slice(pack.local_path.length + 1)
-            : s.path;
-          const pathParts = relativePath.split("/");
-          const filename = pathParts.pop() ?? relativePath;
-          const parentPath = pathParts.join("/");
-          const selected =
-            activeMainTabId === diffTabId(pack.pack_id, s.path);
-          const discarding =
-            discard.isPending && discard.variables?.path === s.path;
+        <div className="ml-3 border-l border-border/60 pb-2">
+          {statuses.map((s) => {
+            const relativePath = s.path.startsWith(`${pack.local_path}/`)
+              ? s.path.slice(pack.local_path.length + 1)
+              : s.path;
+            const pathParts = relativePath.split("/");
+            const filename = pathParts.pop() ?? relativePath;
+            const parentPath = pathParts.join("/");
+            const selected =
+              activeMainTabId === diffTabId(pack.pack_id, s.path);
+            const discarding =
+              discard.isPending && discard.variables?.path === s.path;
 
-          return (
-            <ContextMenu key={s.path}>
-              <ContextMenuTrigger asChild>
-                <div
-                  className={cn(
-                    "group flex w-full items-center rounded-md pr-2 text-sm transition-colors hover:bg-muted/80",
-                    selected && "bg-muted/80",
-                  )}
-                >
-                  <button
-                    type="button"
-                    onClick={() => openDiffTab(pack.pack_id, s.path)}
-                    className="flex min-w-0 flex-1 items-center gap-1.5 py-1.5 pl-3 text-left"
+            return (
+              <ContextMenu key={s.path}>
+                <ContextMenuTrigger asChild>
+                  <div
+                    className={cn(
+                      "group flex w-full items-center rounded-md pr-2 text-sm transition-colors hover:bg-muted/80",
+                      selected && "bg-muted/80",
+                    )}
                   >
-                    <FileText className="size-3.5 shrink-0 text-muted-foreground" />
-                    <span className="flex min-w-0 flex-1 items-baseline gap-1.5 overflow-hidden">
-                      <span
-                        className={cn(
-                          "max-w-[60%] shrink-0 truncate",
-                          STATUS_TEXT_CLASSES[s.status],
-                        )}
-                      >
-                        {filename}
-                      </span>
-                      {parentPath && (
-                        <span className="truncate text-xs text-muted-foreground">
-                          {parentPath}
-                        </span>
-                      )}
-                    </span>
-                  </button>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        type="button"
-                        size="icon-xs"
-                        variant="ghost"
-                        aria-label={`Discard changes to ${filename}`}
-                        disabled={discard.isPending}
-                        className={cn(
-                          "shrink-0 opacity-0 transition-opacity group-hover:opacity-100",
-                          selected && "opacity-100",
-                        )}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          discard.mutate(s);
-                        }}
-                      >
-                        <Undo2
+                    <button
+                      type="button"
+                      onClick={() => openDiffTab(pack.pack_id, s.path)}
+                      className="flex min-w-0 flex-1 items-center gap-1.5 py-1.5 pl-3 text-left"
+                    >
+                      <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+                      <span className="flex min-w-0 flex-1 items-baseline gap-1.5 overflow-hidden">
+                        <span
                           className={cn(
-                            "size-3.5",
-                            discarding && "animate-spin",
+                            "max-w-[60%] shrink-0 truncate",
+                            STATUS_TEXT_CLASSES[s.status],
                           )}
-                        />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="right">
-                      Discard changes
-                    </TooltipContent>
-                  </Tooltip>
-                  <Badge
-                    variant={STATUS_BADGE_VARIANT[s.status]}
-                    className="ml-1 shrink-0 px-1 py-0 text-[10px] leading-4"
+                        >
+                          {filename}
+                        </span>
+                        {parentPath && (
+                          <span className="truncate text-xs text-muted-foreground">
+                            {parentPath}
+                          </span>
+                        )}
+                      </span>
+                    </button>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          size="icon-xs"
+                          variant="ghost"
+                          aria-label={`Discard changes to ${filename}`}
+                          disabled={discard.isPending}
+                          className={cn(
+                            "shrink-0 opacity-0 transition-opacity group-hover:opacity-100",
+                            selected && "opacity-100",
+                          )}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            discard.mutate(s);
+                          }}
+                        >
+                          <Undo2
+                            className={cn(
+                              "size-3.5",
+                              discarding && "animate-spin",
+                            )}
+                          />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="right">
+                        Discard changes
+                      </TooltipContent>
+                    </Tooltip>
+                    <Badge
+                      variant={STATUS_BADGE_VARIANT[s.status]}
+                      className="ml-1 shrink-0 px-1 py-0 text-[10px] leading-4"
+                    >
+                      {STATUS_LETTER[s.status]}
+                    </Badge>
+                  </div>
+                </ContextMenuTrigger>
+                <ContextMenuContent>
+                  <ContextMenuItem
+                    onSelect={() => openDiffTab(pack.pack_id, s.path)}
                   >
-                    {STATUS_LETTER[s.status]}
-                  </Badge>
-                </div>
-              </ContextMenuTrigger>
-              <ContextMenuContent>
-                <ContextMenuItem
-                  onSelect={() => openDiffTab(pack.pack_id, s.path)}
-                >
-                  <GitCompare className="size-3.5" />
-                  Open Changes
-                </ContextMenuItem>
-                <ContextMenuItem
-                  disabled={
-                    s.status === "deleted" ||
-                    !s.path.toLowerCase().endsWith(".md")
-                  }
-                  onSelect={() => openFileTab(s.path, { preview: false })}
-                >
-                  <FileText className="size-3.5" />
-                  Open File
-                </ContextMenuItem>
-                <ContextMenuSeparator />
-                <ContextMenuItem
-                  disabled={discard.isPending}
-                  className="text-destructive focus:text-destructive"
-                  onSelect={() => discard.mutate(s)}
-                >
-                  <Undo2 className="size-3.5" />
-                  Discard Changes
-                </ContextMenuItem>
-              </ContextMenuContent>
-            </ContextMenu>
-          );
-        })}
-      </div>
+                    <GitCompare className="size-3.5" />
+                    Open Changes
+                  </ContextMenuItem>
+                  <ContextMenuItem
+                    disabled={
+                      s.status === "deleted" ||
+                      !s.path.toLowerCase().endsWith(".md")
+                    }
+                    onSelect={() => openFileTab(s.path, { preview: false })}
+                  >
+                    <FileText className="size-3.5" />
+                    Open File
+                  </ContextMenuItem>
+                  <ContextMenuSeparator />
+                  <ContextMenuItem
+                    disabled={discard.isPending}
+                    className="text-destructive focus:text-destructive"
+                    onSelect={() => discard.mutate(s)}
+                  >
+                    <Undo2 className="size-3.5" />
+                    Discard Changes
+                  </ContextMenuItem>
+                </ContextMenuContent>
+              </ContextMenu>
+            );
+          })}
+        </div>
       )}
-      <PublishPackDialog
+      <PackPublishDialogController
+        pack={pack}
         open={publishDialogOpen}
         onOpenChange={setPublishDialogOpen}
-        packName={pack.name}
-        currentVersion={pack.version}
-        currentDescription={publishDescriptionDefault(
-          catalogEntry,
-          pack.description,
-        )}
-        isFirstPublish={isFirstPublish}
-        defaultsLoading={catalogQuery.isLoading}
-        publishing={publish.isPending}
-        lockedPendingVersion={pack.pending_version}
-        onPublish={(version, description) => {
-          publish.mutate({ packId: pack.pack_id, version, description });
-          setPublishDialogOpen(false);
-        }}
       />
     </section>
   );
@@ -378,7 +343,9 @@ export function SourceControlPanel({
   // Get fresh "under review" state as soon as this view is opened, rather
   // than waiting for the background poll.
   useEffect(() => {
-    void queryClient.invalidateQueries({ queryKey: queryKeys.publishReconcile });
+    void queryClient.invalidateQueries({
+      queryKey: queryKeys.publishReconcile,
+    });
   }, [queryClient]);
 
   const rejectionQuery = useQuery({

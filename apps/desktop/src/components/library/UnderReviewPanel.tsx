@@ -8,6 +8,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { RefreshButton } from "@/components/ui/refresh-button";
 import { SidebarPaneHeader } from "@/components/ui/sidebar-pane-header";
 import { api } from "@/lib/api";
+import { pendingPublishVersionLabel } from "@/lib/publish-request-labels";
 import { queryKeys } from "@/lib/query-keys";
 import { useUiStore } from "@/stores/ui";
 
@@ -86,7 +87,9 @@ export function UnderReviewPanel({
                       {pack.pack_id}
                     </p>
                   </div>
-                  <Badge variant="accent">v{pack.pending_version}</Badge>
+                  <Badge variant="accent">
+                    {pendingPublishVersionLabel(pack)}
+                  </Badge>
                 </div>
                 {pack.publish_review_created_at && (
                   <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">

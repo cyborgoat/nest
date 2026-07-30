@@ -39,7 +39,8 @@ export const api = {
     }),
   vaultCreateFolder: (path: string) =>
     invoke<void>("vault_create_folder", { path }),
-  vaultDeleteFile: (path: string) => invoke<void>("vault_delete_file", { path }),
+  vaultDeleteFile: (path: string) =>
+    invoke<void>("vault_delete_file", { path }),
   vaultDeleteFolder: (path: string) =>
     invoke<void>("vault_delete_folder", { path }),
   vaultRenameEntry: (from: string, to: string) =>
@@ -57,10 +58,7 @@ export const api = {
     invoke<VaultChangePreview>("settings_preview_knowledge_dir", {
       knowledgeDir,
     }),
-  settingsChangeKnowledgeDir: (
-    knowledgeDir: string,
-    mode: VaultChangeMode,
-  ) =>
+  settingsChangeKnowledgeDir: (knowledgeDir: string, mode: VaultChangeMode) =>
     invoke<VaultChangeResult>("settings_change_knowledge_dir", {
       knowledgeDir,
       mode,
@@ -121,6 +119,7 @@ export const api = {
     version?: string,
     ownerId?: string | null,
     replaceLocalPackId?: string | null,
+    syncPatch = false,
   ) =>
     invoke<InstalledPack>("hub_download_pack", {
       packId,
@@ -128,6 +127,21 @@ export const api = {
       version: version ?? null,
       ownerId: ownerId ?? null,
       replaceLocalPackId: replaceLocalPackId ?? null,
+      syncPatch,
+    }),
+  hubSyncPackPatch: (
+    packId: string,
+    packName: string,
+    version: string,
+    ownerId?: string | null,
+  ) =>
+    invoke<InstalledPack>("hub_download_pack", {
+      packId,
+      packName,
+      version,
+      ownerId: ownerId ?? null,
+      replaceLocalPackId: null,
+      syncPatch: true,
     }),
   hubInspectLocalPack: (sourcePath: string) =>
     invoke<LocalPackInspection>("hub_inspect_local_pack", { sourcePath }),
@@ -174,10 +188,15 @@ export const api = {
       currentPassword,
       newPassword,
     }),
-  hubPublishPack: (packId: string, version?: string) =>
-    invoke<PublishRequest>("hub_publish_pack", {
+  hubPublishRelease: (packId: string, version: string) =>
+    invoke<PublishRequest>("hub_publish_release", {
       packId,
-      version: version ?? null,
+      version,
+    }),
+  hubPublishLivePatch: (packId: string, targetVersion: string) =>
+    invoke<PublishRequest>("hub_publish_live_patch", {
+      packId,
+      targetVersion,
     }),
   hubUpdatePackMetadata: (packId: string, description: string) =>
     invoke<InstalledPack>("hub_update_pack_metadata", {

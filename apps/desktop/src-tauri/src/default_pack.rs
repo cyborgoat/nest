@@ -130,6 +130,7 @@ fn promote_bundled_record(conn: &Connection, pack_id: &str) -> AppResult<()> {
             origin: "local",
             owner_id: installed.owner_id.as_deref(),
             description: &installed.description,
+            patch_revision: installed.patch_revision,
         },
     )
 }
@@ -172,6 +173,7 @@ fn seed_pack(
             owner_id: None,
             // Bundled packs' embedded pack.json doesn't carry a description field.
             description: "",
+            patch_revision: 0,
         },
     )
 }

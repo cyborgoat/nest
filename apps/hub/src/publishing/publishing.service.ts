@@ -3,6 +3,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import AdmZip from 'adm-zip';
@@ -22,6 +23,7 @@ import type {
   AdminPublishRequest,
   PendingPublishRequest,
   PublishReviewFileDetail,
+  PublishRequestType,
   PublishRequestStatus,
 } from '@nest/shared';
 import { PublishReviewService } from './publish-review.service';
@@ -60,6 +62,9 @@ type PublishRequestRow = {
   reviewer_name_snapshot: string | null;
   base_version: string | null;
   review_artifact_path: string | null;
+  request_type: PublishRequestType;
+  patch_revision: number | null;
+  base_patch_revision: number | null;
   created_at: string;
   reviewed_at: string | null;
 };
@@ -78,6 +83,8 @@ type PendingRequestView = PendingPublishRequest;
 
 @Injectable()
 export class PublishingService {
+  private readonly logger = new Logger(PublishingService.name);
+
   constructor(
     private readonly database: DatabaseService,
     private readonly config: HubRuntimeConfig,
@@ -86,9 +93,72 @@ export class PublishingService {
     private readonly publishReview: PublishReviewService,
   ) {}
 
-  async submit(
+  submitRelease(
     user: AuthUser,
     file: UploadedPackFile,
+  ): Promise<PublishRequestView> {
+    return this.submitWithDiagnostics(user, file, {
+      requestType: 'release',
+    });
+  }
+
+  submitLivePatch(
+    user: AuthUser,
+    file: UploadedPackFile,
+    packId: string,
+    targetVersion: string,
+  ): Promise<PublishRequestView> {
+    return this.submitWithDiagnostics(user, file, {
+      requestType: 'live_patch',
+      packId,
+      targetVersion,
+    });
+  }
+
+  private async submitWithDiagnostics(
+    user: AuthUser,
+    file: UploadedPackFile,
+    operation:
+      | { requestType: 'release' }
+      | {
+          requestType: 'live_patch';
+          packId: string;
+          targetVersion: string;
+        },
+  ): Promise<PublishRequestView> {
+    try {
+      return await this.submit(user, file, operation);
+    } catch (error) {
+      this.logger.warn(
+        JSON.stringify({
+          event: 'publish_submission_rejected',
+          request_type: operation.requestType,
+          pack_id:
+            operation.requestType === 'live_patch'
+              ? operation.packId
+              : undefined,
+          version:
+            operation.requestType === 'live_patch'
+              ? operation.targetVersion
+              : undefined,
+          submitter_id: user.id,
+          reason: error instanceof Error ? error.message : String(error),
+        }),
+      );
+      throw error;
+    }
+  }
+
+  private async submit(
+    user: AuthUser,
+    file: UploadedPackFile,
+    operation:
+      | { requestType: 'release' }
+      | {
+          requestType: 'live_patch';
+          packId: string;
+          targetVersion: string;
+        },
   ): Promise<PublishRequestView> {
     if (!file?.buffer?.length)
       throw new BadRequestException('A pack ZIP is required');
@@ -96,6 +166,14 @@ export class PublishingService {
     if (file.buffer.length > max)
       throw new BadRequestException('Pack ZIP exceeds the upload limit');
     const pack = this.validateZip(file.buffer);
+    const requestType = operation.requestType;
+    if (
+      requestType === 'live_patch' &&
+      (operation.packId !== pack.id || operation.targetVersion !== pack.version)
+    )
+      throw new BadRequestException(
+        'Live patch route must match the ZIP pack id and version',
+      );
     const db = this.database.db;
     const existing = db
       .prepare('SELECT 1 FROM packs WHERE id = ?')
@@ -124,14 +202,41 @@ export class PublishingService {
         `${pack.id} already has a pending publish request for version ${pending.version} — wait for it to be approved or rejected before submitting again`,
       );
     }
-    if (
-      db
-        .prepare('SELECT 1 FROM releases WHERE pack_id = ? AND version = ?')
-        .get(pack.id, pack.version)
-    ) {
+    const existingRelease = db
+      .prepare(
+        `SELECT r.patch_revision, r.yanked
+         FROM releases r
+         WHERE r.pack_id = ? AND r.version = ?`,
+      )
+      .get(pack.id, pack.version) as
+      | {
+          patch_revision: number;
+          yanked: number;
+        }
+      | undefined;
+    if (requestType === 'release' && existingRelease) {
       throw new ConflictException(
         `Pack release already exists: ${pack.id}@${pack.version}`,
       );
+    }
+    if (requestType === 'live_patch') {
+      if (!existingRelease)
+        throw new NotFoundException(
+          `Pack release not found: ${pack.id}@${pack.version}`,
+        );
+      if (existingRelease.yanked)
+        throw new ConflictException('Yanked releases cannot be live patched');
+      const targetManifest = await this.readReleaseManifest(
+        pack.id,
+        pack.version,
+      );
+      if (
+        pack.name !== targetManifest.name ||
+        pack.description !== targetManifest.description
+      )
+        throw new BadRequestException(
+          'Live patches cannot change pack name, description, id, path, or version',
+        );
     }
     const stagingRoot = this.config.value.stagingPath;
     mkdirSync(stagingRoot, { recursive: true });
@@ -144,7 +249,17 @@ export class PublishingService {
         requestId,
         pack.id,
         file.buffer,
+        requestType === 'live_patch' ? pack.version : undefined,
       );
+      if (requestType === 'live_patch' && reviewArtifact.changedFiles === 0) {
+        await fs.rm(reviewArtifact.artifactPath, {
+          recursive: true,
+          force: true,
+        });
+        throw new BadRequestException(
+          'Live patch must change at least one file',
+        );
+      }
     } catch (error) {
       await fs.unlink(stagingPath).catch(() => undefined);
       throw error;
@@ -158,9 +273,10 @@ export class PublishingService {
             id, pack_id, version, name, description, submitter_uuid,
             submitter_id_snapshot, submitter_name_snapshot, staging_path,
             checksum, status, validation_json, base_version,
-            review_artifact_path, created_at
+            review_artifact_path, request_type, patch_revision,
+            base_patch_revision, created_at
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)`,
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)`,
         ).run(
           requestId,
           pack.id,
@@ -175,13 +291,26 @@ export class PublishingService {
           JSON.stringify({ files: pack.files }),
           reviewArtifact.baseVersion,
           reviewArtifact.artifactPath,
+          requestType,
+          requestType === 'live_patch'
+            ? (existingRelease?.patch_revision ?? 0) + 1
+            : null,
+          requestType === 'live_patch'
+            ? (existingRelease?.patch_revision ?? 0)
+            : null,
           timestamp,
         );
         this.messages.create({
           userUuid: user.uuid,
           kind: 'publish_submitted',
-          title: 'Publish request submitted',
-          body: `${pack.name} ${pack.version} is waiting for review.`,
+          title:
+            requestType === 'live_patch'
+              ? 'Live patch submitted'
+              : 'Publish request submitted',
+          body:
+            requestType === 'live_patch'
+              ? `${pack.name} ${pack.version} · Patch ${(existingRelease?.patch_revision ?? 0) + 1} is waiting for review.`
+              : `${pack.name} ${pack.version} is waiting for review.`,
           packId: pack.id,
           publishRequestId: requestId,
           eventKey: `publish:${requestId}:submitted`,
@@ -197,13 +326,28 @@ export class PublishingService {
       ]);
       throw error;
     }
+    this.logger.log(
+      JSON.stringify({
+        event: 'publish_submission_accepted',
+        request_id: requestId,
+        request_type: requestType,
+        pack_id: pack.id,
+        version: pack.version,
+        patch_revision:
+          requestType === 'live_patch'
+            ? (existingRelease?.patch_revision ?? 0) + 1
+            : null,
+        submitter_id: user.id,
+      }),
+    );
     return this.getRequest(requestId, user);
   }
 
   listMine(user: AuthUser): PublishRequestView[] {
     return this.database.db
       .prepare(
-        `SELECT id, pack_id, version, name, description, status, review_note, created_at, reviewed_at
+        `SELECT id, pack_id, version, name, description, status, request_type,
+                patch_revision, base_patch_revision, review_note, created_at, reviewed_at
       FROM publish_requests WHERE submitter_uuid = ? ORDER BY created_at DESC`,
       )
       .all(user.uuid) as PublishRequestView[];
@@ -212,7 +356,8 @@ export class PublishingService {
   listPending(): PendingRequestView[] {
     return this.database.db
       .prepare(
-        `SELECT r.id, r.pack_id, r.version, r.name, r.description, r.status, r.checksum,
+        `SELECT r.id, r.pack_id, r.version, r.name, r.description, r.status,
+      r.request_type, r.patch_revision, r.base_patch_revision, r.checksum,
       r.validation_json, r.created_at, u.login_id AS submitter_id, u.name AS submitter_name
       FROM publish_requests r JOIN users u ON u.uuid = r.submitter_uuid
       WHERE r.status = 'pending' ORDER BY r.created_at`,
@@ -253,6 +398,7 @@ export class PublishingService {
       .prepare(
         `SELECT
           r.id, r.pack_id, r.version, r.name, r.description, r.status,
+          r.request_type, r.patch_revision, r.base_patch_revision,
           r.checksum, r.validation_json, r.review_note, r.created_at,
           r.reviewed_at,
           COALESCE(r.submitter_id_snapshot, submitter.login_id) AS submitter_id,
@@ -294,13 +440,31 @@ export class PublishingService {
     const root = this.config.value.registryPath;
     const projectDir = path.join(root, validated.id);
     const destination = path.join(projectDir, validated.version);
-    if (
-      await fs
+    const isLivePatch = request.request_type === 'live_patch';
+    const currentRelease = this.database.db
+      .prepare(
+        'SELECT patch_revision, yanked FROM releases WHERE pack_id = ? AND version = ?',
+      )
+      .get(validated.id, validated.version) as
+      { patch_revision: number; yanked: number } | undefined;
+    if (isLivePatch) {
+      if (!currentRelease)
+        throw new ConflictException('Target release no longer exists');
+      if (currentRelease.yanked)
+        throw new ConflictException('Yanked releases cannot be live patched');
+      if (currentRelease.patch_revision !== request.base_patch_revision)
+        throw new ConflictException(
+          'The release changed after this live patch was submitted',
+        );
+    } else if (
+      currentRelease ||
+      (await fs
         .stat(destination)
         .then(() => true)
-        .catch(() => false)
-    )
+        .catch(() => false))
+    ) {
       throw new ConflictException('Release directory already exists');
+    }
     const extractRoot = path.join(
       path.dirname(request.staging_path),
       `${request.id}-extract`,
@@ -309,7 +473,23 @@ export class PublishingService {
     mkdirSync(extractRoot, { recursive: true });
     new AdmZip(zipBytes).extractAllTo(extractRoot, true);
     mkdirSync(projectDir, { recursive: true });
-    await fs.rename(path.join(extractRoot, validated.id), destination);
+    const candidate = path.join(extractRoot, validated.id);
+    const backup = path.join(
+      path.dirname(request.staging_path),
+      `${request.id}-backup`,
+    );
+    if (isLivePatch) {
+      await fs.rm(backup, { recursive: true, force: true });
+      await fs.rename(destination, backup);
+      try {
+        await fs.rename(candidate, destination);
+      } catch (error) {
+        await fs.rename(backup, destination);
+        throw error;
+      }
+    } else {
+      await fs.rename(candidate, destination);
+    }
     await fs.rm(extractRoot, { recursive: true, force: true });
     const timestamp = now();
     try {
@@ -337,20 +517,41 @@ export class PublishingService {
             )
             .run(validated.id, request.submitter_uuid, timestamp);
         }
-        this.database.db
-          .prepare(
-            `INSERT INTO releases(pack_id, version, storage_path, checksum, submitted_by, approved_by, published_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          )
-          .run(
-            validated.id,
-            validated.version,
-            path.join(validated.id, validated.version),
-            request.checksum,
-            request.submitter_uuid,
-            reviewer.uuid,
-            timestamp,
-          );
+        if (isLivePatch) {
+          const updated = this.database.db
+            .prepare(
+              `UPDATE releases
+               SET checksum = ?, patch_revision = ?, patched_at = ?
+               WHERE pack_id = ? AND version = ? AND patch_revision = ?`,
+            )
+            .run(
+              request.checksum,
+              request.patch_revision,
+              timestamp,
+              validated.id,
+              validated.version,
+              request.base_patch_revision,
+            );
+          if (updated.changes !== 1)
+            throw new ConflictException(
+              'The release changed while approving this live patch',
+            );
+        } else {
+          this.database.db
+            .prepare(
+              `INSERT INTO releases(pack_id, version, storage_path, checksum, submitted_by, approved_by, published_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            )
+            .run(
+              validated.id,
+              validated.version,
+              path.join(validated.id, validated.version),
+              request.checksum,
+              request.submitter_uuid,
+              reviewer.uuid,
+              timestamp,
+            );
+        }
         this.database.db
           .prepare(
             `UPDATE publish_requests
@@ -369,12 +570,13 @@ export class PublishingService {
           );
         this.audit_log.record(
           reviewer,
-          'publish.approve',
+          isLivePatch ? 'publish.live_patch.approve' : 'publish.approve',
           'publish_request',
           requestId,
           {
             pack_id: validated.id,
             version: validated.version,
+            patch_revision: request.patch_revision,
             note: note?.trim() || null,
           },
         );
@@ -385,10 +587,14 @@ export class PublishingService {
           this.messages.create({
             userUuid: request.submitter_uuid,
             kind: 'publish_approved',
-            title: 'Knowledge pack published',
-            body: `${validated.name} ${validated.version} was approved and released to the Hub.${
-              note?.trim() ? ` Reviewer comment: ${note.trim()}` : ''
-            }`,
+            title: isLivePatch
+              ? 'Live patch approved'
+              : 'Knowledge pack published',
+            body: `${
+              isLivePatch
+                ? `${validated.name} ${validated.version} · Patch ${request.patch_revision} was approved and is available on the Hub.`
+                : `${validated.name} ${validated.version} was approved and released to the Hub.`
+            }${note?.trim() ? ` Reviewer comment: ${note.trim()}` : ''}`,
             packId: validated.id,
             publishRequestId: requestId,
             eventKey: `publish:${requestId}:approved`,
@@ -398,7 +604,13 @@ export class PublishingService {
       })();
     } catch (error) {
       await fs.rm(destination, { recursive: true, force: true });
+      if (isLivePatch) {
+        await fs.rename(backup, destination).catch(() => undefined);
+      }
       throw error;
+    }
+    if (isLivePatch) {
+      await fs.rm(backup, { recursive: true, force: true });
     }
     await fs.unlink(request.staging_path).catch(() => undefined);
     return this.getRequest(requestId, reviewer);
@@ -434,7 +646,9 @@ export class PublishingService {
         );
       this.audit_log.record(
         reviewer,
-        'publish.reject',
+        request.request_type === 'live_patch'
+          ? 'publish.live_patch.reject'
+          : 'publish.reject',
         'publish_request',
         requestId,
         {
@@ -446,8 +660,15 @@ export class PublishingService {
         this.messages.create({
           userUuid: request.submitter_uuid,
           kind: 'publish_rejected',
-          title: 'Publish request needs changes',
-          body: `${request.name} ${request.version} was not approved: ${note.trim()}`,
+          title:
+            request.request_type === 'live_patch'
+              ? 'Live patch needs changes'
+              : 'Publish request needs changes',
+          body: `${request.name} ${request.version}${
+            request.request_type === 'live_patch'
+              ? ` · Patch ${request.patch_revision}`
+              : ''
+          } was not approved: ${note.trim()}`,
           packId: request.pack_id,
           publishRequestId: requestId,
           eventKey: `publish:${requestId}:rejected`,
@@ -509,6 +730,9 @@ export class PublishingService {
       version: row.version,
       name: row.name,
       description: row.description,
+      request_type: row.request_type,
+      patch_revision: row.patch_revision,
+      base_patch_revision: row.base_patch_revision,
       checksum: row.checksum,
       status: row.status,
       validation_json: row.validation_json,
@@ -691,6 +915,48 @@ export class PublishingService {
     return { id, name, description, version, files };
   }
 
+  private async readReleaseManifest(
+    packId: string,
+    version: string,
+  ): Promise<ValidatedPack> {
+    const manifestPath = path.join(
+      this.config.value.registryPath,
+      packId,
+      version,
+      'pack.json',
+    );
+    let raw: Record<string, unknown>;
+    try {
+      raw = JSON.parse(await fs.readFile(manifestPath, 'utf8')) as Record<
+        string,
+        unknown
+      >;
+    } catch {
+      throw new ConflictException('Target release metadata is unavailable');
+    }
+    const stringField = (value: unknown) =>
+      typeof value === 'string' ? value.trim() : '';
+    const id = stringField(raw.id);
+    const name = stringField(raw.name);
+    const description = stringField(raw.description);
+    const manifestVersion = stringField(raw.version);
+    const manifestPathField = stringField(raw.path) || id;
+    if (
+      id !== packId ||
+      manifestVersion !== version ||
+      manifestPathField !== id ||
+      !name
+    )
+      throw new ConflictException('Target release metadata is invalid');
+    return {
+      id,
+      name,
+      description,
+      version: manifestVersion,
+      files: [],
+    };
+  }
+
   private requestRow(id: string): PublishRequestRow {
     const row = this.database.db
       .prepare('SELECT * FROM publish_requests WHERE id = ?')
@@ -704,6 +970,7 @@ export class PublishingService {
       .prepare(
         `SELECT
           r.id, r.pack_id, r.version, r.name, r.description, r.status,
+          r.request_type, r.patch_revision, r.base_patch_revision,
           r.checksum, r.validation_json, r.review_note, r.created_at,
           r.reviewed_at,
           COALESCE(r.submitter_id_snapshot, submitter.login_id) AS submitter_id,

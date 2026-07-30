@@ -22,7 +22,7 @@ import {
 } from "../components/ui";
 import { useApi } from "../app/contexts";
 import { adminQueryKeys } from "../lib/api";
-import { useAdminData, useRegistryResync } from "../lib/hooks";
+import { useAdminPacks, useAdminUsers, useRegistryResync } from "../lib/hooks";
 import { PageHeader } from "../layout/PageHeader";
 
 export function PackDetailPage() {
@@ -30,7 +30,8 @@ export function PackDetailPage() {
   const navigate = useNavigate();
   const api = useApi();
   const qc = useQueryClient();
-  const { packs, users } = useAdminData();
+  const packs = useAdminPacks();
+  const users = useAdminUsers();
   const resync = useRegistryResync();
   const pack = packs.data?.find((item) => item.id === packId);
   const [deleteReleaseTarget, setDeleteReleaseTarget] = useState<{

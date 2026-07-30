@@ -27,6 +27,11 @@ Nest keeps one installed version per pack ID. Installing a newer release updates
 the pack; selecting an older release asks you to confirm the downgrade. Either
 operation replaces the current local files for that pack.
 
+A maintainer may also publish a reviewed live patch without creating a new
+semantic version. When **Patch available** appears, choose **Sync patch** to
+replace your installed release with the newest patch. Source Control must be
+clean before Nest allows this replacement.
+
 Installed packs remain readable if Hub later goes offline. Restricted downloads
 and future updates require a working Hub connection and suitable access.
 

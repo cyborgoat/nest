@@ -26,6 +26,7 @@ type PackZipArtifact = {
   filename: string;
   sha256: string;
   byteLength: number;
+  patchRevision: number;
 };
 
 type CreatePackZipOptions = {
@@ -125,6 +126,8 @@ export class PacksService implements OnModuleInit {
       version: packVersion,
       path: id,
       yanked: raw.yanked === true,
+      patch_revision: 0,
+      patched_at: null,
     };
   }
 
@@ -462,7 +465,8 @@ export class PacksService implements OnModuleInit {
     const rows = this.database.db
       .prepare(
         `
-      SELECT r.pack_id AS id, p.name, p.description, r.version, r.yanked
+      SELECT r.pack_id AS id, p.name, p.description, r.version, r.yanked,
+             r.patch_revision, r.patched_at
       FROM releases r JOIN packs p ON p.id = r.pack_id
       WHERE (? = 1 OR p.archived = 0)
         AND (? = 1 OR p.visibility = 'public' OR EXISTS (
@@ -483,6 +487,8 @@ export class PacksService implements OnModuleInit {
       description: string;
       version: string;
       yanked: number;
+      patch_revision: number;
+      patched_at: string | null;
     }>;
     return rows.map((row) => ({
       ...row,
@@ -507,6 +513,17 @@ export class PacksService implements OnModuleInit {
       description: latestMeta.description,
       latest_version: latest,
       versions,
+      releases: versions.map((version) => {
+        const release = releases.find(
+          (candidate) => candidate.version === version,
+        )!;
+        return {
+          version,
+          yanked: release.yanked,
+          patch_revision: release.patch_revision,
+          patched_at: release.patched_at,
+        };
+      }),
     };
   }
 
@@ -570,7 +587,22 @@ export class PacksService implements OnModuleInit {
     if (!release) {
       throw new NotFoundException(`Pack not found: ${packId}@${version}`);
     }
-    return release;
+    const manifestRelease = await this.readRelease(
+      packId,
+      version,
+      path.join(this.registryRoot(), packId, version),
+    );
+    if (!manifestRelease) {
+      throw new NotFoundException(
+        `Pack manifest not found: ${packId}@${version}`,
+      );
+    }
+    return {
+      ...manifestRelease,
+      yanked: release.yanked,
+      patch_revision: release.patch_revision,
+      patched_at: release.patched_at,
+    };
   }
 
   /**
@@ -639,7 +671,13 @@ export class PacksService implements OnModuleInit {
         `createPackZip done id=${packId} version=${release.version} bytes=${byteLength} sha256=${sha256.slice(0, 12)}… elapsedMs=${elapsedMs} file=${filePath}`,
       );
 
-      return { filePath, filename, sha256, byteLength };
+      return {
+        filePath,
+        filename,
+        sha256,
+        byteLength,
+        patchRevision: release.patch_revision,
+      };
     } catch (e) {
       await fs.unlink(filePath).catch(() => undefined);
       this.logger.error(

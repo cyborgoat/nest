@@ -5,12 +5,14 @@ import { Metric } from "../components/Metric";
 import { Progress } from "../components/Progress";
 import { Badge, Card, Empty, ErrorBox, RefreshButton } from "../components/ui";
 import { adminQueryKeys } from "../lib/api";
-import { useAdminData } from "../lib/hooks";
+import { useAdminPacks, useAdminReviews, useAdminUsers } from "../lib/hooks";
 import { PageHeader } from "../layout/PageHeader";
 
 export function DashboardPage() {
   const qc = useQueryClient();
-  const { users, reviews, packs } = useAdminData();
+  const users = useAdminUsers();
+  const reviews = useAdminReviews();
+  const packs = useAdminPacks();
   const dataError = users.error ?? reviews.error ?? packs.error;
   const restricted =
     packs.data?.filter((p) => p.visibility === "restricted").length ?? 0;

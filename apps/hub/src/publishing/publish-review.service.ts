@@ -53,6 +53,7 @@ type ReviewArtifact = {
 type BuiltArtifact = {
   artifactPath: string;
   baseVersion: string | null;
+  changedFiles: number;
 };
 
 type ArtifactImage = {
@@ -134,6 +135,7 @@ export class PublishReviewService {
       return {
         artifactPath,
         baseVersion,
+        changedFiles: summary.changed_files,
       };
     } catch (error) {
       await fs.rm(artifactPath, { recursive: true, force: true });

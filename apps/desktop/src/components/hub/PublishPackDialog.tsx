@@ -14,6 +14,10 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { nextPatchVersion } from "@/lib/semver";
 
+export type PublishPackIntent =
+  | { kind: "release"; version: string; description: string }
+  | { kind: "live_patch"; targetVersion: string };
+
 export function PublishPackDialog({
   open,
   onOpenChange,
@@ -25,6 +29,8 @@ export function PublishPackDialog({
   publishing = false,
   lockedPendingVersion,
   defaultsLoading = false,
+  availableReleases = [],
+  canLivePatch = false,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -33,7 +39,7 @@ export function PublishPackDialog({
   currentDescription: string;
   /** True for a local pack that has never been published before. */
   isFirstPublish: boolean;
-  onPublish: (version: string, description: string) => void;
+  onPublish: (intent: PublishPackIntent) => void;
   publishing?: boolean;
   /** Set when this pack already has an unresolved submission. Renders an
    *  explanation instead of the form — defense-in-depth in case the dialog
@@ -43,14 +49,30 @@ export function PublishPackDialog({
   /** Wait for the latest Hub release metadata before exposing editable
    * defaults. Falls back to local metadata if that lookup fails. */
   defaultsLoading?: boolean;
+  availableReleases?: string[];
+  /** True when the installed pack is already linked to a Hub project even
+   * if catalog metadata is temporarily stale or unavailable. */
+  canLivePatch?: boolean;
 }) {
+  const [requestType, setRequestType] = useState<"release" | "live_patch">(
+    "release",
+  );
   const [version, setVersion] = useState(currentVersion);
   const [description, setDescription] = useState(currentDescription);
+  const patchTargets =
+    availableReleases.length > 0
+      ? availableReleases
+      : canLivePatch
+        ? [currentVersion]
+        : [];
 
   useLayoutEffect(() => {
     if (open) {
-      setVersion(isFirstPublish ? currentVersion : nextPatchVersion(currentVersion));
+      setVersion(
+        isFirstPublish ? currentVersion : nextPatchVersion(currentVersion),
+      );
       setDescription(currentDescription);
+      setRequestType("release");
     }
   }, [open, currentVersion, currentDescription, isFirstPublish]);
 
@@ -107,26 +129,86 @@ export function PublishPackDialog({
           <DialogDescription>
             {isFirstPublish
               ? "Submits this pack to the hub for review."
-              : "Submits your edits as a new version for review. The hub keeps every version, so this can't reuse an already-published version number."}
+              : requestType === "live_patch"
+                ? "Updates an existing release without changing its semantic version. Reviewers will see this as a live patch."
+                : "Submits your edits as a new version for review. The hub keeps every version, so this can't reuse an already-published version number."}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
+          {!isFirstPublish || canLivePatch ? (
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                type="button"
+                variant={requestType === "release" ? "default" : "outline"}
+                onClick={() => {
+                  setRequestType("release");
+                  setVersion(nextPatchVersion(currentVersion));
+                }}
+              >
+                New release
+              </Button>
+              <Button
+                type="button"
+                variant={requestType === "live_patch" ? "default" : "outline"}
+                disabled={!canLivePatch || patchTargets.length === 0}
+                onClick={() => {
+                  setRequestType("live_patch");
+                  setVersion(
+                    patchTargets.includes(currentVersion)
+                      ? currentVersion
+                      : patchTargets[0],
+                  );
+                }}
+              >
+                Live patch
+              </Button>
+            </div>
+          ) : (
+            <p className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+              Live patch becomes available after this pack has an approved Hub
+              release.
+            </p>
+          )}
           <Field label="Version">
-            <Input
-              autoFocus
-              value={version}
-              onChange={(e) => setVersion(e.target.value)}
-              placeholder="1.0.0"
-            />
+            {requestType === "live_patch" ? (
+              <select
+                autoFocus
+                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                value={version}
+                onChange={(event) => setVersion(event.target.value)}
+              >
+                {patchTargets.map((release) => (
+                  <option key={release} value={release}>
+                    {release}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <Input
+                autoFocus
+                value={version}
+                onChange={(e) => setVersion(e.target.value)}
+                placeholder="1.0.0"
+              />
+            )}
           </Field>
-          <Field label="Description">
-            <Textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="What is this knowledge pack for?"
-              rows={3}
-            />
-          </Field>
+          {requestType === "release" && (
+            <Field label="Description">
+              <Textarea
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="What is this knowledge pack for?"
+                rows={3}
+              />
+            </Field>
+          )}
+          {requestType === "live_patch" && (
+            <p className="text-xs text-muted-foreground">
+              Replaces the selected release’s files after the normal review
+              process, without creating a new semantic version. Pack metadata
+              cannot change.
+            </p>
+          )}
         </div>
         <DialogFooter>
           <Button
@@ -139,14 +221,27 @@ export function PublishPackDialog({
           </Button>
           <Button
             disabled={!version.trim() || publishing}
-            onClick={() => onPublish(version.trim(), description.trim())}
+            onClick={() => {
+              if (requestType === "live_patch") {
+                onPublish({
+                  kind: "live_patch",
+                  targetVersion: version.trim(),
+                });
+              } else {
+                onPublish({
+                  kind: "release",
+                  version: version.trim(),
+                  description: description.trim(),
+                });
+              }
+            }}
           >
             {publishing ? (
               <Loader2 className="size-4 animate-spin" />
             ) : (
               <CloudUpload className="size-4" />
             )}
-            Publish
+            {requestType === "live_patch" ? "Submit live patch" : "Publish"}
           </Button>
         </DialogFooter>
       </DialogContent>

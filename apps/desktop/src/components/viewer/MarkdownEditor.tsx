@@ -5,10 +5,20 @@ import { gfm } from "@milkdown/kit/preset/gfm";
 import "@milkdown/kit/prose/view/style/prosemirror.css";
 import { Milkdown, MilkdownProvider, useEditor } from "@milkdown/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Code2, Eye, Save } from "lucide-react";
+import { Code2, Eye, Redo2, Save, Undo2, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { PanelHeader } from "@/components/ui/panel-header";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -18,6 +28,14 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
+import {
+  createEditorHistory,
+  currentEditorHistory,
+  recordEditorHistory,
+  redoEditorHistory,
+  undoEditorHistory,
+  type EditorHistory,
+} from "@/lib/editor-history";
 import { fileMutationInvalidations, queryKeys } from "@/lib/query-keys";
 import { useEditorStore } from "@/stores/editor";
 
@@ -137,6 +155,9 @@ export function MarkdownEditor({ path }: { path: string }) {
   });
 
   const [markdown, setMarkdown] = useState<string | null>(null);
+  const [history, setHistory] = useState<EditorHistory | null>(null);
+  const [editorRevision, setEditorRevision] = useState(0);
+  const [cancelOpen, setCancelOpen] = useState(false);
   const [mode, setMode] = useState<"wysiwyg" | "source">("wysiwyg");
   const savedRef = useRef<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -147,6 +168,7 @@ export function MarkdownEditor({ path }: { path: string }) {
 
     if (markdown === null) {
       setMarkdown(fileQuery.data);
+      setHistory(createEditorHistory(fileQuery.data));
       savedRef.current = fileQuery.data;
       return;
     }
@@ -156,6 +178,7 @@ export function MarkdownEditor({ path }: { path: string }) {
     // overwrite unsaved typing during an incidental query refetch.
     if (!dirty && fileQuery.data !== savedRef.current) {
       setMarkdown(fileQuery.data);
+      setHistory(createEditorHistory(fileQuery.data));
       savedRef.current = fileQuery.data;
     }
   }, [fileQuery.data, markdown, dirty]);
@@ -192,6 +215,28 @@ export function MarkdownEditor({ path }: { path: string }) {
   dirtyRef.current = dirty;
   const saveRef = useRef(save);
   saveRef.current = save;
+  const undo = () => {
+    if (!history || history.index === 0) return;
+    const next = undoEditorHistory(history);
+    const value = currentEditorHistory(next);
+    setHistory(next);
+    setMarkdown(value);
+    setDirty(path, value !== savedRef.current);
+    setEditorRevision((revision) => revision + 1);
+  };
+  const redo = () => {
+    if (!history || history.index >= history.entries.length - 1) return;
+    const next = redoEditorHistory(history);
+    const value = currentEditorHistory(next);
+    setHistory(next);
+    setMarkdown(value);
+    setDirty(path, value !== savedRef.current);
+    setEditorRevision((revision) => revision + 1);
+  };
+  const undoRef = useRef(undo);
+  undoRef.current = undo;
+  const redoRef = useRef(redo);
+  redoRef.current = redo;
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -201,6 +246,22 @@ export function MarkdownEditor({ path }: { path: string }) {
         if (dirtyRef.current && !saveRef.current.isPending) {
           saveRef.current.mutate();
         }
+      } else if (
+        (e.metaKey || e.ctrlKey) &&
+        (e.key.toLowerCase() === "y" ||
+          (e.shiftKey && e.key.toLowerCase() === "z"))
+      ) {
+        if (!containerRef.current?.contains(document.activeElement)) return;
+        e.preventDefault();
+        redoRef.current();
+      } else if (
+        (e.metaKey || e.ctrlKey) &&
+        !e.shiftKey &&
+        e.key.toLowerCase() === "z"
+      ) {
+        if (!containerRef.current?.contains(document.activeElement)) return;
+        e.preventDefault();
+        undoRef.current();
       }
     };
     window.addEventListener("keydown", handler);
@@ -209,6 +270,9 @@ export function MarkdownEditor({ path }: { path: string }) {
 
   const updateMarkdown = (next: string) => {
     setMarkdown(next);
+    setHistory((current) =>
+      current ? recordEditorHistory(current, next) : createEditorHistory(next),
+    );
     setDirty(path, next !== savedRef.current);
   };
 
@@ -239,22 +303,34 @@ export function MarkdownEditor({ path }: { path: string }) {
           <>
             <Tabs value={mode} onValueChange={(v) => setMode(v as typeof mode)}>
               <TabsList className="h-7 rounded-md p-0.5">
-                <TabsTrigger
-                  value="wysiwyg"
-                  className="h-6 px-2 py-0 text-xs"
-                >
+                <TabsTrigger value="wysiwyg" className="h-6 px-2 py-0 text-xs">
                   <Eye className="size-3.5" />
                   Editor
                 </TabsTrigger>
-                <TabsTrigger
-                  value="source"
-                  className="h-6 px-2 py-0 text-xs"
-                >
+                <TabsTrigger value="source" className="h-6 px-2 py-0 text-xs">
                   <Code2 className="size-3.5" />
                   Source
                 </TabsTrigger>
               </TabsList>
             </Tabs>
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              aria-label="Undo"
+              disabled={!history || history.index === 0}
+              onClick={undo}
+            >
+              <Undo2 className="size-3.5" />
+            </Button>
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              aria-label="Redo"
+              disabled={!history || history.index >= history.entries.length - 1}
+              onClick={redo}
+            >
+              <Redo2 className="size-3.5" />
+            </Button>
             <Button
               size="sm"
               variant={dirty ? "default" : "outline"}
@@ -264,6 +340,19 @@ export function MarkdownEditor({ path }: { path: string }) {
             >
               <Save className="size-3.5" />
               {save.isPending ? "Saving…" : dirty ? "Save" : "Saved"}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7"
+              disabled={save.isPending}
+              onClick={() => {
+                if (dirty) setCancelOpen(true);
+                else setEditing(path, false);
+              }}
+            >
+              <X className="size-3.5" />
+              Cancel
             </Button>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -305,6 +394,7 @@ export function MarkdownEditor({ path }: { path: string }) {
           ) : mode === "wysiwyg" ? (
             <MilkdownProvider>
               <MilkdownEditorCore
+                key={editorRevision}
                 initialMarkdown={markdown}
                 onChange={updateMarkdown}
               />
@@ -330,6 +420,31 @@ export function MarkdownEditor({ path }: { path: string }) {
           )}
         </div>
       </ScrollArea>
+      <AlertDialog open={cancelOpen} onOpenChange={setCancelOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Discard unsaved changes?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This restores the last saved content and exits the editor.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep editing</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const saved = savedRef.current ?? "";
+                setMarkdown(saved);
+                setHistory(createEditorHistory(saved));
+                setDirty(path, false);
+                setCancelOpen(false);
+                setEditing(path, false);
+              }}
+            >
+              Discard changes
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

@@ -29,17 +29,26 @@ Restricted projects are available to their owner, explicitly granted users, admi
 | `GET` | `/api/auth/me` | User | Current immutable ID, name, and role |
 | `PATCH` | `/api/auth/profile` | User | Change display name (managed superuser forbidden) |
 | `POST` | `/api/auth/password` | User | Change password and rotate sessions (managed superuser forbidden) |
-| `POST` | `/api/publish-requests` | User | Submit multipart field `file` containing a pack ZIP |
+| `POST` | `/api/publish-requests` | User | Legacy release-only submission with multipart `file` |
+| `POST` | `/api/publish-requests/releases` | User | Submit a new version release with multipart `file` |
+| `POST` | `/api/publish-requests/live-patches/:packId/:version` | Pack maintainer | Submit a reviewed replacement for an existing version with multipart `file` |
 | `GET` | `/api/publish-requests/mine` | User | Author's submissions |
 | `GET` | `/api/publish-requests/:id` | Submitter, pack maintainer, or registry admin | One submission |
 
 Account IDs cannot be changed. The desktop surfaces Hub validation responses directly and keeps authentication errors inside the account dialog.
 
+Live patches use the same review endpoints and pack-wide pending-request lock
+as releases. The route identifies the target release; the server does not infer
+the operation from optional multipart fields. The target must exist and not be
+yanked; its identity and metadata cannot change. Approval atomically replaces
+its full file snapshot and increments `patch_revision` without changing SemVer.
+Downloads advertise the installed revision in `X-Pack-Patch-Revision`.
+
 ## Messages
 
 | Method | Path | Access | Purpose |
 | --- | --- | --- | --- |
-| `GET` | `/api/messages?filter=all|unread&cursor=...` | User | Cursor-paginated messages |
+| `GET` | `/api/messages?filter=all\|unread&cursor=...` | User | Cursor-paginated messages |
 | `GET` | `/api/messages/unread-count` | User | Unread badge count |
 | `PATCH` | `/api/messages/:id/read` | User | Mark one message read |
 | `POST` | `/api/messages/read-all` | User | Mark every message read |
@@ -58,7 +67,7 @@ Every `/api/admin/*` route requires role `admin` or `superuser`.
 | `PATCH` | `/api/admin/users/:uuid` | Set `role` to `user` or `admin` |
 | `DELETE` | `/api/admin/users/:uuid` | Delete an account according to role hierarchy |
 | `GET` | `/api/admin/publish-requests` | List pending submissions |
-| `GET` | `/api/admin/publish-requests/history` | Cursor-paginated approved/rejected history; filter with `status=all|approved|rejected` |
+| `GET` | `/api/admin/publish-requests/history` | Cursor-paginated approved/rejected history; filter with `status=all\|approved\|rejected` |
 | `GET` | `/api/admin/publish-requests/:id/review` | Review metadata, frozen base version, change totals, and changed-file list |
 | `GET` | `/api/admin/publish-requests/:id/review/file?path=…` | Unified text diff or image/binary review metadata for one changed file |
 | `GET` | `/api/admin/publish-requests/:id/review/image?path=…&side=old\|new` | Safely stream one side of a changed image |
@@ -67,8 +76,8 @@ Every `/api/admin/*` route requires role `admin` or `superuser`.
 | `GET` | `/api/admin/packs` | List projects, releases, and access grants |
 | `PATCH` | `/api/admin/packs/:id` | Edit name, description, owner, visibility, or archive state |
 | `DELETE` | `/api/admin/packs/:id` | Delete project metadata and release files |
-| `POST` | `/api/admin/packs/:id/access/:userUuid` | Set grant using `{ "allowed": true|false }` |
-| `POST` | `/api/admin/packs/:id/releases/:version/yank` | Set `{ "yanked": true|false }` |
+| `POST` | `/api/admin/packs/:id/access/:userUuid` | Set grant using `{ "allowed": true\|false }` |
+| `POST` | `/api/admin/packs/:id/releases/:version/yank` | Set `{ "yanked": true\|false }` |
 | `POST` | `/api/admin/packs/upload` | Validate and immediately publish multipart field `file` |
 
 Admins and the superuser have identical registry-management privileges. An admin can promote regular users and delete regular users, but cannot change or delete an existing admin. The superuser can demote or delete admins. The environment-managed superuser cannot be edited, demoted, have its password changed, or be deleted by any route.

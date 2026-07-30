@@ -8,6 +8,8 @@ function release(version: string, yanked = false): AdminRelease {
     yanked,
     checksum: 'checksum',
     published_at: '2026-01-01T00:00:00.000Z',
+    patch_revision: 0,
+    patched_at: null,
   };
 }
 

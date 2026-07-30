@@ -36,7 +36,7 @@ import {
 } from "../components/ui";
 import { useApi } from "../app/contexts";
 import { adminQueryKeys } from "../lib/api";
-import { useAdminData, useRegistryResync } from "../lib/hooks";
+import { useAdminPacks, useRegistryResync } from "../lib/hooks";
 import { cn } from "../lib/cn";
 import { PageHeader } from "../layout/PageHeader";
 
@@ -52,7 +52,7 @@ const FILTER_LABELS: Record<StatusFilter, string> = {
 export function PacksPage() {
   const api = useApi();
   const qc = useQueryClient();
-  const { packs } = useAdminData();
+  const packs = useAdminPacks();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [uploadOpen, setUploadOpen] = useState(false);

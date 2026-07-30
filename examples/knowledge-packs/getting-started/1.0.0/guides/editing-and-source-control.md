@@ -6,6 +6,10 @@ Open a Markdown file and switch between rendered and source modes. Save changes
 normally; the editor and Source Control share the same file state, so discarding
 a change also restores the open editor.
 
+Use **Undo** and **Redo** while editing. **Cancel** exits immediately when the
+buffer is clean; with unsaved edits it asks before restoring the last saved
+content.
+
 Nest supports GitHub Flavored Markdown, including tables, task lists,
 strikethrough, fenced code, links, local images, and Mermaid diagrams.
 

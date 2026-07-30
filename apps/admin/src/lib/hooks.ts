@@ -8,21 +8,35 @@ import type {
 import { useApi } from "../app/contexts";
 import { adminQueryKeys } from "./api";
 
-export function useAdminData() {
+const ADMIN_DATA_STALE_MS = 5_000;
+
+export function useAdminUsers() {
   const api = useApi();
-  const users = useQuery({
+  return useQuery({
     queryKey: adminQueryKeys.users,
     queryFn: () => api<User[]>("/api/admin/users"),
+    staleTime: ADMIN_DATA_STALE_MS,
   });
-  const reviews = useQuery({
+}
+
+export function useAdminReviews() {
+  const api = useApi();
+  return useQuery({
     queryKey: adminQueryKeys.reviews,
     queryFn: () => api<RequestItem[]>("/api/admin/publish-requests"),
+    staleTime: ADMIN_DATA_STALE_MS,
+    refetchInterval: ADMIN_DATA_STALE_MS,
+    refetchOnWindowFocus: true,
   });
-  const packs = useQuery({
+}
+
+export function useAdminPacks() {
+  const api = useApi();
+  return useQuery({
     queryKey: adminQueryKeys.packs,
     queryFn: () => api<Pack[]>("/api/admin/packs"),
+    staleTime: ADMIN_DATA_STALE_MS,
   });
-  return { users, reviews, packs };
 }
 
 export function useRegistryResync() {

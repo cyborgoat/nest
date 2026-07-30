@@ -80,6 +80,7 @@ export class PacksController {
     );
     res.setHeader('Content-Length', String(artifact.byteLength));
     res.setHeader('X-Content-SHA256', artifact.sha256);
+    res.setHeader('X-Pack-Patch-Revision', String(artifact.patchRevision));
 
     const stream = this.packsService.openZipStream(artifact.filePath);
     const cleanup = () => {

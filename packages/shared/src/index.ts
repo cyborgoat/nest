@@ -8,7 +8,14 @@ export type PackRelease = {
   /** Vault folder; equals `id`. */
   path: string;
   yanked: boolean;
+  patch_revision: number;
+  patched_at: string | null;
 };
+
+export type PackReleaseSummary = Pick<
+  PackRelease,
+  "version" | "yanked" | "patch_revision" | "patched_at"
+>;
 
 /** Hub catalog project (may have multiple SemVer releases). */
 export type PackProject = {
@@ -17,6 +24,7 @@ export type PackProject = {
   description: string;
   latest_version: string;
   versions: string[];
+  releases: PackReleaseSummary[];
   visibility: PackVisibility;
   /** The requesting user's own login id, echoed back only if they're one of
    *  this pack's maintainers (a pack can have several) — null otherwise.
@@ -40,6 +48,7 @@ export type HubSession = {
   expires_in: number;
 };
 export type PublishRequestStatus = "pending" | "approved" | "rejected";
+export type PublishRequestType = "release" | "live_patch";
 export type PublishRequest = {
   id: string;
   pack_id: string;
@@ -47,6 +56,9 @@ export type PublishRequest = {
   name: string;
   description: string;
   status: PublishRequestStatus;
+  request_type: PublishRequestType;
+  patch_revision: number | null;
+  base_patch_revision: number | null;
   review_note?: string | null;
   created_at: string;
   reviewed_at?: string | null;
@@ -168,6 +180,8 @@ export type AdminRelease = {
   yanked: boolean;
   checksum: string;
   published_at: string;
+  patch_revision: number;
+  patched_at: string | null;
 };
 
 export type AdminGrant = Pick<HubUser, "uuid" | "id" | "name"> & {
@@ -213,6 +227,7 @@ export type InstalledPack = {
   name: string;
   local_path: string;
   version: string;
+  patch_revision: number;
   last_synced: string | null;
   active: boolean;
   origin: "local" | "registry" | "bundled" | "unknown";
@@ -225,6 +240,8 @@ export type InstalledPack = {
   /** Version of an unresolved publish request for this pack, if any. `version`
    *  above stays at the last-approved value while this is set. */
   pending_version: string | null;
+  pending_request_type: PublishRequestType | null;
+  pending_patch_revision: number | null;
   pending_request_id: string | null;
   /** Resolution state for the locally tracked publish request. Approved
    * requests stay actionable until their exact Hub release is merged. */

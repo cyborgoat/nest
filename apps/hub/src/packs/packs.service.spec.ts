@@ -35,6 +35,8 @@ describe('PacksService administrative ZIP retrieval', () => {
       version: '2.0.0',
       path: 'example',
       yanked: true,
+      patch_revision: 0,
+      patched_at: null,
     });
 
     try {

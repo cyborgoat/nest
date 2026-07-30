@@ -44,6 +44,11 @@ pub struct PublishRequest {
     pub name: String,
     pub description: String,
     pub status: String,
+    pub request_type: String,
+    #[serde(default)]
+    pub patch_revision: Option<i64>,
+    #[serde(default)]
+    pub base_patch_revision: Option<i64>,
     pub review_note: Option<String>,
     pub created_at: String,
     pub reviewed_at: Option<String>,
@@ -270,9 +275,37 @@ pub struct PackProject {
     pub latest_version: String,
     pub versions: Vec<String>,
     #[serde(default)]
+    pub releases: Vec<PackReleaseSummary>,
+    #[serde(default)]
     pub visibility: Option<String>,
     #[serde(default)]
     pub owner_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PackReleaseSummary {
+    pub version: String,
+    #[serde(default)]
+    pub yanked: bool,
+    #[serde(default)]
+    pub patch_revision: i64,
+    #[serde(default)]
+    pub patched_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PackRelease {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub version: String,
+    pub path: String,
+    #[serde(default)]
+    pub yanked: bool,
+    #[serde(default)]
+    pub patch_revision: i64,
+    #[serde(default)]
+    pub patched_at: Option<String>,
 }
 
 pub async fn list_packs_remote(
@@ -304,6 +337,26 @@ pub async fn list_packs_remote(
     Ok(resp.json().await?)
 }
 
+pub async fn get_release_remote(
+    hub_base_url: &str,
+    proxy_url: &str,
+    access_token: &str,
+    pack_id: &str,
+    version: &str,
+) -> AppResult<PackRelease> {
+    let url = format!(
+        "{}/packs/{pack_id}/{version}",
+        hub_base_url.trim_end_matches('/')
+    );
+    let response = http::build_client(proxy_url)?
+        .get(url)
+        .bearer_auth(access_token)
+        .send()
+        .await
+        .map_err(|e| map_hub_http_error("Hub release lookup", e))?;
+    parse_hub_response(response, "Hub release lookup").await
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HubConnectionStatus {
     pub online: bool,
@@ -316,6 +369,11 @@ pub struct FolderPackDefaults {
     pub metadata: PackMeta,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub warning: Option<String>,
+}
+
+pub struct DownloadedPack {
+    pub pack: PackMeta,
+    pub patch_revision: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -384,7 +442,7 @@ pub async fn download_pack_remote(
     version: Option<&str>,
     vault_root: &Path,
     access_token: Option<&str>,
-) -> AppResult<PackMeta> {
+) -> AppResult<DownloadedPack> {
     if hub_base_url.trim().is_empty() {
         return Err(AppError::msg(
             "Hub URL is not configured. Set it in Settings.",
@@ -410,6 +468,12 @@ pub async fn download_pack_remote(
             resp.status()
         )));
     }
+    let patch_revision = resp
+        .headers()
+        .get("x-pack-patch-revision")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<i64>().ok())
+        .unwrap_or(0);
     let bytes = resp
         .bytes()
         .await
@@ -434,14 +498,18 @@ pub async fn download_pack_remote(
             meta.version = v.to_string();
         }
     }
-    Ok(meta)
+    Ok(DownloadedPack {
+        pack: meta,
+        patch_revision,
+    })
 }
 
-pub async fn publish_pack_remote(
+pub async fn publish_release_remote(
     hub_base_url: &str,
     proxy_url: &str,
     access_token: &str,
     pack: &PackMeta,
+    source_local_path: &str,
     vault_root: &Path,
 ) -> AppResult<PublishRequest> {
     if hub_base_url.trim().is_empty() {
@@ -449,29 +517,81 @@ pub async fn publish_pack_remote(
             "Hub URL is not configured. Set it in Settings.",
         ));
     }
+    let endpoint = format!(
+        "{}/api/publish-requests/releases",
+        hub_base_url.trim_end_matches('/')
+    );
+    upload_publish_archive(
+        proxy_url,
+        access_token,
+        pack,
+        source_local_path,
+        vault_root,
+        endpoint,
+        "Release publish",
+    )
+    .await
+}
+
+pub async fn publish_live_patch_remote(
+    hub_base_url: &str,
+    proxy_url: &str,
+    access_token: &str,
+    pack: &PackMeta,
+    source_local_path: &str,
+    vault_root: &Path,
+) -> AppResult<PublishRequest> {
+    if hub_base_url.trim().is_empty() {
+        return Err(AppError::msg(
+            "Hub URL is not configured. Set it in Settings.",
+        ));
+    }
+    let endpoint = format!(
+        "{}/api/publish-requests/live-patches/{}/{}",
+        hub_base_url.trim_end_matches('/'),
+        pack.id,
+        pack.version
+    );
+    upload_publish_archive(
+        proxy_url,
+        access_token,
+        pack,
+        source_local_path,
+        vault_root,
+        endpoint,
+        "Live patch publish",
+    )
+    .await
+}
+
+async fn upload_publish_archive(
+    proxy_url: &str,
+    access_token: &str,
+    pack: &PackMeta,
+    source_local_path: &str,
+    vault_root: &Path,
+    endpoint: String,
+    label: &str,
+) -> AppResult<PublishRequest> {
     let temp = std::env::temp_dir().join(format!(
         "nest-publish-{}-{}.zip",
         pack.id,
         uuid::Uuid::new_v4()
     ));
-    export_pack(pack, vault_root, &temp)?;
+    export_pack_from_source(pack, source_local_path, vault_root, &temp)?;
     let bytes = fs::read(&temp)?;
     let _ = fs::remove_file(&temp);
     let part = reqwest::multipart::Part::bytes(bytes)
         .file_name(format!("{}-{}.zip", pack.id, pack.version))
         .mime_str("application/zip")?;
     let form = reqwest::multipart::Form::new().part("file", part);
-    let url = format!(
-        "{}/api/publish-requests",
-        hub_base_url.trim_end_matches('/')
-    );
     let response = http::build_client(proxy_url)?
-        .post(url)
+        .post(endpoint)
         .bearer_auth(access_token)
         .multipart(form)
         .send()
         .await
-        .map_err(|e| map_hub_http_error("Pack publish", e))?;
+        .map_err(|e| map_hub_http_error(label, e))?;
     if !response.status().is_success() {
         let status = response.status();
         let message = response
@@ -493,7 +613,7 @@ pub async fn publish_pack_remote(
             });
         return Err(AppError::hub_response(
             status.as_u16(),
-            message.unwrap_or_else(|| format!("Pack publish failed: HTTP {status}")),
+            message.unwrap_or_else(|| format!("{label} failed: HTTP {status}")),
         ));
     }
     Ok(response.json().await?)
@@ -696,6 +816,16 @@ pub fn record_sync(
     origin: &str,
     owner_id: Option<&str>,
 ) -> AppResult<()> {
+    record_sync_with_patch(conn, pack, origin, owner_id, 0)
+}
+
+pub fn record_sync_with_patch(
+    conn: &Connection,
+    pack: &PackMeta,
+    origin: &str,
+    owner_id: Option<&str>,
+    patch_revision: i64,
+) -> AppResult<()> {
     db::upsert_sync_state(
         conn,
         db::SyncStateUpsert {
@@ -706,6 +836,7 @@ pub fn record_sync(
             origin,
             owner_id,
             description: &pack.description,
+            patch_revision,
         },
     )
 }
@@ -871,13 +1002,21 @@ pub fn create_pack_from_folder(
 
 /// Write an installed pack to a portable ZIP containing one top-level pack folder.
 pub fn export_pack(pack: &PackMeta, vault_root: &Path, destination: &Path) -> AppResult<()> {
-    let source = vault_root.join(&pack.path);
+    export_pack_from_source(pack, &pack.path, vault_root, destination)
+}
+
+fn export_pack_from_source(
+    pack: &PackMeta,
+    source_local_path: &str,
+    vault_root: &Path,
+    destination: &Path,
+) -> AppResult<()> {
+    let source = vault_root.join(source_local_path);
     if !source.is_dir() || !dir_has_markdown(&source) {
         return Err(AppError::msg(
             "Installed pack content is missing or has no Markdown files",
         ));
     }
-    let pack = read_required_pack_meta(&source)?;
     if destination
         .extension()
         .and_then(|ext| ext.to_str())
@@ -912,10 +1051,14 @@ pub fn export_pack(pack: &PackMeta, vault_root: &Path, destination: &Path) -> Ap
             writer.add_directory(name, options)?;
         } else {
             writer.start_file(name, options)?;
-            let mut input = File::open(path)?;
-            let mut bytes = Vec::new();
-            input.read_to_end(&mut bytes)?;
-            writer.write_all(&bytes)?;
+            if relative == Path::new("pack.json") {
+                writer.write_all(serde_json::to_string_pretty(pack)?.as_bytes())?;
+            } else {
+                let mut input = File::open(path)?;
+                let mut bytes = Vec::new();
+                input.read_to_end(&mut bytes)?;
+                writer.write_all(&bytes)?;
+            }
         }
     }
     writer.finish()?;

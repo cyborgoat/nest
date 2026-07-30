@@ -8,6 +8,20 @@ const latestRelease: PackProject = {
   description: "Description from the latest release",
   latest_version: "2.0.0",
   versions: ["2.0.0", "1.0.0"],
+  releases: [
+    {
+      version: "2.0.0",
+      yanked: false,
+      patch_revision: 0,
+      patched_at: null,
+    },
+    {
+      version: "1.0.0",
+      yanked: false,
+      patch_revision: 0,
+      patched_at: null,
+    },
+  ],
   visibility: "public",
   owner_id: "owner",
 };

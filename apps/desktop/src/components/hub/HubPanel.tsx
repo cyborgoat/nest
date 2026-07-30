@@ -34,14 +34,11 @@ import { packMutationInvalidations, queryKeys } from "@/lib/query-keys";
 import { useI18n } from "@/lib/i18n";
 import { compareSemVer } from "@/lib/semver";
 import { useUiStore } from "@/stores/ui";
-import { usePublishPack } from "@/hooks/use-publish-pack";
 
 export function HubPanel() {
   const { t } = useI18n();
   const clearPathsUnder = useUiStore((s) => s.clearPathsUnder);
-  const openAccountSettingsTab = useUiStore(
-    (s) => s.openAccountSettingsTab,
-  );
+  const openAccountSettingsTab = useUiStore((s) => s.openAccountSettingsTab);
   const queryClient = useQueryClient();
   const [importOpen, setImportOpen] = useState(false);
   const [catalogSearch, setCatalogSearch] = useState("");
@@ -191,6 +188,28 @@ export function HubPanel() {
       toast.error(t("hub.downloadFailed"), { description: e.message }),
   });
 
+  const syncPatch = useMutation({
+    mutationFn: ({
+      packId,
+      packName,
+      version,
+      ownerId,
+    }: {
+      packId: string;
+      packName: string;
+      version: string;
+      ownerId?: string | null;
+    }) => api.hubSyncPackPatch(packId, packName, version, ownerId),
+    onSuccess: () => {
+      invalidateAfterPackChange();
+      toast.success("Live patch synced");
+    },
+    onError: (error: unknown) =>
+      toast.error("Could not sync live patch", {
+        description: appErrorMessage(error, "Live patch sync failed"),
+      }),
+  });
+
   const requestDownload = async ({
     packId,
     version,
@@ -225,10 +244,7 @@ export function HubPanel() {
       });
       return;
     }
-    if (
-      previousVersion &&
-      compareSemVer(version, previousVersion) > 0
-    ) {
+    if (previousVersion && compareSemVer(version, previousVersion) > 0) {
       setPendingPackUpdate({
         packId,
         packName,
@@ -343,8 +359,6 @@ export function HubPanel() {
       }),
   });
 
-  const publish = usePublishPack();
-
   const rename = useMutation({
     mutationFn: ({ packId, name }: { packId: string; name: string }) =>
       api.hubRenamePack(packId, name),
@@ -369,7 +383,7 @@ export function HubPanel() {
     createFromZip.isPending ||
     importLocal.isPending ||
     exportPack.isPending ||
-    publish.isPending ||
+    syncPatch.isPending ||
     rename.isPending;
   const importing =
     importLocal.isPending ||
@@ -433,11 +447,7 @@ export function HubPanel() {
               or access restricted knowledge packs.
             </p>
           </div>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={openAccountSettingsTab}
-          >
+          <Button size="sm" variant="outline" onClick={openAccountSettingsTab}>
             Sign in or register
           </Button>
         </div>
@@ -496,7 +506,6 @@ export function HubPanel() {
                 isLoading={installedQuery.isLoading}
                 hubOnline={hubOnline}
                 catalogById={catalogById}
-                catalogLoading={hubOnline && packsQuery.isLoading}
                 busy={busy}
                 downloadPendingId={downloadPendingId}
                 removePendingId={removePendingId}
@@ -508,6 +517,33 @@ export function HubPanel() {
                     ownerId,
                   })
                 }
+                onSyncPatch={async (packId, packName, version, ownerId) => {
+                  try {
+                    const changes = await api.hubPackChangeStatus(packId);
+                    if (changes.length > 0) {
+                      toast.warning("Live patch cannot be synced yet", {
+                        description:
+                          "Commit or discard local Source Control changes first.",
+                      });
+                      return;
+                    }
+                  } catch (error) {
+                    toast.error("Could not check local changes", {
+                      description: appErrorMessage(
+                        error,
+                        "Source Control status is unavailable",
+                      ),
+                    });
+                    return;
+                  }
+                  if (
+                    window.confirm(
+                      `Replace ${packName} v${version} with the latest reviewed live patch?`,
+                    )
+                  ) {
+                    syncPatch.mutate({ packId, packName, version, ownerId });
+                  }
+                }}
                 onRemove={(packId) => remove.mutate(packId)}
                 onOpenImport={() => setImportOpen(true)}
                 onBrowse={() => setTab("browse")}
@@ -517,10 +553,6 @@ export function HubPanel() {
                 authenticated={authQuery.data?.authenticated === true}
                 hubUser={authQuery.data?.user ?? null}
                 onSignIn={openAccountSettingsTab}
-                onPublish={(packId, version, description) =>
-                  publish.mutate({ packId, version, description })
-                }
-                publishing={publish.isPending}
                 onRename={(packId, name) => rename.mutate({ packId, name })}
                 renaming={rename.isPending}
               />
@@ -533,10 +565,7 @@ export function HubPanel() {
         open={importOpen}
         onOpenChange={setImportOpen}
         importing={importing}
-        onImportZip={(
-          sourcePath: string,
-          inspection: LocalPackInspection,
-        ) => {
+        onImportZip={(sourcePath: string, inspection: LocalPackInspection) => {
           const installed = installedById.get(inspection.metadata.id.trim());
           const kind = inspection.needs_metadata ? "zip-create" : "zip";
           if (installed) {

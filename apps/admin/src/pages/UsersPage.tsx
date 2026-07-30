@@ -17,7 +17,7 @@ import {
 } from "../components/ui";
 import { AuthContext, useApi } from "../app/contexts";
 import { adminQueryKeys } from "../lib/api";
-import { useAdminData } from "../lib/hooks";
+import { useAdminUsers } from "../lib/hooks";
 import { PageHeader } from "../layout/PageHeader";
 
 type RoleFilter = "all" | "admin" | "user";
@@ -26,7 +26,7 @@ export function UsersPage() {
   const api = useApi();
   const qc = useQueryClient();
   const { auth } = useContext(AuthContext);
-  const { users } = useAdminData();
+  const users = useAdminUsers();
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState<RoleFilter>("all");
   const [deleteTarget, setDeleteTarget] = useState<User | null>(null);

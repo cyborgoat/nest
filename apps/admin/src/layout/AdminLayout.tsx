@@ -3,12 +3,14 @@ import { Outlet } from "@tanstack/react-router";
 import { CircleGauge, LogOut, Package, ShieldCheck, Users } from "lucide-react";
 import { Button } from "../components/ui";
 import { AuthContext } from "../app/contexts";
-import { useAdminData } from "../lib/hooks";
+import { useAdminPacks, useAdminReviews, useAdminUsers } from "../lib/hooks";
 import { NavLink } from "./NavLink";
 
 export function AdminLayout() {
   const { auth, signOut } = useContext(AuthContext);
-  const { reviews, packs, users } = useAdminData();
+  const reviews = useAdminReviews();
+  const packs = useAdminPacks();
+  const users = useAdminUsers();
   return (
     <div className="min-h-screen bg-background text-foreground lg:grid lg:grid-cols-[260px_1fr]">
       <aside className="border-b border-sidebar-border bg-sidebar text-sidebar-foreground lg:sticky lg:top-0 lg:h-screen lg:border-b-0 lg:border-r">

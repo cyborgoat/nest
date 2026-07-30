@@ -20,7 +20,7 @@ import {
 } from "../components/ui";
 import { useApi } from "../app/contexts";
 import { adminQueryKeys } from "../lib/api";
-import { useAdminData } from "../lib/hooks";
+import { useAdminReviews } from "../lib/hooks";
 import { PageHeader } from "../layout/PageHeader";
 
 type ReviewTab = "queue" | "history";
@@ -29,7 +29,7 @@ type HistoryStatus = "all" | "approved" | "rejected";
 export function ReviewsPage() {
   const api = useApi();
   const qc = useQueryClient();
-  const { reviews } = useAdminData();
+  const reviews = useAdminReviews();
   const [tab, setTab] = useState<ReviewTab>("queue");
   const [historyStatus, setHistoryStatus] = useState<HistoryStatus>("all");
   const history = useInfiniteQuery({
@@ -199,6 +199,9 @@ function RequestSummary({ item }: { item: RequestItem }) {
         <span className="font-medium">{item.name}</span>
         <Badge>{item.pack_id}</Badge>
         <span className="text-sm text-muted-foreground">v{item.version}</span>
+        {item.request_type === "live_patch" && (
+          <Badge tone="amber">Live patch · Patch {item.patch_revision}</Badge>
+        )}
       </div>
       <p className="mt-1 text-xs text-muted-foreground">
         Submitted by{" "}
@@ -270,7 +273,13 @@ function History({
                     <Badge>{item.pack_id}</Badge>
                     <span className="text-sm text-muted-foreground">
                       v{item.version}
+                      {item.request_type === "live_patch"
+                        ? ` · Patch ${item.patch_revision}`
+                        : ""}
                     </span>
+                    {item.request_type === "live_patch" && (
+                      <Badge tone="amber">Live patch</Badge>
+                    )}
                     <Badge tone={item.status === "approved" ? "green" : "red"}>
                       {item.status}
                     </Badge>

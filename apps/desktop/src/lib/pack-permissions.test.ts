@@ -8,12 +8,15 @@ function pack(overrides: Partial<InstalledPack> = {}): InstalledPack {
     name: "Sample",
     local_path: "sample",
     version: "1.0.0",
+    patch_revision: 0,
     last_synced: null,
     active: true,
     origin: "registry",
     owner_id: null,
     description: "",
     pending_version: null,
+    pending_request_type: null,
+    pending_patch_revision: null,
     pending_request_id: null,
     publish_review_status: null,
     publish_review_created_at: null,
@@ -88,7 +91,10 @@ describe("canEditPack", () => {
     for (const origin of ["bundled", "unknown"] as const) {
       expect(canEditPack(pack({ origin, owner_id: null }), null)).toBe(false);
       expect(
-        canEditPack(pack({ origin, owner_id: null }), user({ role: "superuser" })),
+        canEditPack(
+          pack({ origin, owner_id: null }),
+          user({ role: "superuser" }),
+        ),
       ).toBe(false);
     }
   });

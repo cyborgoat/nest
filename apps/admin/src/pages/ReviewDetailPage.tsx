@@ -129,10 +129,15 @@ export function ReviewDetailPage() {
               {item.name}
             </h1>
             <Badge tone={statusTone(item.status)}>{item.status}</Badge>
+            {item.request_type === "live_patch" && (
+              <Badge tone="amber">Live patch</Badge>
+            )}
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
-            <code>{item.pack_id}</code> · {item.base_version ?? "Empty pack"} →{" "}
-            {item.version}
+            <code>{item.pack_id}</code> ·{" "}
+            {item.request_type === "live_patch"
+              ? `v${item.version} · Patch ${item.base_patch_revision} → Patch ${item.patch_revision}`
+              : `${item.base_version ?? "Empty pack"} → ${item.version}`}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -252,7 +257,9 @@ export function ReviewDetailPage() {
           <div>
             <p className="text-sm font-medium">Ready to make a decision?</p>
             <p className="text-xs text-muted-foreground">
-              Approval releases this version to Hub users immediately.
+              {item.request_type === "live_patch"
+                ? "Approval replaces this release with the reviewed patch immediately."
+                : "Approval releases this version to Hub users immediately."}
             </p>
           </div>
           <div className="flex gap-2">
@@ -280,7 +287,9 @@ export function ReviewDetailPage() {
               }}
             >
               <Check />
-              Approve & release
+              {item.request_type === "live_patch"
+                ? "Approve live patch"
+                : "Approve & release"}
             </Button>
           </div>
         </div>
@@ -300,6 +309,7 @@ export function ReviewDetailPage() {
           }
         }}
         onConfirm={() => decision && mutateDecision.mutate(decision)}
+        livePatch={item.request_type === "live_patch"}
       />
     </div>
   );
@@ -717,6 +727,7 @@ function DecisionDialog({
   onNoteChange,
   onOpenChange,
   onConfirm,
+  livePatch,
 }: {
   action: "approve" | "reject" | null;
   note: string;
@@ -724,17 +735,26 @@ function DecisionDialog({
   onNoteChange: (value: string) => void;
   onOpenChange: (open: boolean) => void;
   onConfirm: () => void;
+  livePatch: boolean;
 }) {
   const rejecting = action === "reject";
   return (
     <Dialog
       open={action != null}
       onOpenChange={onOpenChange}
-      title={rejecting ? "Reject publish request" : "Approve and release"}
+      title={
+        rejecting
+          ? `Reject ${livePatch ? "live patch" : "publish request"}`
+          : livePatch
+            ? "Approve live patch"
+            : "Approve and release"
+      }
       description={
         rejecting
           ? "Explain what the publisher should change before resubmitting."
-          : "This version will become available to Hub users immediately."
+          : livePatch
+            ? "The reviewed files will replace this release immediately."
+            : "This version will become available to Hub users immediately."
       }
     >
       <label className="text-sm font-medium">
@@ -759,7 +779,11 @@ function DecisionDialog({
           onClick={onConfirm}
         >
           {rejecting ? <X /> : <Check />}
-          {rejecting ? "Send rejection" : "Approve & release"}
+          {rejecting
+            ? "Send rejection"
+            : livePatch
+              ? "Approve live patch"
+              : "Approve & release"}
         </Button>
       </div>
     </Dialog>

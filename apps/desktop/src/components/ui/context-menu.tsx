@@ -2,7 +2,12 @@ import * as React from "react";
 import * as ContextMenuPrimitive from "@radix-ui/react-context-menu";
 import { cn } from "@/lib/utils";
 
-const ContextMenu = ContextMenuPrimitive.Root;
+function ContextMenu({
+  modal = false,
+  ...props
+}: React.ComponentProps<typeof ContextMenuPrimitive.Root>) {
+  return <ContextMenuPrimitive.Root modal={modal} {...props} />;
+}
 const ContextMenuTrigger = ContextMenuPrimitive.Trigger;
 
 const ContextMenuContent = React.forwardRef<

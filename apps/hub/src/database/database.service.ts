@@ -109,6 +109,8 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
         submitted_by TEXT REFERENCES users(uuid) ON DELETE SET NULL,
         approved_by TEXT REFERENCES users(uuid) ON DELETE SET NULL,
         published_at TEXT NOT NULL,
+        patch_revision INTEGER NOT NULL DEFAULT 0,
+        patched_at TEXT,
         PRIMARY KEY(pack_id, version)
       );
       CREATE TABLE IF NOT EXISTS publish_requests (
@@ -130,6 +132,10 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
         reviewer_name_snapshot TEXT,
         base_version TEXT,
         review_artifact_path TEXT,
+        request_type TEXT NOT NULL DEFAULT 'release'
+          CHECK(request_type IN ('release', 'live_patch')),
+        patch_revision INTEGER,
+        base_patch_revision INTEGER,
         created_at TEXT NOT NULL,
         reviewed_at TEXT
       );
@@ -170,6 +176,7 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
       SELECT id, owner_uuid, created_at FROM packs WHERE owner_uuid IS NOT NULL;
     `);
     this.ensurePublishRequestHistoryColumns();
+    this.ensureLivePatchColumns();
   }
 
   private ensurePublishRequestHistoryColumns() {
@@ -219,5 +226,34 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
       WHERE reviewer_uuid IS NOT NULL
         AND (reviewer_id_snapshot IS NULL OR reviewer_name_snapshot IS NULL);
     `);
+  }
+
+  private ensureLivePatchColumns() {
+    const addMissing = (
+      table: 'releases' | 'publish_requests',
+      additions: readonly (readonly [string, string])[],
+    ) => {
+      const columns = new Set(
+        (
+          this.database.prepare(`PRAGMA table_info(${table})`).all() as {
+            name: string;
+          }[]
+        ).map((column) => column.name),
+      );
+      for (const [name, type] of additions) {
+        if (!columns.has(name)) {
+          this.database.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`);
+        }
+      }
+    };
+    addMissing('releases', [
+      ['patch_revision', 'INTEGER NOT NULL DEFAULT 0'],
+      ['patched_at', 'TEXT'],
+    ]);
+    addMissing('publish_requests', [
+      ['request_type', "TEXT NOT NULL DEFAULT 'release'"],
+      ['patch_revision', 'INTEGER'],
+      ['base_patch_revision', 'INTEGER'],
+    ]);
   }
 }

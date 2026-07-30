@@ -915,6 +915,7 @@ pub async fn hub_download_pack(
     version: Option<String>,
     owner_id: Option<String>,
     replace_local_pack_id: Option<String>,
+    sync_patch: Option<bool>,
 ) -> AppResult<InstalledPack> {
     let settings = {
         let conn = state.db.lock();
@@ -922,6 +923,28 @@ pub async fn hub_download_pack(
     };
 
     let vault = state.vault_path();
+    if sync_patch.unwrap_or(false) {
+        let installed = {
+            let conn = state.db.lock();
+            require_installed_pack(&conn, &pack_id)?
+        };
+        if version.as_deref() != Some(installed.version.as_str()) {
+            return Err(AppError::msg(
+                "A live patch must sync the currently installed release",
+            ));
+        }
+        let pack_dir = vault.join(&installed.local_path);
+        let snapshot_dir = crate::snapshot::snapshot_root(
+            &state.app_data_dir,
+            &installed.pack_id,
+            &installed.version,
+        );
+        if !crate::snapshot::compute_status(&pack_dir, &snapshot_dir)?.is_empty() {
+            return Err(AppError::msg(
+                "Commit or discard local Source Control changes before syncing a live patch",
+            ));
+        }
+    }
     let conflict = {
         let conn = state.db.lock();
         local_download_conflict(&conn, &pack_id, &pack_name)?
@@ -954,13 +977,15 @@ pub async fn hub_download_pack(
         token.as_deref(),
     )
     .await;
-    let pack = match downloaded {
+    let downloaded = match downloaded {
         Ok(pack) => pack,
         Err(error) => {
             let _ = fs::remove_dir_all(&staging);
             return Err(error);
         }
     };
+    let pack = downloaded.pack;
+    let patch_revision = downloaded.patch_revision;
     if pack.id != pack_id {
         let _ = fs::remove_dir_all(&staging);
         return Err(AppError::msg(format!(
@@ -1054,7 +1079,13 @@ pub async fn hub_download_pack(
                 db::purge_path_data(&transaction, &local.local_path)?;
             }
         }
-        hub::record_sync(&transaction, &pack, "registry", owner_id.as_deref())?;
+        hub::record_sync_with_patch(
+            &transaction,
+            &pack,
+            "registry",
+            owner_id.as_deref(),
+            patch_revision,
+        )?;
         let installed = db::get_sync_state(&transaction, &pack.id)?.ok_or_else(|| {
             AppError::msg(format!("Installed pack record was not saved: {}", pack.id))
         })?;
@@ -1329,7 +1360,7 @@ pub async fn hub_update_profile(
         let conn = state.db.lock();
         db::get_settings(&conn)?
     };
-    let token = ensure_hub_access(state.inner(), &settings, false)
+    let token = ensure_hub_access(&state, &settings, false)
         .await?
         .ok_or_else(|| AppError::msg("Sign in to update your Hub profile"))?;
     let user = hub::update_profile_remote(
@@ -1355,7 +1386,7 @@ pub async fn hub_change_password(
         let conn = state.db.lock();
         db::get_settings(&conn)?
     };
-    let token = ensure_hub_access(state.inner(), &settings, false)
+    let token = ensure_hub_access(&state, &settings, false)
         .await?
         .ok_or_else(|| AppError::msg("Sign in to change your Hub password"))?;
     let session = hub::change_password_remote(
@@ -1378,16 +1409,91 @@ pub async fn hub_change_password(
 }
 
 #[tauri::command]
-pub async fn hub_publish_pack(
+pub async fn hub_publish_release(
     state: State<'_, SharedState>,
     pack_id: String,
-    version: Option<String>,
+    version: String,
+) -> AppResult<hub::PublishRequest> {
+    publish_pack(
+        state.inner(),
+        pack_id,
+        PublishOperation::Release { version },
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn hub_publish_live_patch(
+    state: State<'_, SharedState>,
+    pack_id: String,
+    target_version: String,
+) -> AppResult<hub::PublishRequest> {
+    publish_pack(
+        state.inner(),
+        pack_id,
+        PublishOperation::LivePatch { target_version },
+    )
+    .await
+}
+
+enum PublishOperation {
+    Release { version: String },
+    LivePatch { target_version: String },
+}
+
+impl PublishOperation {
+    fn request_type(&self) -> &'static str {
+        match self {
+            Self::Release { .. } => "release",
+            Self::LivePatch { .. } => "live_patch",
+        }
+    }
+}
+
+async fn publish_operation_remote(
+    operation: &PublishOperation,
+    settings: &db::AppSettings,
+    token: &str,
+    pack: &PackMeta,
+    source_local_path: &str,
+    vault: &Path,
+) -> AppResult<hub::PublishRequest> {
+    match operation {
+        PublishOperation::Release { .. } => {
+            hub::publish_release_remote(
+                &settings.hub_base_url,
+                settings.effective_proxy_url(),
+                token,
+                pack,
+                source_local_path,
+                vault,
+            )
+            .await
+        }
+        PublishOperation::LivePatch { .. } => {
+            hub::publish_live_patch_remote(
+                &settings.hub_base_url,
+                settings.effective_proxy_url(),
+                token,
+                pack,
+                source_local_path,
+                vault,
+            )
+            .await
+        }
+    }
+}
+
+async fn publish_pack(
+    state: &SharedState,
+    pack_id: String,
+    operation: PublishOperation,
 ) -> AppResult<hub::PublishRequest> {
     let settings = {
         let conn = state.db.lock();
         db::get_settings(&conn)?
     };
-    let token = ensure_hub_access(state.inner(), &settings, false)
+    let token = ensure_hub_access(state, &settings, false)
         .await?
         .ok_or_else(|| AppError::msg("Sign in to publish a knowledge pack"))?;
     let installed = {
@@ -1401,41 +1507,71 @@ pub async fn hub_publish_pack(
             installed.name,
         )));
     }
-    let version = match version {
-        Some(v) if !v.trim().is_empty() => v.trim().to_string(),
-        _ => installed.version.clone(),
-    };
     let vault = state.vault_path();
-    if version != installed.version {
-        // export_pack re-reads pack.json from disk, so the new version has
-        // to land there before we zip up the pack for upload.
-        hub::update_pack_version(&vault.join(&installed.local_path), &version)?;
-    }
-    let pack = PackMeta {
-        id: installed.pack_id,
-        name: installed.name,
-        description: installed.description,
-        version,
-        path: installed.local_path,
+    let source_local_path = installed.local_path.clone();
+    let pack = match &operation {
+        PublishOperation::Release { version } => {
+            let version = version.trim();
+            if version.is_empty() {
+                return Err(AppError::msg("Release version is required"));
+            }
+            if version != installed.version {
+                hub::update_pack_version(&vault.join(&installed.local_path), version)?;
+            }
+            PackMeta {
+                id: installed.pack_id.clone(),
+                name: installed.name.clone(),
+                description: installed.description.clone(),
+                version: version.to_string(),
+                path: installed.local_path.clone(),
+            }
+        }
+        PublishOperation::LivePatch { target_version } => {
+            let target_version = target_version.trim();
+            if target_version.is_empty() {
+                return Err(AppError::msg("Live patch target version is required"));
+            }
+            let release = hub::get_release_remote(
+                &settings.hub_base_url,
+                settings.effective_proxy_url(),
+                &token,
+                &installed.pack_id,
+                target_version,
+            )
+            .await?;
+            if release.yanked {
+                return Err(AppError::msg("Yanked releases cannot be live patched"));
+            }
+            PackMeta {
+                id: release.id,
+                name: release.name,
+                description: release.description,
+                version: release.version,
+                path: release.path,
+            }
+        }
     };
-    let published = hub::publish_pack_remote(
-        &settings.hub_base_url,
-        settings.effective_proxy_url(),
+    let expected_request_type = operation.request_type();
+    let published = publish_operation_remote(
+        &operation,
+        &settings,
         &token,
         &pack,
+        &source_local_path,
         &vault,
     )
     .await;
     let result = match published {
         Err(error) if error.is_unauthorized() => {
-            let token = ensure_hub_access(state.inner(), &settings, true)
+            let token = ensure_hub_access(state, &settings, true)
                 .await?
                 .ok_or_else(|| AppError::msg("Your Hub session expired. Sign in again."))?;
-            hub::publish_pack_remote(
-                &settings.hub_base_url,
-                settings.effective_proxy_url(),
+            publish_operation_remote(
+                &operation,
+                &settings,
                 &token,
                 &pack,
+                &source_local_path,
                 &vault,
             )
             .await
@@ -1443,6 +1579,12 @@ pub async fn hub_publish_pack(
         result => result,
     };
     if let Ok(request) = &result {
+        if request.request_type != expected_request_type {
+            return Err(AppError::msg(format!(
+                "Hub returned {} for a {expected_request_type} submission; local pending state was not changed",
+                request.request_type
+            )));
+        }
         // Don't advance `version` or the M/N/D snapshot baseline yet — the
         // request is only pending, not approved. Just record that this pack
         // now has an unresolved submission; hub_reconcile_publish_requests
@@ -1454,6 +1596,8 @@ pub async fn hub_publish_pack(
             &request.id,
             &pack.version,
             Some(&request.created_at),
+            &request.request_type,
+            request.patch_revision,
         )?;
     }
     result
@@ -1525,6 +1669,8 @@ async fn reconcile_one_pack(
             &remote.id,
             &remote.version,
             Some(&remote.created_at),
+            &remote.request_type,
+            remote.patch_revision,
         );
         return;
     }
@@ -1630,13 +1776,15 @@ pub async fn hub_merge_approved_pack(
         Some(&token),
     )
     .await;
-    let approved = match downloaded {
+    let downloaded = match downloaded {
         Ok(pack) => pack,
         Err(error) => {
             let _ = fs::remove_dir_all(&staging);
             return Err(error);
         }
     };
+    let approved = downloaded.pack;
+    let patch_revision = downloaded.patch_revision;
     if approved.id != pack_id || approved.version != request.version {
         let _ = fs::remove_dir_all(&staging);
         return Err(AppError::msg(
@@ -1672,7 +1820,13 @@ pub async fn hub_merge_approved_pack(
         let mut conn = state.db.lock();
         let transaction = conn.transaction()?;
         let owner_id = remote_owner_id.as_deref().or(installed.owner_id.as_deref());
-        hub::record_sync(&transaction, &approved, "registry", owner_id)?;
+        hub::record_sync_with_patch(
+            &transaction,
+            &approved,
+            "registry",
+            owner_id,
+            patch_revision,
+        )?;
         db::clear_pending_publish(&transaction, &pack_id)?;
         let merged = db::get_sync_state(&transaction, &pack_id)?
             .ok_or_else(|| AppError::msg("Merged pack state was not saved"))?;
@@ -1726,6 +1880,7 @@ pub fn hub_update_pack_metadata(
             origin: &installed.origin,
             owner_id: installed.owner_id.as_deref(),
             description: &updated.description,
+            patch_revision: installed.patch_revision,
         },
     )?;
     db::get_sync_state(&conn, &installed.pack_id)?
@@ -1942,12 +2097,15 @@ mod publishing_origin_tests {
             name: "Sample".into(),
             local_path: "sample".into(),
             version: "1.0.0".into(),
+            patch_revision: 0,
             last_synced: None,
             active: true,
             origin: origin.into(),
             owner_id: None,
             description: String::new(),
             pending_version: None,
+            pending_request_type: None,
+            pending_patch_revision: None,
             pending_request_id: None,
             publish_review_status: None,
             publish_review_created_at: None,
@@ -2003,6 +2161,7 @@ mod pack_install_conflict_tests {
                 origin: "local",
                 owner_id: None,
                 description: "",
+                patch_revision: 0,
             },
         )
         .unwrap();
@@ -2016,6 +2175,7 @@ mod pack_install_conflict_tests {
                 origin: "registry",
                 owner_id: None,
                 description: "",
+                patch_revision: 0,
             },
         )
         .unwrap();

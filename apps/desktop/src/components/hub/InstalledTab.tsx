@@ -1,9 +1,15 @@
 import type { HubUser, InstalledPack, PackProject } from "@nest/shared";
 import { save } from "@tauri-apps/plugin-dialog";
-import { ArrowUpCircle, FolderInput, Globe, Package } from "lucide-react";
+import {
+  ArrowUpCircle,
+  FolderInput,
+  Globe,
+  Package,
+  RefreshCw,
+} from "lucide-react";
 import { motion } from "motion/react";
 import { useState } from "react";
-import { PublishPackDialog } from "@/components/hub/PublishPackDialog";
+import { PackPublishDialogController } from "@/components/hub/PackPublishDialogController";
 import { RemovePackButton } from "@/components/hub/RemovePackButton";
 import { RenamePackDialog } from "@/components/hub/RenamePackDialog";
 import { Badge } from "@/components/ui/badge";
@@ -12,7 +18,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Spinner } from "@/components/ui/spinner";
 import { useI18n } from "@/lib/i18n";
 import { canEditPack, canRenamePack } from "@/lib/pack-permissions";
-import { publishDescriptionDefault } from "@/lib/publish-defaults";
+import { pendingPublishVersionLabel } from "@/lib/publish-request-labels";
 import { cn } from "@/lib/utils";
 
 export function InstalledTab({
@@ -20,11 +26,11 @@ export function InstalledTab({
   isLoading,
   hubOnline,
   catalogById,
-  catalogLoading,
   busy,
   downloadPendingId,
   removePendingId,
   onUpgrade,
+  onSyncPatch,
   onRemove,
   onOpenImport,
   onBrowse,
@@ -32,8 +38,6 @@ export function InstalledTab({
   authenticated,
   hubUser,
   onSignIn,
-  onPublish,
-  publishing,
   onRename,
   renaming,
 }: {
@@ -41,7 +45,6 @@ export function InstalledTab({
   isLoading: boolean;
   hubOnline: boolean;
   catalogById: Map<string, PackProject> | null;
-  catalogLoading: boolean;
   busy: boolean;
   downloadPendingId?: string;
   removePendingId?: string;
@@ -51,6 +54,12 @@ export function InstalledTab({
     previousVersion: string,
     ownerId?: string | null,
   ) => void;
+  onSyncPatch: (
+    packId: string,
+    packName: string,
+    version: string,
+    ownerId?: string | null,
+  ) => void;
   onRemove: (packId: string) => void;
   onOpenImport: () => void;
   onBrowse: () => void;
@@ -58,8 +67,6 @@ export function InstalledTab({
   authenticated: boolean;
   hubUser: HubUser | null;
   onSignIn: () => void;
-  onPublish: (packId: string, version: string, description: string) => void;
-  publishing?: boolean;
   onRename: (packId: string, name: string) => void;
   renaming?: boolean;
 }) {
@@ -109,19 +116,17 @@ export function InstalledTab({
           index={i}
           pack={pack}
           catalogEntry={catalogById?.get(pack.pack_id)}
-          catalogLoading={catalogLoading}
           busy={busy}
           downloading={downloadPendingId === pack.pack_id}
           removePending={removePendingId === pack.pack_id}
           t={t}
           onUpgrade={onUpgrade}
+          onSyncPatch={onSyncPatch}
           onRemove={() => onRemove(pack.pack_id)}
           onExport={onExport}
           authenticated={authenticated}
           canEdit={canEditPack(pack, hubUser)}
           onSignIn={onSignIn}
-          onPublish={onPublish}
-          publishing={publishing}
           onRename={onRename}
           renaming={renaming}
         />
@@ -142,26 +147,23 @@ function InstalledPackRow({
   index,
   pack,
   catalogEntry,
-  catalogLoading,
   busy,
   downloading,
   removePending,
   t,
   onUpgrade,
+  onSyncPatch,
   onRemove,
   onExport,
   authenticated,
   canEdit,
   onSignIn,
-  onPublish,
-  publishing,
   onRename,
   renaming,
 }: {
   index: number;
   pack: InstalledPack;
   catalogEntry: PackProject | undefined;
-  catalogLoading: boolean;
   busy: boolean;
   downloading: boolean;
   removePending: boolean;
@@ -172,13 +174,17 @@ function InstalledPackRow({
     previousVersion: string,
     ownerId?: string | null,
   ) => void;
+  onSyncPatch: (
+    packId: string,
+    packName: string,
+    version: string,
+    ownerId?: string | null,
+  ) => void;
   onRemove: () => void;
   onExport: (packId: string, destinationPath: string) => void;
   authenticated: boolean;
   canEdit: boolean;
   onSignIn: () => void;
-  onPublish: (packId: string, version: string, description: string) => void;
-  publishing?: boolean;
   onRename: (packId: string, name: string) => void;
   renaming?: boolean;
 }) {
@@ -186,6 +192,13 @@ function InstalledPackRow({
     catalogEntry != null &&
     catalogEntry.latest_version !== pack.version &&
     !pack.pending_version;
+  const currentRelease = catalogEntry?.releases?.find(
+    (release) => release.version === pack.version,
+  );
+  const patchAvailable =
+    currentRelease != null &&
+    !currentRelease.yanked &&
+    currentRelease.patch_revision > pack.patch_revision;
   const [publishDialogOpen, setPublishDialogOpen] = useState(false);
   const [renameDialogOpen, setRenameDialogOpen] = useState(false);
 
@@ -217,12 +230,12 @@ function InstalledPackRow({
         }
         publishLabel={
           pack.publish_review_status === "approved_awaiting_merge"
-            ? `v${pack.pending_version} ready to merge`
+            ? `${pendingPublishVersionLabel(pack)} ready to merge`
             : pack.pending_version
-            ? `v${pack.pending_version} awaiting review`
-            : authenticated
-              ? "Publish"
-              : "Sign in to publish"
+              ? `${pendingPublishVersionLabel(pack)} awaiting review`
+              : authenticated
+                ? "Publish"
+                : "Sign in to publish"
         }
         publishDisabled={Boolean(pack.pending_version)}
         onRename={
@@ -239,23 +252,10 @@ function InstalledPackRow({
           setRenameDialogOpen(false);
         }}
       />
-      <PublishPackDialog
+      <PackPublishDialogController
+        pack={pack}
         open={publishDialogOpen}
         onOpenChange={setPublishDialogOpen}
-        packName={pack.name}
-        currentVersion={pack.version}
-        currentDescription={publishDescriptionDefault(
-          catalogEntry,
-          pack.description,
-        )}
-        isFirstPublish={catalogEntry == null}
-        defaultsLoading={catalogLoading}
-        publishing={publishing}
-        lockedPendingVersion={pack.pending_version}
-        onPublish={(version, description) => {
-          onPublish(pack.pack_id, version, description);
-          setPublishDialogOpen(false);
-        }}
       />
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2 pr-7">
@@ -267,13 +267,18 @@ function InstalledPackRow({
           />
           <h3 className="font-medium">{pack.name}</h3>
           <span className="text-xs text-muted-foreground">v{pack.version}</span>
+          <span className="text-xs text-muted-foreground">
+            Patch {pack.patch_revision}
+          </span>
           {pack.publish_review_status === "pending" && pack.pending_version && (
-            <Badge variant="accent">v{pack.pending_version} under review</Badge>
+            <Badge variant="accent">
+              {pendingPublishVersionLabel(pack)} under review
+            </Badge>
           )}
           {pack.publish_review_status === "approved_awaiting_merge" &&
             pack.pending_version && (
               <Badge variant="update">
-                v{pack.pending_version} ready to merge
+                {pendingPublishVersionLabel(pack)} ready to merge
               </Badge>
             )}
           {pack.origin === "local" && (
@@ -291,12 +296,32 @@ function InstalledPackRow({
           {updateAvailable && (
             <Badge variant="update">{t("hub.updateAvailable")}</Badge>
           )}
+          {patchAvailable && <Badge variant="update">Patch available</Badge>}
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
           {t("hub.localFolder", { path: pack.local_path })}
         </p>
       </div>
       <div className="mt-2 flex justify-end gap-1.5">
+        {patchAvailable && catalogEntry && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 gap-1 px-2 text-[11px]"
+            disabled={busy}
+            onClick={() =>
+              onSyncPatch(
+                pack.pack_id,
+                pack.name,
+                pack.version,
+                catalogEntry.owner_id,
+              )
+            }
+          >
+            <RefreshCw className="size-3.5" />
+            Sync patch
+          </Button>
+        )}
         {updateAvailable && catalogEntry && (
           <Button
             size="sm"
