@@ -1,33 +1,30 @@
 # Troubleshooting
 
-## Hub is offline
+## A folder or ZIP will not import
 
-- Verify the Hub URL and protocol in Settings.
-- Open the Hub health URL in a browser.
-- Confirm the Hub process and reverse proxy are running.
-- Local reading, editing, import, export, and Chat remain available.
+- A folder must contain at least one Markdown file. It does not need a
+  `pack.json`; Nest creates one after you confirm the pack details.
+- A ZIP must contain one Nest pack, its `pack.json`, and at least one Markdown
+  file. If possible, ask the sender to create it with **Export ZIP**.
+- If the same pack is already installed, export it first if you need to keep a
+  copy, then confirm replacement.
 
-## Admin login returns to the login page
+## Hub cannot connect or a pack cannot be installed
 
-If login returns `201` but the page immediately signs out, update Hub to a
-version that supports HTTP-only internal deployments or serve it over HTTPS.
-Cookies are marked `Secure` only for HTTPS requests.
+- Confirm that the Hub URL in Settings matches the address provided by your
+  team.
+- Check the connection status and try again.
+- Sign in if the pack is restricted.
+- If the service remains unavailable, contact your Hub administrator. Already
+  installed packs and local import, reading, editing, and export still work.
 
-## Chat fails or gives weak answers
+## Publishing fails
 
-- Verify the model URL, API key, and model name.
-- Confirm relevant packs are active and indexing has completed.
-- Use a narrower `@` reference.
-- Inspect citations and restate the task with clearer constraints.
-
-## Import or publish fails
-
-- For folder imports, include at least one Markdown file. `pack.json` is
-  optional because Nest generates it from the metadata you confirm.
-- For ZIP imports, confirm the archive contains one pack and its `pack.json`.
 - Check that `pack.json.id` matches the folder and uses a valid ID.
 - Check that `pack.json.version` is valid SemVer and not already published.
 - Include at least one Markdown file.
+- Sign in to the correct Hub account and confirm you have permission to
+  publish.
 - Wait for an existing pending request to be reviewed.
 
 ## Local changes look stale
@@ -39,3 +36,10 @@ approved, refresh and choose **Merge with remote** to update the baseline.
 
 Use a path relative to the Markdown file and a supported extension such as
 PNG, JPEG, GIF, WebP, SVG, or BMP. Check spelling and capitalization.
+
+## Optional Chat fails or gives weak answers
+
+- Verify the model URL, API key, and model name.
+- Confirm relevant packs are active and indexing has completed.
+- Use a narrower `@` reference.
+- Inspect citations and restate the task with clearer constraints.

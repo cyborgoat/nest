@@ -1,44 +1,66 @@
 # First 10 Minutes
 
-## 1. Explore the Library
+Your first goal is simple: bring useful knowledge into Nest and open it.
 
-Open the Explorer sidebar, expand `getting-started`, and open this file. Use the
-top tabs to move between open documents.
+## 1. Connect Hub for your team's catalog
 
-## 2. Configure Chat
+If you want to find packs published by your team:
 
-Open **Settings → General** and enter:
+1. Ask your team or Hub administrator for the Hub URL.
+2. Open **Settings** and enter that address under **Hub URL**.
+3. Select **Test connection** and confirm that Hub is connected.
+4. Sign in under **Settings → Account** if your team requires it or the pack is
+   restricted.
 
-- the base URL of an OpenAI-compatible API;
-- its API key;
-- the model name to use for Chat.
+You can skip this step when importing a local folder or ZIP.
 
-Save the settings, open Chat, and ask:
+## 2. Choose where your knowledge comes from
 
-```text
-What is the difference between an active and inactive knowledge pack?
-```
+Open **Hub** and choose the path that matches what you have:
 
-Open the answer's citations to see which tutorial pages supported it.
+| You have | Choose |
+| --- | --- |
+| A pack published by your team | **Browse**, then search and install |
+| A folder of Markdown files | **Import → Create from folder** |
+| A Nest pack ZIP shared with you | **Import → Import pack ZIP** |
 
-## 3. Try an `@` reference
+Public Hub packs can be browsed without an account when your Hub allows it.
+Local folder and ZIP imports do not require Hub sign-in.
 
-Type `@` in Chat and select this pack or one of its guides:
+## 3. Add one pack
 
-```text
-@getting-started/guides How do I publish a knowledge pack?
-```
+- **From Hub:** search or browse, open a pack, choose a version, and select
+  **Install**.
+- **From a folder:** choose a folder containing at least one `.md` file,
+  review its name, and select **Create pack**.
+- **From a ZIP:** choose a ZIP exported from Nest and select **Import ZIP**.
 
-The selected item appears as a pill in the composer and limits retrieval.
+Nest copies the pack into its local knowledge directory. Your source folder or
+ZIP is left unchanged.
 
-## 4. Make a small edit
+## 4. Open and read it
 
-Open a Markdown file, switch to editing mode, make a change, and save it. Open
-Source Control to inspect the diff. You can keep the edit or discard it to
-restore the last synchronized version.
+Open **Explorer**, expand the new pack, and select a Markdown file. Use the top
+tabs to move between open documents. Installed packs remain available when Hub
+is offline.
 
-## 5. Connect Hub when needed
+For more detail, see:
 
-Set the Hub URL in Settings. Public packs can be browsed without an account.
-Sign in under **Settings → Account** when you want to publish, receive review
-messages, or access a restricted pack.
+- [Install from Hub](import-from-hub.md)
+- [Import from a folder](import-from-folder.md)
+- [Import from a ZIP](import-from-zip.md)
+
+## 5. Share knowledge when you are ready
+
+- Use **Export ZIP** to send a portable copy directly to someone.
+- Sign in to Hub and use **Publish** to share a version through your team's
+  catalog and review process.
+
+See [Exporting and publishing](publishing-and-messages.md) for the complete
+workflow.
+
+## Optional: ask questions with Chat
+
+Chat is an additional way to use installed knowledge; it is not required to
+read, import, edit, export, or publish packs. If you want it, configure a model
+provider in **Settings**, then see [Chat and `@` references](chat-and-references.md).

@@ -1,23 +1,25 @@
 # Install a Pack from Hub
 
-Use Hub to find and install packs that have been published for your team.
+Hub is the quickest way to find knowledge packs published for your team.
 
-## Connect to Hub
+## Connect Hub first
 
-1. Open **Settings**.
-2. Enter your Hub URL.
-3. Sign in if the pack is restricted. Public packs can be browsed without an
-   account when the Hub permits it.
+1. Ask your team or Hub administrator for the Hub URL.
+2. Open **Settings** and enter it under **Hub URL**.
+3. Select **Test connection** and confirm that Hub is connected.
+4. Sign in under **Settings → Account** if your team requires it or the pack is
+   restricted.
 
-## Install a pack
+Public packs may be available without an account, but the Hub URL must still be
+configured before you browse the catalog.
+
+## Find and install a pack
 
 1. Open **Hub** and select **Browse**.
-2. Search or browse for the pack.
-3. Open its available versions.
-4. Choose the version you need and select **Install**.
-
-Hub downloads a complete pack, including its `pack.json`, so you do not need to
-create metadata yourself.
+2. Search by pack name or browse the catalog.
+3. Open a pack to read its description and see available versions.
+4. Choose a version and select **Install**.
+5. Open **Explorer**, expand the installed pack, and select a file to read.
 
 ## Updates and versions
 
@@ -27,3 +29,6 @@ operation replaces the current local files for that pack.
 
 Installed packs remain readable if Hub later goes offline. Restricted downloads
 and future updates require a working Hub connection and suitable access.
+
+If installing would replace local files, Nest asks you to confirm first. Export
+the current pack if you want to keep a portable copy.

@@ -1,54 +1,42 @@
 # Exporting, Publishing, and Messages
 
-## Export a portable copy
+Choose how you want to share:
 
-Use **Export ZIP** from the installed pack actions. Nest includes the pack
-metadata and content in a portable archive that can be imported on another
-computer.
+| Goal | Use |
+| --- | --- |
+| Send a copy directly to someone | **Export ZIP** |
+| Make a version available in your team's catalog | **Publish** to Hub |
 
-## Prepare a release
+## Share a ZIP
 
-Before submitting:
+Choose **Export ZIP** from the installed pack's actions. Send the resulting
+file to another Nest user, who can add it with **Hub → Import → Import pack
+ZIP**. Exporting does not require an account or Hub connection.
 
-1. Review every change in Source Control.
-2. Follow the [pack publishing rules](publishing-rules.md).
-3. Use semantic versioning: patch for fixes, minor for additive content, and
-   major for incompatible structure changes.
-4. Check links, images, Markdown rendering, and the pack README.
+## Publish to Hub
 
-## Submit
+You need a Hub connection, a signed-in account with publishing permission, and
+a pack that is not already waiting for review.
 
-Use the publish action for the pack, choose the next version, confirm the
-description, and upload. Hub validates paths, metadata, size, Markdown content,
-and version uniqueness before creating a pending request.
+1. Open and read the content you intend to share.
+2. Open **Source Control** and review every local change.
+3. Use the pack's **Publish** action.
+4. Choose a new version, check the description, and submit.
+5. Open **Under Review** or **Messages** to follow the result.
 
-Only one request for a pack can be pending at a time. The local baseline does
-not advance merely because a request was submitted.
+For version naming, file compatibility, and a fuller pre-publish checklist, see
+[Pack publishing rules](publishing-rules.md).
 
-## Follow review status
+## After submission
 
-The pack shows **under review** while pending. Use Source Control refresh to
-synchronize immediately, or wait for background refresh.
+Only one request for a pack can be under review at a time:
 
-- **Approved:** the release becomes available in Hub and waits for you to
-  choose **Merge with remote** from Messages or Source Control.
-- **Rejected:** the pending marker clears, local edits remain, and Source
-  Control shows a rejection badge until its message is read.
+- **Approved:** the version becomes available in Hub. Choose **Merge with
+  remote** in Messages or Source Control to finish synchronizing your local
+  review state.
+- **Rejected:** open the message to read the review comment. Your local edits
+  remain, so you can make the requested changes and publish again.
 
-## Read and act on messages
-
-The Messages page records submission, approval, and rejection events. An unread
-dot appears on the Messages icon. For an approval, choose **Merge with remote**.
-Nest downloads the exact reviewed release as the new Source Control baseline
-without overwriting your local working files. Any edits made after submission
-remain visible as modified, new, or deleted files.
-
-The **Under Review** sidebar lists installed packs with pending requests. Use it
-to inspect the local pack, open its submission message, or refresh review
-status.
-
-Open a rejection to read the administrator's comment, make the requested edits,
-choose a new valid version when necessary, and submit again.
-
-Mark messages read when they no longer require attention. Read messages can be
-deleted without changing the publishing history kept by Hub administrators.
+Merging the approved release updates the comparison baseline without
+overwriting edits made after submission. Those later edits continue to appear
+in Source Control.

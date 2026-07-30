@@ -1,33 +1,22 @@
 # Import a Pack from a Folder
 
-Use this option when you already have Markdown notes or documentation in a
-folder on your computer.
+Use this option to bring Markdown notes or documentation already on your
+computer into Nest.
 
-## What you need
+## Quick import
 
-- A folder containing at least one Markdown (`.md`) file.
-- A clear name for the pack.
-
-`pack.json` is optional. If the folder does not contain one, Nest derives
-initial details from the folder name, asks you to confirm the pack ID, name,
-version, and optional description, then generates `pack.json` in the installed
-copy automatically.
-
-If the folder already has a valid `pack.json`, Nest uses its values as the form
-defaults. You can review them before importing.
-
-## Import the folder
-
-1. Open **Hub** and choose **Import**.
-2. Select **Create from folder**.
-3. Choose the folder containing your Markdown files.
-4. Review the generated or discovered pack details.
-5. Select **Create pack**.
+1. Put at least one Markdown (`.md`) file in a folder.
+2. Open **Hub** and choose **Import**.
+3. Select **Create from folder**.
+4. Choose the folder containing your Markdown files.
+5. Review the suggested pack name and details.
+6. Select **Create pack**.
 
 Nest copies supported Markdown and image files into its local vault. Your
-original folder is left unchanged.
+original folder stays unchanged. Open **Explorer** to find and read the new
+pack.
 
-## Good folder structure
+## Example folder
 
 ```text
 my-notes/
@@ -38,5 +27,14 @@ my-notes/
     diagram.png
 ```
 
-After import, the installed copy also contains the generated `pack.json`. Keep
-the pack ID stable if you later publish it.
+Folders can be organized however they make sense to readers. Relative links and
+images continue to work when their target files are included.
+
+## About pack details
+
+You do not need to create `pack.json` yourself. Nest suggests an ID, name,
+version, and optional description, then creates the required metadata in the
+installed copy. If the folder already contains valid pack metadata, Nest uses
+it as the starting point for the form.
+
+Keep the pack ID stable if you later publish updates under the same Hub entry.
