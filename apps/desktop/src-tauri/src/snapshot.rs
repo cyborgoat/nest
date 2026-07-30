@@ -5,7 +5,7 @@
 //! there is no git repo or history here, just "current" vs. "last known
 //! good", matching the desktop app's file-tree/vault model.
 
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use base64::{engine::general_purpose, Engine as _};
 use serde::Serialize;
 use std::fs;
@@ -162,6 +162,30 @@ fn list_file_rel_paths(root: &Path, dir: &Path, out: &mut Vec<String>) -> AppRes
     Ok(())
 }
 
+/// The root pack manifest is managed by Nest and should never appear as a
+/// user-editable Source Control change. Nested files with the same name are
+/// ordinary pack content and remain visible.
+fn is_internal_pack_metadata(rel_path: &str) -> bool {
+    let normalized = rel_path.replace('\\', "/");
+    let mut components = Path::new(&normalized).components();
+    matches!(
+        (components.next(), components.next()),
+        (Some(std::path::Component::Normal(name)), None)
+            if name
+                .to_string_lossy()
+                .eq_ignore_ascii_case("pack.json")
+    )
+}
+
+fn ensure_source_control_path(rel_path: &str) -> AppResult<()> {
+    if is_internal_pack_metadata(rel_path) {
+        return Err(AppError::msg(
+            "pack.json is managed internally and is not available in Source Control",
+        ));
+    }
+    Ok(())
+}
+
 /// Compute per-file Modified/New/Deleted status for a pack by comparing its
 /// working files against its snapshot. Unchanged files are omitted. If
 /// `snapshot_dir` doesn't exist at all (e.g. a brand-new local pack that was
@@ -170,11 +194,13 @@ fn list_file_rel_paths(root: &Path, dir: &Path, out: &mut Vec<String>) -> AppRes
 pub fn compute_status(pack_dir: &Path, snapshot_dir: &Path) -> AppResult<Vec<FileStatus>> {
     let mut working = Vec::new();
     list_file_rel_paths(pack_dir, pack_dir, &mut working)?;
+    working.retain(|rel| !is_internal_pack_metadata(rel));
 
     let has_snapshot = snapshot_dir.is_dir();
     let mut snapshotted = Vec::new();
     if has_snapshot {
         list_file_rel_paths(snapshot_dir, snapshot_dir, &mut snapshotted)?;
+        snapshotted.retain(|rel| !is_internal_pack_metadata(rel));
     }
 
     let mut statuses = Vec::new();
@@ -215,6 +241,7 @@ pub fn compute_status(pack_dir: &Path, snapshot_dir: &Path) -> AppResult<Vec<Fil
 /// side may be absent: `old: None` means the file is New, `new: None` means
 /// it was Deleted.
 pub fn read_pair(pack_dir: &Path, snapshot_dir: &Path, rel_path: &str) -> AppResult<DiffPair> {
+    ensure_source_control_path(rel_path)?;
     let working_path = crate::vault::resolve_vault_path(pack_dir, rel_path)?;
     let snap_path = snapshot_dir.join(rel_path);
     let kind_path = if working_path.is_file() {
@@ -242,6 +269,7 @@ pub fn read_pair(pack_dir: &Path, snapshot_dir: &Path, rel_path: &str) -> AppRes
 /// or delete it if it has no snapshot counterpart (New case) — the caller
 /// doesn't need to know which case applies ahead of time.
 pub fn discard_file(pack_dir: &Path, snapshot_dir: &Path, rel_path: &str) -> AppResult<()> {
+    ensure_source_control_path(rel_path)?;
     let working_path = crate::vault::resolve_vault_path(pack_dir, rel_path)?;
     let snap_path = snapshot_dir.join(rel_path);
     if snap_path.is_file() {
@@ -386,6 +414,7 @@ mod tests {
         fs::write(pack_dir.join("keep.md"), "unchanged").unwrap();
         fs::write(pack_dir.join("edit.md"), "original").unwrap();
         fs::write(pack_dir.join("gone.md"), "will be deleted").unwrap();
+        fs::write(pack_dir.join("pack.json"), r#"{"name":"Before"}"#).unwrap();
 
         write_snapshot(&app_data, "pack1", "1.0.0", &pack_dir).unwrap();
         let snap_dir = snapshot_root(&app_data, "pack1", "1.0.0");
@@ -394,6 +423,7 @@ mod tests {
         fs::write(pack_dir.join("edit.md"), "changed").unwrap();
         fs::remove_file(pack_dir.join("gone.md")).unwrap();
         fs::write(pack_dir.join("new.md"), "brand new").unwrap();
+        fs::write(pack_dir.join("pack.json"), r#"{"name":"After"}"#).unwrap();
 
         let statuses = compute_status(&pack_dir, &snap_dir).unwrap();
         assert_eq!(statuses.len(), 3);
@@ -413,11 +443,50 @@ mod tests {
         let pack_dir = scratch("status-no-snapshot-pack");
         crate::vault::ensure_dir(&pack_dir).unwrap();
         fs::write(pack_dir.join("readme.md"), "# hi").unwrap();
+        fs::write(pack_dir.join("pack.json"), "{}").unwrap();
         let missing_snapshot = scratch("status-no-snapshot-missing");
 
         let statuses = compute_status(&pack_dir, &missing_snapshot).unwrap();
         assert_eq!(statuses.len(), 1);
+        assert_eq!(statuses[0].path, "readme.md");
         assert_eq!(statuses[0].status, FileChangeStatus::New);
+    }
+
+    #[test]
+    fn source_control_hides_only_the_root_pack_manifest() {
+        let app_data = scratch("status-internal-metadata-app-data");
+        let pack_dir = scratch("status-internal-metadata-pack");
+        crate::vault::ensure_dir(&pack_dir.join("docs")).unwrap();
+        fs::write(pack_dir.join("pack.json"), "{}").unwrap();
+        fs::write(pack_dir.join("docs/pack.json"), "{}").unwrap();
+        write_snapshot(&app_data, "pack1", "1.0.0", &pack_dir).unwrap();
+        let snap_dir = snapshot_root(&app_data, "pack1", "1.0.0");
+
+        fs::remove_file(pack_dir.join("pack.json")).unwrap();
+        fs::write(pack_dir.join("docs/pack.json"), r#"{"changed":true}"#).unwrap();
+
+        let statuses = compute_status(&pack_dir, &snap_dir).unwrap();
+        assert_eq!(statuses.len(), 1);
+        assert_eq!(statuses[0].path, "docs/pack.json");
+        assert_eq!(statuses[0].status, FileChangeStatus::Modified);
+    }
+
+    #[test]
+    fn source_control_rejects_direct_manifest_access() {
+        let app_data = scratch("internal-metadata-access-app-data");
+        let pack_dir = scratch("internal-metadata-access-pack");
+        crate::vault::ensure_dir(&pack_dir).unwrap();
+        fs::write(pack_dir.join("pack.json"), "{}").unwrap();
+        write_snapshot(&app_data, "pack1", "1.0.0", &pack_dir).unwrap();
+        let snap_dir = snapshot_root(&app_data, "pack1", "1.0.0");
+
+        fs::write(pack_dir.join("pack.json"), r#"{"changed":true}"#).unwrap();
+        assert!(read_pair(&pack_dir, &snap_dir, "pack.json").is_err());
+        assert!(discard_file(&pack_dir, &snap_dir, "PACK.JSON").is_err());
+        assert_eq!(
+            fs::read_to_string(pack_dir.join("pack.json")).unwrap(),
+            r#"{"changed":true}"#
+        );
     }
 
     #[test]
