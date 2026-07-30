@@ -12,6 +12,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Spinner } from "@/components/ui/spinner";
 import { useI18n } from "@/lib/i18n";
 import { canEditPack, canRenamePack } from "@/lib/pack-permissions";
+import { publishDescriptionDefault } from "@/lib/publish-defaults";
 import { cn } from "@/lib/utils";
 
 export function InstalledTab({
@@ -19,6 +20,7 @@ export function InstalledTab({
   isLoading,
   hubOnline,
   catalogById,
+  catalogLoading,
   busy,
   downloadPendingId,
   removePendingId,
@@ -39,6 +41,7 @@ export function InstalledTab({
   isLoading: boolean;
   hubOnline: boolean;
   catalogById: Map<string, PackProject> | null;
+  catalogLoading: boolean;
   busy: boolean;
   downloadPendingId?: string;
   removePendingId?: string;
@@ -106,6 +109,7 @@ export function InstalledTab({
           index={i}
           pack={pack}
           catalogEntry={catalogById?.get(pack.pack_id)}
+          catalogLoading={catalogLoading}
           busy={busy}
           downloading={downloadPendingId === pack.pack_id}
           removePending={removePendingId === pack.pack_id}
@@ -138,6 +142,7 @@ function InstalledPackRow({
   index,
   pack,
   catalogEntry,
+  catalogLoading,
   busy,
   downloading,
   removePending,
@@ -156,6 +161,7 @@ function InstalledPackRow({
   index: number;
   pack: InstalledPack;
   catalogEntry: PackProject | undefined;
+  catalogLoading: boolean;
   busy: boolean;
   downloading: boolean;
   removePending: boolean;
@@ -238,8 +244,12 @@ function InstalledPackRow({
         onOpenChange={setPublishDialogOpen}
         packName={pack.name}
         currentVersion={pack.version}
-        currentDescription={pack.description}
+        currentDescription={publishDescriptionDefault(
+          catalogEntry,
+          pack.description,
+        )}
         isFirstPublish={catalogEntry == null}
+        defaultsLoading={catalogLoading}
         publishing={publishing}
         lockedPendingVersion={pack.pending_version}
         onPublish={(version, description) => {

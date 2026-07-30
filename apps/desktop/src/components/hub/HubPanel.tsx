@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   InstalledPack,
   KnowledgePackMeta,
+  LocalPackInspection,
   PackInstallConflict,
   PackProject,
 } from "@nest/shared";
@@ -61,7 +62,7 @@ export function HubPanel() {
     conflict: PackInstallConflict;
   } | null>(null);
   const [pendingOverwrite, setPendingOverwrite] = useState<{
-    kind: "zip" | "folder";
+    kind: "zip" | "zip-create" | "folder";
     sourcePath: string;
     metadata: KnowledgePackMeta;
     installed: InstalledPack;
@@ -267,27 +268,6 @@ export function HubPanel() {
       }),
   });
 
-  const inspectLocal = useMutation({
-    mutationFn: api.hubInspectLocalPack,
-    onSuccess: (metadata, sourcePath) => {
-      const installed = installedById.get(metadata.id);
-      if (installed) {
-        setPendingOverwrite({
-          kind: "zip",
-          sourcePath,
-          metadata,
-          installed,
-        });
-      } else {
-        importLocal.mutate({ sourcePath, overwrite: false });
-      }
-    },
-    onError: (e: Error) =>
-      toast.error(t("hub.importFailed"), {
-        description: e.message || String(e),
-      }),
-  });
-
   const createFromFolder = useMutation({
     mutationFn: ({
       sourcePath,
@@ -298,6 +278,28 @@ export function HubPanel() {
       metadata: KnowledgePackMeta;
       overwrite: boolean;
     }) => api.hubCreatePackFromFolder(sourcePath, metadata, overwrite),
+    onSuccess: () => {
+      setPendingOverwrite(null);
+      setImportOpen(false);
+      invalidateAfterPackChange();
+      toast.success(t("hub.packCreated"));
+    },
+    onError: (e: Error) =>
+      toast.error(t("hub.createFailed"), {
+        description: e.message || String(e),
+      }),
+  });
+
+  const createFromZip = useMutation({
+    mutationFn: ({
+      sourcePath,
+      metadata,
+      overwrite,
+    }: {
+      sourcePath: string;
+      metadata: KnowledgePackMeta;
+      overwrite: boolean;
+    }) => api.hubCreatePackFromZip(sourcePath, metadata, overwrite),
     onSuccess: () => {
       setPendingOverwrite(null);
       setImportOpen(false);
@@ -364,6 +366,7 @@ export function HubPanel() {
     download.isPending ||
     remove.isPending ||
     createFromFolder.isPending ||
+    createFromZip.isPending ||
     importLocal.isPending ||
     exportPack.isPending ||
     publish.isPending ||
@@ -371,7 +374,7 @@ export function HubPanel() {
   const importing =
     importLocal.isPending ||
     createFromFolder.isPending ||
-    inspectLocal.isPending;
+    createFromZip.isPending;
   const downloadPendingId = download.isPending
     ? download.variables?.packId
     : undefined;
@@ -493,6 +496,7 @@ export function HubPanel() {
                 isLoading={installedQuery.isLoading}
                 hubOnline={hubOnline}
                 catalogById={catalogById}
+                catalogLoading={hubOnline && packsQuery.isLoading}
                 busy={busy}
                 downloadPendingId={downloadPendingId}
                 removePendingId={removePendingId}
@@ -529,7 +533,29 @@ export function HubPanel() {
         open={importOpen}
         onOpenChange={setImportOpen}
         importing={importing}
-        onImportZip={(path) => inspectLocal.mutate(path)}
+        onImportZip={(
+          sourcePath: string,
+          inspection: LocalPackInspection,
+        ) => {
+          const installed = installedById.get(inspection.metadata.id.trim());
+          const kind = inspection.needs_metadata ? "zip-create" : "zip";
+          if (installed) {
+            setPendingOverwrite({
+              kind,
+              sourcePath,
+              metadata: inspection.metadata,
+              installed,
+            });
+          } else if (inspection.needs_metadata) {
+            createFromZip.mutate({
+              sourcePath,
+              metadata: inspection.metadata,
+              overwrite: false,
+            });
+          } else {
+            importLocal.mutate({ sourcePath, overwrite: false });
+          }
+        }}
         onCreateFromFolder={(sourcePath, metadata) => {
           const installed = installedById.get(metadata.id.trim());
           if (installed) {
@@ -633,6 +659,12 @@ export function HubPanel() {
                 if (pendingOverwrite.kind === "zip") {
                   importLocal.mutate({
                     sourcePath: pendingOverwrite.sourcePath,
+                    overwrite: true,
+                  });
+                } else if (pendingOverwrite.kind === "zip-create") {
+                  createFromZip.mutate({
+                    sourcePath: pendingOverwrite.sourcePath,
+                    metadata: pendingOverwrite.metadata,
                     overwrite: true,
                   });
                 } else {

@@ -318,6 +318,12 @@ pub struct FolderPackDefaults {
     pub warning: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct LocalPackInspection {
+    pub metadata: PackMeta,
+    pub needs_metadata: bool,
+}
+
 #[derive(Debug, Deserialize)]
 struct LoosePackMeta {
     #[serde(default)]
@@ -916,11 +922,55 @@ pub fn export_pack(pack: &PackMeta, vault_root: &Path, destination: &Path) -> Ap
     Ok(())
 }
 
-/// Inspect and validate a local `.zip` without installing it.
-pub fn inspect_local_pack(source: &Path, vault_root: &Path) -> AppResult<PackMeta> {
-    let (tmp, _, pack) = prepare_local_pack(source, vault_root)?;
-    let _ = fs::remove_dir_all(tmp);
-    Ok(pack)
+/// Inspect a local `.zip` without installing it. Existing Nest packs return
+/// their manifest metadata. Plain Markdown zips return editable defaults so
+/// the UI can collect metadata before creating pack.json.
+pub fn inspect_local_pack(source: &Path, vault_root: &Path) -> AppResult<LocalPackInspection> {
+    let tmp = extract_local_zip(source, vault_root)?;
+    let result = (|| {
+        if let Some((content_root, pack)) = find_pack_root(&tmp)? {
+            validate_imported_pack(&content_root, &pack)?;
+            return Ok(LocalPackInspection {
+                metadata: pack,
+                needs_metadata: false,
+            });
+        }
+
+        let content_root = unmanifested_content_root(&tmp)?;
+        if !dir_has_markdown(&content_root) {
+            return Err(AppError::msg(
+                "This zip has no Markdown (.md) files. Knowledge packs must include at least one.",
+            ));
+        }
+        let fallback_name = source
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .filter(|name| !name.trim().is_empty())
+            .unwrap_or("knowledge-pack");
+        let name = if content_root != tmp {
+            content_root
+                .file_name()
+                .and_then(|name| name.to_str())
+                .filter(|name| !name.trim().is_empty())
+                .unwrap_or(fallback_name)
+        } else {
+            fallback_name
+        }
+        .trim()
+        .to_string();
+        Ok(LocalPackInspection {
+            metadata: PackMeta {
+                id: slugify_pack_id(&name),
+                name,
+                description: String::new(),
+                version: "1.0.0".into(),
+                path: String::new(),
+            },
+            needs_metadata: true,
+        })
+    })();
+    let _ = fs::remove_dir_all(&tmp);
+    result
 }
 
 /// Import a local `.zip` knowledge pack (must include `pack.json`).
@@ -967,7 +1017,28 @@ pub fn import_local_pack(source: &Path, vault_root: &Path, overwrite: bool) -> A
     Ok(pack)
 }
 
-fn prepare_local_pack(source: &Path, vault_root: &Path) -> AppResult<(PathBuf, PathBuf, PackMeta)> {
+/// Create a pack from a zip that contains Markdown but no pack.json.
+pub fn create_pack_from_zip(
+    source: &Path,
+    submitted: PackMeta,
+    vault_root: &Path,
+    overwrite: bool,
+) -> AppResult<PackMeta> {
+    let tmp = extract_local_zip(source, vault_root)?;
+    let result = (|| {
+        if find_pack_root(&tmp)?.is_some() {
+            return Err(AppError::msg(
+                "This zip already contains pack.json. Import it as an existing pack instead.",
+            ));
+        }
+        let content_root = unmanifested_content_root(&tmp)?;
+        create_pack_from_folder(&content_root, submitted, vault_root, overwrite)
+    })();
+    let _ = fs::remove_dir_all(&tmp);
+    result
+}
+
+fn extract_local_zip(source: &Path, vault_root: &Path) -> AppResult<PathBuf> {
     if !source.is_file() {
         return Err(AppError::msg("Select a .zip knowledge pack file"));
     }
@@ -981,16 +1052,19 @@ fn prepare_local_pack(source: &Path, vault_root: &Path) -> AppResult<(PathBuf, P
             "Knowledge packs must be imported as a .zip file",
         ));
     }
-
     let tmp = vault_root.join(format!(".import-{}", uuid::Uuid::new_v4()));
+    if let Err(error) = extract_zip_to_dir(source, &tmp) {
+        let _ = fs::remove_dir_all(&tmp);
+        return Err(error);
+    }
+    Ok(tmp)
+}
+
+fn prepare_local_pack(source: &Path, vault_root: &Path) -> AppResult<(PathBuf, PathBuf, PackMeta)> {
+    let tmp = extract_local_zip(source, vault_root)?;
     let cleanup = || {
         let _ = fs::remove_dir_all(&tmp);
     };
-
-    if let Err(e) = extract_zip_to_dir(source, &tmp) {
-        cleanup();
-        return Err(e);
-    }
 
     let (content_root, pack) = match locate_pack_root(&tmp) {
         Ok(v) => v,
@@ -1000,32 +1074,34 @@ fn prepare_local_pack(source: &Path, vault_root: &Path) -> AppResult<(PathBuf, P
         }
     };
 
-    if let Err(e) = validate_pack_folder_name(&pack.path) {
+    if let Err(e) = validate_imported_pack(&content_root, &pack) {
         cleanup();
         return Err(e);
-    }
-    if pack.id != pack.path {
-        cleanup();
-        return Err(AppError::msg(
-            "pack.json id must equal the pack folder name (path)",
-        ));
-    }
-
-    if !dir_has_markdown(&content_root) {
-        cleanup();
-        return Err(AppError::msg(
-            "This pack has no Markdown (.md) files. Nest packs must include at least one .md file.",
-        ));
     }
 
     Ok((tmp, content_root, pack))
 }
 
-fn locate_pack_root(extracted: &Path) -> AppResult<(PathBuf, PackMeta)> {
+fn validate_imported_pack(content_root: &Path, pack: &PackMeta) -> AppResult<()> {
+    validate_pack_folder_name(&pack.path)?;
+    if pack.id != pack.path {
+        return Err(AppError::msg(
+            "pack.json id must equal the pack folder name (path)",
+        ));
+    }
+    if !dir_has_markdown(content_root) {
+        return Err(AppError::msg(
+            "This pack has no Markdown (.md) files. Nest packs must include at least one .md file.",
+        ));
+    }
+    Ok(())
+}
+
+fn find_pack_root(extracted: &Path) -> AppResult<Option<(PathBuf, PackMeta)>> {
     let root_meta = extracted.join("pack.json");
     if root_meta.is_file() {
         let pack = read_required_pack_meta(extracted)?;
-        return Ok((extracted.to_path_buf(), pack));
+        return Ok(Some((extracted.to_path_buf(), pack)));
     }
 
     // Hub zips nest content under {path}/… including {path}/pack.json.
@@ -1049,11 +1125,38 @@ fn locate_pack_root(extracted: &Path) -> AppResult<(PathBuf, PackMeta)> {
         let pack = read_required_pack_meta(&dir)?;
         found = Some((dir, pack));
     }
-    found.ok_or_else(|| {
+    Ok(found)
+}
+
+fn locate_pack_root(extracted: &Path) -> AppResult<(PathBuf, PackMeta)> {
+    find_pack_root(extracted)?.ok_or_else(|| {
         AppError::msg(
             "Zip is missing pack.json. Every Nest knowledge pack must include a pack.json at the pack root.",
         )
     })
+}
+
+fn unmanifested_content_root(extracted: &Path) -> AppResult<PathBuf> {
+    let mut visible_dirs = Vec::new();
+    let mut has_visible_files = false;
+    for entry in fs::read_dir(extracted)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with('.') || name == "__MACOSX" {
+            continue;
+        }
+        if entry.file_type()?.is_dir() {
+            visible_dirs.push(entry.path());
+        } else {
+            has_visible_files = true;
+        }
+    }
+    if !has_visible_files && visible_dirs.len() == 1 {
+        Ok(visible_dirs.remove(0))
+    } else {
+        Ok(extracted.to_path_buf())
+    }
 }
 
 fn validate_pack_folder_name(name: &str) -> AppResult<()> {
@@ -1289,7 +1392,8 @@ mod local_pack_tests {
         write_pack_zip(&zip_path, "2.0.0");
 
         let inspected = inspect_local_pack(&zip_path, &vault).unwrap();
-        assert_eq!(inspected.version, "2.0.0");
+        assert!(!inspected.needs_metadata);
+        assert_eq!(inspected.metadata.version, "2.0.0");
         assert!(import_local_pack(&zip_path, &vault, false).is_err());
         assert!(vault.join("sample/old.md").exists());
 
@@ -1297,6 +1401,32 @@ mod local_pack_tests {
         assert_eq!(imported.version, "2.0.0");
         assert!(vault.join("sample/new.md").exists());
         assert!(!vault.join("sample/old.md").exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn zip_without_manifest_gets_defaults_and_creates_pack_json() {
+        let root = test_root("zip-defaults");
+        let vault = root.join("vault");
+        fs::create_dir_all(&vault).unwrap();
+        let zip_path = root.join("shared-notes.zip");
+        let file = File::create(&zip_path).unwrap();
+        let mut zip = ZipWriter::new(file);
+        let options = SimpleFileOptions::default();
+        zip.start_file("Team Notes/README.md", options).unwrap();
+        zip.write_all(b"# Team notes").unwrap();
+        zip.finish().unwrap();
+
+        let inspected = inspect_local_pack(&zip_path, &vault).unwrap();
+        assert!(inspected.needs_metadata);
+        assert_eq!(inspected.metadata.id, "team-notes");
+        assert_eq!(inspected.metadata.name, "Team Notes");
+        assert_eq!(inspected.metadata.version, "1.0.0");
+
+        let created = create_pack_from_zip(&zip_path, inspected.metadata, &vault, false).unwrap();
+        assert_eq!(created.id, "team-notes");
+        assert!(vault.join("team-notes/README.md").is_file());
+        assert!(vault.join("team-notes/pack.json").is_file());
         let _ = fs::remove_dir_all(root);
     }
 

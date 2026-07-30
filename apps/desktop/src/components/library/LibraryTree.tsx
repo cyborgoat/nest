@@ -74,6 +74,7 @@ import {
 import { useI18n } from "@/lib/i18n";
 import { mergeDeletedIntoTree } from "@/lib/merge-deleted-tree";
 import { canEditPack, canRenamePack } from "@/lib/pack-permissions";
+import { publishDescriptionDefault } from "@/lib/publish-defaults";
 import {
   fileMutationInvalidations,
   packMutationInvalidations,
@@ -295,9 +296,10 @@ function TreeItem({
     enabled: isRoot && canEdit && publishDialogOpen,
     retry: 1,
   });
-  const isFirstPublish = !catalogQuery.data?.some(
+  const catalogEntry = catalogQuery.data?.find(
     (p: PackProject) => p.id === packId,
   );
+  const isFirstPublish = catalogEntry == null;
 
   const invalidateAfterEdit = () => {
     for (const key of fileMutationInvalidations(packId)) {
@@ -706,8 +708,12 @@ function TreeItem({
           onOpenChange={setPublishDialogOpen}
           packName={installedPack?.name ?? node.name}
           currentVersion={installedPack?.version ?? ""}
-          currentDescription={installedPack?.description ?? ""}
+          currentDescription={publishDescriptionDefault(
+            catalogEntry,
+            installedPack?.description ?? "",
+          )}
           isFirstPublish={isFirstPublish}
+          defaultsLoading={catalogQuery.isLoading}
           publishing={publishPending}
           lockedPendingVersion={installedPack?.pending_version}
           onPublish={(version, description) => {

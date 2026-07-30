@@ -141,6 +141,9 @@ const messages: Record<Locale, MessageTree> = {
       dropZipToSelect: "Drop ZIP to select",
       dragPackZipHere: "Drag a pack ZIP here",
       orClickToBrowse: "or click to browse",
+      inspectingZip: "Inspecting ZIP…",
+      zipMissingManifest:
+        "This ZIP has no pack.json. Review the pack details below; Nest will create it during import.",
       importDialogBack: "Back",
       importDialogCancel: "Cancel",
       importDialogImportZip: "Import ZIP",

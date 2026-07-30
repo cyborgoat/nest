@@ -46,6 +46,7 @@ import {
   STATUS_TEXT_CLASSES,
 } from "@/lib/file-status-ui";
 import { canEditPack } from "@/lib/pack-permissions";
+import { publishDescriptionDefault } from "@/lib/publish-defaults";
 import { fileMutationInvalidations, queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
 import { useEditorStore } from "@/stores/editor";
@@ -82,9 +83,10 @@ function PackChanges({
     enabled: publishDialogOpen,
     retry: 1,
   });
-  const isFirstPublish = !catalogQuery.data?.some(
+  const catalogEntry = catalogQuery.data?.find(
     (project) => project.id === pack.pack_id,
   );
+  const isFirstPublish = catalogEntry == null;
 
   const publish = usePublishPack();
   const mergeApproved = useMergeApprovedPack();
@@ -343,8 +345,12 @@ function PackChanges({
         onOpenChange={setPublishDialogOpen}
         packName={pack.name}
         currentVersion={pack.version}
-        currentDescription={pack.description}
+        currentDescription={publishDescriptionDefault(
+          catalogEntry,
+          pack.description,
+        )}
         isFirstPublish={isFirstPublish}
+        defaultsLoading={catalogQuery.isLoading}
         publishing={publish.isPending}
         lockedPendingVersion={pack.pending_version}
         onPublish={(version, description) => {

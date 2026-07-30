@@ -33,7 +33,8 @@ Local folder and ZIP imports do not require Hub sign-in.
   **Install**.
 - **From a folder:** choose a folder containing at least one `.md` file,
   review its name, and select **Create pack**.
-- **From a ZIP:** choose a ZIP exported from Nest and select **Import ZIP**.
+- **From a ZIP:** choose the ZIP. If it has no `pack.json`, review the
+  prefilled pack details before selecting **Create pack**.
 
 Nest copies the pack into its local knowledge directory. Your source folder or
 ZIP is left unchanged.

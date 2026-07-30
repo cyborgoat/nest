@@ -82,6 +82,7 @@ pub fn run() {
             commands::hub_download_pack,
             commands::hub_import_local_pack,
             commands::hub_inspect_local_pack,
+            commands::hub_create_pack_from_zip,
             commands::hub_read_folder_pack_defaults,
             commands::hub_create_pack_from_folder,
             commands::hub_create_empty_pack,

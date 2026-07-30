@@ -21,7 +21,9 @@ a pack that is not already waiting for review.
 1. Open and read the content you intend to share.
 2. Open **Source Control** and review every local change.
 3. Use the pack's **Publish** action.
-4. Choose a new version, check the description, and submit.
+4. Choose a new version, check the description, and submit. For an existing
+   Hub pack, Nest prefills the description from its most recent release so you
+   can keep or update it.
 5. Open **Under Review** or **Messages** to follow the result.
 
 For version naming, file compatibility, and a fuller pre-publish checklist, see

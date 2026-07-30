@@ -4,8 +4,10 @@
 
 - A folder must contain at least one Markdown file. It does not need a
   `pack.json`; Nest creates one after you confirm the pack details.
-- A ZIP must contain one Nest pack, its `pack.json`, and at least one Markdown
-  file. If possible, ask the sender to create it with **Export ZIP**.
+- A ZIP must contain at least one Markdown file. If `pack.json` is missing,
+  review the prefilled pack details and select **Create pack**.
+- If a ZIP contains an invalid `pack.json`, correct it or remove it and import
+  the ZIP again using Nest's generated pack details.
 - If the same pack is already installed, export it first if you need to keep a
   copy, then confirm replacement.
 

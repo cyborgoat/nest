@@ -1,8 +1,11 @@
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import type { KnowledgePackMeta } from "@nest/shared";
+import type {
+  KnowledgePackMeta,
+  LocalPackInspection,
+} from "@nest/shared";
 import { FileArchive, FolderInput, Loader2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -21,7 +24,10 @@ import { cn } from "@/lib/utils";
 type Props = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onImportZip: (sourcePath: string) => void;
+  onImportZip: (
+    sourcePath: string,
+    inspection: LocalPackInspection,
+  ) => void;
   onCreateFromFolder: (sourcePath: string, metadata: KnowledgePackMeta) => void;
   importing?: boolean;
 };
@@ -51,6 +57,9 @@ export function ImportPackDialog({
   const [warning, setWarning] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [zipInspection, setZipInspection] =
+    useState<LocalPackInspection | null>(null);
+  const [inspectingZip, setInspectingZip] = useState(false);
 
   useEffect(() => {
     if (!open) {
@@ -60,8 +69,30 @@ export function ImportPackDialog({
       setWarning(null);
       setError(null);
       setDragging(false);
+      setZipInspection(null);
+      setInspectingZip(false);
     }
   }, [open]);
+
+  const inspectZipPath = useCallback(async (path: string) => {
+    setSelectedPath(path);
+    setZipInspection(null);
+    setWarning(null);
+    setError(null);
+    setInspectingZip(true);
+    try {
+      const inspection = await api.hubInspectLocalPack(path);
+      setZipInspection(inspection);
+      if (inspection.needs_metadata) {
+        setMetadata(inspection.metadata);
+        setWarning(t("hub.zipMissingManifest"));
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setInspectingZip(false);
+    }
+  }, [t]);
 
   useEffect(() => {
     if (!open || mode !== "zip") return;
@@ -81,8 +112,7 @@ export function ImportPackDialog({
             setError(t("hub.importFailed"));
             return;
           }
-          setError(null);
-          setSelectedPath(path);
+          void inspectZipPath(path);
         }
       })
       .then((fn) => {
@@ -93,7 +123,7 @@ export function ImportPackDialog({
       cancelled = true;
       unlisten?.();
     };
-  }, [open, mode]);
+  }, [inspectZipPath, open, mode, t]);
 
   const selectZip = async () => {
     const result = await openDialog({
@@ -102,8 +132,7 @@ export function ImportPackDialog({
       filters: [{ name: "Knowledge pack", extensions: ["zip"] }],
     });
     if (typeof result === "string" && result) {
-      setSelectedPath(result);
-      setError(null);
+      await inspectZipPath(result);
     }
   };
 
@@ -201,6 +230,50 @@ export function ImportPackDialog({
               </span>
             </button>
             <SelectedPath path={selectedPath} />
+            {inspectingZip && (
+              <p className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="size-3.5 animate-spin" />
+                {t("hub.inspectingZip")}
+              </p>
+            )}
+            {warning && zipInspection?.needs_metadata && (
+              <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700">
+                {warning}
+              </p>
+            )}
+            {zipInspection?.needs_metadata && (
+              <div className="grid min-w-0 gap-3 sm:grid-cols-2 [&>*]:min-w-0">
+                <Field label={t("hub.packId")}>
+                  <Input
+                    value={metadata.id}
+                    onChange={(e) => update("id", e.target.value)}
+                  />
+                </Field>
+                <Field label={t("hub.version")}>
+                  <Input
+                    value={metadata.version}
+                    onChange={(e) => update("version", e.target.value)}
+                    placeholder="1.0.0"
+                  />
+                </Field>
+                <div className="sm:col-span-2">
+                  <Field label={t("hub.name")}>
+                    <Input
+                      value={metadata.name}
+                      onChange={(e) => update("name", e.target.value)}
+                    />
+                  </Field>
+                </div>
+                <div className="sm:col-span-2">
+                  <Field label={t("hub.descriptionOptional")}>
+                    <Input
+                      value={metadata.description}
+                      onChange={(e) => update("description", e.target.value)}
+                    />
+                  </Field>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -267,11 +340,29 @@ export function ImportPackDialog({
           </Button>
           {mode === "zip" && (
             <Button
-              disabled={!selectedPath || importing}
-              onClick={() => selectedPath && onImportZip(selectedPath)}
+              disabled={
+                !selectedPath ||
+                !zipInspection ||
+                inspectingZip ||
+                importing ||
+                (zipInspection.needs_metadata && !folderValid)
+              }
+              onClick={() => {
+                if (!selectedPath || !zipInspection) return;
+                onImportZip(selectedPath, {
+                  ...zipInspection,
+                  metadata: zipInspection.needs_metadata
+                    ? metadata
+                    : zipInspection.metadata,
+                });
+              }}
             >
-              {importing && <Loader2 className="size-4 animate-spin" />}
-              {t("hub.importDialogImportZip")}
+              {(importing || inspectingZip) && (
+                <Loader2 className="size-4 animate-spin" />
+              )}
+              {zipInspection?.needs_metadata
+                ? t("hub.importDialogCreatePack")
+                : t("hub.importDialogImportZip")}
             </Button>
           )}
           {mode === "folder" && (
@@ -304,4 +395,3 @@ function SelectedPath({ path }: { path: string | null }) {
     </div>
   );
 }
-

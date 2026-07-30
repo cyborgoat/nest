@@ -1097,10 +1097,10 @@ pub async fn hub_import_local_pack(
     let inspected = hub::inspect_local_pack(&source, &vault)?;
     if !overwrite {
         let conn = state.db.lock();
-        if db::get_sync_state(&conn, &inspected.id)?.is_some() {
+        if db::get_sync_state(&conn, &inspected.metadata.id)?.is_some() {
             return Err(AppError::msg(format!(
                 "Knowledge pack '{}' is already installed",
-                inspected.id
+                inspected.metadata.id
             )));
         }
     }
@@ -1120,11 +1120,43 @@ pub async fn hub_import_local_pack(
 pub fn hub_inspect_local_pack(
     state: State<'_, SharedState>,
     source_path: String,
-) -> AppResult<PackMeta> {
+) -> AppResult<hub::LocalPackInspection> {
     hub::inspect_local_pack(
         std::path::Path::new(source_path.trim()),
         &state.vault_path(),
     )
+}
+
+#[tauri::command]
+pub async fn hub_create_pack_from_zip(
+    state: State<'_, SharedState>,
+    source_path: String,
+    metadata: PackMeta,
+    overwrite: bool,
+) -> AppResult<InstalledPack> {
+    if !overwrite {
+        let conn = state.db.lock();
+        if db::get_sync_state(&conn, metadata.id.trim())?.is_some() {
+            return Err(AppError::msg(format!(
+                "Knowledge pack '{}' is already installed",
+                metadata.id.trim()
+            )));
+        }
+    }
+    let vault = state.vault_path();
+    let pack = hub::create_pack_from_zip(
+        std::path::Path::new(source_path.trim()),
+        metadata,
+        &vault,
+        overwrite,
+    )?;
+    crate::snapshot::write_snapshot(
+        &state.app_data_dir,
+        &pack.id,
+        &pack.version,
+        &vault.join(&pack.path),
+    )?;
+    finish_pack_install(state.inner(), &pack, "local", None)
 }
 
 #[tauri::command]

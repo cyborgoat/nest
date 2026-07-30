@@ -252,7 +252,7 @@ export type VaultChangeResult = {
   cleanup_warning: string | null;
 };
 
-/** Editable metadata used when creating a knowledge pack from a local folder. */
+/** Editable metadata used when creating a knowledge pack from a folder or ZIP. */
 export type KnowledgePackMeta = {
   id: string;
   name: string;
@@ -263,6 +263,11 @@ export type KnowledgePackMeta = {
 export type KnowledgePackDefaults = {
   metadata: KnowledgePackMeta;
   warning?: string;
+};
+
+export type LocalPackInspection = {
+  metadata: KnowledgePackMeta;
+  needs_metadata: boolean;
 };
 
 export type TreeNodeKind = "folder" | "file";

@@ -1,5 +1,5 @@
 import { CloudUpload, Loader2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useLayoutEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -24,6 +24,7 @@ export function PublishPackDialog({
   onPublish,
   publishing = false,
   lockedPendingVersion,
+  defaultsLoading = false,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -39,11 +40,14 @@ export function PublishPackDialog({
    *  is already open when a reconcile poll flips the lock on; the entry
    *  points that open this dialog already prevent it in the normal case. */
   lockedPendingVersion?: string | null;
+  /** Wait for the latest Hub release metadata before exposing editable
+   * defaults. Falls back to local metadata if that lookup fails. */
+  defaultsLoading?: boolean;
 }) {
   const [version, setVersion] = useState(currentVersion);
   const [description, setDescription] = useState(currentDescription);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (open) {
       setVersion(isFirstPublish ? currentVersion : nextPatchVersion(currentVersion));
       setDescription(currentDescription);
@@ -64,6 +68,30 @@ export function PublishPackDialog({
           <DialogFooter>
             <Button type="button" onClick={() => onOpenChange(false)}>
               Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
+  }
+
+  if (defaultsLoading) {
+    return (
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="max-w-[480px]">
+          <DialogHeader>
+            <DialogTitle>Publish {packName}</DialogTitle>
+            <DialogDescription>
+              Loading the latest release details from Hub…
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex items-center gap-2 py-3 text-sm text-muted-foreground">
+            <Loader2 className="size-4 animate-spin" />
+            Preparing publish details
+          </div>
+          <DialogFooter>
+            <Button type="button" onClick={() => onOpenChange(false)}>
+              Cancel
             </Button>
           </DialogFooter>
         </DialogContent>

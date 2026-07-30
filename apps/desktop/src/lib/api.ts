@@ -15,6 +15,7 @@ import type {
   InstalledPack,
   KnowledgePackDefaults,
   KnowledgePackMeta,
+  LocalPackInspection,
   PackInstallConflict,
   PackProject,
   PublishRequest,
@@ -129,9 +130,19 @@ export const api = {
       replaceLocalPackId: replaceLocalPackId ?? null,
     }),
   hubInspectLocalPack: (sourcePath: string) =>
-    invoke<KnowledgePackMeta>("hub_inspect_local_pack", { sourcePath }),
+    invoke<LocalPackInspection>("hub_inspect_local_pack", { sourcePath }),
   hubImportLocalPack: (sourcePath: string, overwrite = false) =>
     invoke<InstalledPack>("hub_import_local_pack", { sourcePath, overwrite }),
+  hubCreatePackFromZip: (
+    sourcePath: string,
+    metadata: KnowledgePackMeta,
+    overwrite = false,
+  ) =>
+    invoke<InstalledPack>("hub_create_pack_from_zip", {
+      sourcePath,
+      metadata,
+      overwrite,
+    }),
   hubReadFolderPackDefaults: (sourcePath: string) =>
     invoke<KnowledgePackDefaults>("hub_read_folder_pack_defaults", {
       sourcePath,
