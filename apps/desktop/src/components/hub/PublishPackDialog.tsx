@@ -29,7 +29,6 @@ export function PublishPackDialog({
   publishing = false,
   lockedPendingVersion,
   defaultsLoading = false,
-  availableReleases = [],
   canLivePatch = false,
 }: {
   open: boolean;
@@ -49,7 +48,6 @@ export function PublishPackDialog({
   /** Wait for the latest Hub release metadata before exposing editable
    * defaults. Falls back to local metadata if that lookup fails. */
   defaultsLoading?: boolean;
-  availableReleases?: string[];
   /** True when the installed pack is already linked to a Hub project even
    * if catalog metadata is temporarily stale or unavailable. */
   canLivePatch?: boolean;
@@ -59,12 +57,6 @@ export function PublishPackDialog({
   );
   const [version, setVersion] = useState(currentVersion);
   const [description, setDescription] = useState(currentDescription);
-  const patchTargets =
-    availableReleases.length > 0
-      ? availableReleases
-      : canLivePatch
-        ? [currentVersion]
-        : [];
 
   useLayoutEffect(() => {
     if (open) {
@@ -150,15 +142,8 @@ export function PublishPackDialog({
               <Button
                 type="button"
                 variant={requestType === "live_patch" ? "default" : "outline"}
-                disabled={!canLivePatch || patchTargets.length === 0}
-                onClick={() => {
-                  setRequestType("live_patch");
-                  setVersion(
-                    patchTargets.includes(currentVersion)
-                      ? currentVersion
-                      : patchTargets[0],
-                  );
-                }}
+                disabled={!canLivePatch}
+                onClick={() => setRequestType("live_patch")}
               >
                 Live patch
               </Button>
@@ -171,18 +156,7 @@ export function PublishPackDialog({
           )}
           <Field label="Version">
             {requestType === "live_patch" ? (
-              <select
-                autoFocus
-                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                value={version}
-                onChange={(event) => setVersion(event.target.value)}
-              >
-                {patchTargets.map((release) => (
-                  <option key={release} value={release}>
-                    {release}
-                  </option>
-                ))}
-              </select>
+              <Input value={currentVersion} disabled />
             ) : (
               <Input
                 autoFocus
@@ -220,12 +194,17 @@ export function PublishPackDialog({
             Cancel
           </Button>
           <Button
-            disabled={!version.trim() || publishing}
+            disabled={
+              publishing ||
+              (requestType === "live_patch"
+                ? !currentVersion.trim()
+                : !version.trim())
+            }
             onClick={() => {
               if (requestType === "live_patch") {
                 onPublish({
                   kind: "live_patch",
-                  targetVersion: version.trim(),
+                  targetVersion: currentVersion,
                 });
               } else {
                 onPublish({

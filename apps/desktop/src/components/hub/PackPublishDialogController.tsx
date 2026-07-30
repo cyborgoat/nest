@@ -24,13 +24,13 @@ export function PackPublishDialogController({
   const catalogEntry = catalogQuery.data?.find(
     (project) => project.id === pack.pack_id,
   );
-  const canLivePatch = catalogEntry != null || pack.owner_id != null;
-  const availableReleases =
-    catalogEntry?.releases
-      ?.filter((release) => !release.yanked)
-      .map((release) => release.version) ??
-    catalogEntry?.versions ??
-    [];
+  const currentReleaseExists = catalogEntry?.releases?.length
+    ? catalogEntry.releases.some(
+        (release) => release.version === pack.version && !release.yanked,
+      )
+    : (catalogEntry?.versions.includes(pack.version) ?? false);
+  const canLivePatch =
+    currentReleaseExists || (catalogQuery.isError && pack.owner_id != null);
   const publish = usePublishPack();
 
   return (
@@ -48,7 +48,6 @@ export function PackPublishDialogController({
       publishing={publish.isPending}
       lockedPendingVersion={pack.pending_version}
       canLivePatch={canLivePatch}
-      availableReleases={availableReleases}
       onPublish={(intent) => {
         publish.mutate(
           { ...intent, packId: pack.pack_id },
