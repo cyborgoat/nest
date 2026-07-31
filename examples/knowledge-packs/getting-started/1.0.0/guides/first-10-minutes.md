@@ -1,6 +1,8 @@
 # First 10 Minutes
 
-Your first goal is simple: bring useful knowledge into Nest and open it.
+Nest gives you one place to find versioned, shareable knowledge instead of
+searching across disconnected websites, drives, and message threads. Your first
+goal is simple: bring one useful knowledge pack into Nest and open it.
 
 ## 1. Connect Hub for your team's catalog
 

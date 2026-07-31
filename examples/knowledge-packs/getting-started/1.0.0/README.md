@@ -1,7 +1,53 @@
 # Getting Started with Nest
 
-Welcome to Nest, a local-first workspace for collecting, reading, editing, and
-sharing Markdown knowledge packs.
+## What is Nest?
+
+Nest is a local-first knowledge workspace that brings knowledge packs, their
+supporting images, and other Markdown-based content from across departments
+into one place. Instead of remembering which website, drive, or chat contains a
+file, people can use Nest to find, read, maintain, and share the knowledge they
+need.
+
+The desktop app keeps installed knowledge on your computer. An optional team
+**Hub** provides a shared catalog where people can discover published packs,
+install specific versions, receive updates, and access restricted content when
+they have permission.
+
+## Why use Nest?
+
+Knowledge spread across different websites and tools is difficult to locate,
+easy to duplicate, and hard to trust. It may be unclear which copy is current,
+who is allowed to see it, or whether it represents the organization's official
+position.
+
+Nest gives teams:
+
+- **One place to find knowledge:** organize related documentation, images, and
+  shareable material into discoverable packs across departments.
+- **Clear versions:** publish immutable, versioned releases so readers can
+  identify the copy they installed and update it deliberately.
+- **Trusted releases:** Hub review lets authorized reviewers approve packs of
+  official documents, design guidance, and announcements before a release
+  becomes available.
+- **Controlled or direct sharing:** use Hub permissions for restricted packs,
+  or export a portable ZIP to share with the people you choose.
+- **Reliable local access:** keep installed packs readable even when Hub is
+  unavailable.
+
+Nest helps people spend less time moving between disconnected sources and gives
+them a clearer, more dependable place to find shared knowledge.
+
+## How to use Nest
+
+1. **Add knowledge:** install a published pack from your team's Hub, import a
+   Markdown folder, or import a Nest pack ZIP.
+2. **Find and read it:** open **Explorer**, expand a pack, and select a document.
+3. **Maintain it:** edit Markdown locally and review changes in **Source
+   Control**.
+4. **Share it:** export a ZIP for direct sharing, or publish a new version to
+   Hub for review and controlled distribution.
+5. **Keep it current:** install Hub updates when a newer approved version is
+   available.
 
 ## Get knowledge into Nest
 
