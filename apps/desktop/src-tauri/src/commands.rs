@@ -1268,6 +1268,52 @@ pub fn hub_export_pack(
     hub::export_pack(&pack, &state.vault_path(), &destination)
 }
 
+/// Persist the Hub refresh token in the local `settings` table — the same
+/// storage and guarantees as everything else in Settings (e.g.
+/// `llm_api_key`), not the OS keychain. Errors are logged rather than
+/// propagated — a failed write shouldn't fail login itself, but it must not
+/// be swallowed silently either, since a silent failure here is
+/// indistinguishable from "never logged in" on the next launch.
+///
+/// This used to go through the OS keychain, but on an ad-hoc-signed build
+/// (no Apple Developer Team ID, `signingIdentity: "-"` in tauri.conf.json)
+/// macOS does not reliably persist Keychain items across process launches —
+/// `SecItemAdd` can report success while the item is unreadable by the very
+/// next launch of the same binary — which made the Hub session silently
+/// fail to survive an app restart.
+fn store_refresh_token(state: &SharedState, refresh_token: &str) {
+    let conn = state.db.lock();
+    match db::set_hub_refresh_token(&conn, Some(refresh_token)) {
+        Ok(()) => crate::nest_debug!("hub", "stored refresh token in settings"),
+        Err(error) => crate::nest_debug!("hub", "failed to store refresh token: {error}"),
+    }
+}
+
+fn clear_refresh_token(state: &SharedState) {
+    let conn = state.db.lock();
+    if let Err(error) = db::set_hub_refresh_token(&conn, None) {
+        crate::nest_debug!("hub", "failed to clear refresh token: {error}");
+    }
+}
+
+fn load_refresh_token(state: &SharedState) -> Option<String> {
+    let conn = state.db.lock();
+    match db::get_hub_refresh_token(&conn) {
+        Ok(Some(token)) => {
+            crate::nest_debug!("hub", "loaded refresh token from settings");
+            Some(token)
+        }
+        Ok(None) => {
+            crate::nest_debug!("hub", "no refresh token in settings");
+            None
+        }
+        Err(error) => {
+            crate::nest_debug!("hub", "failed to read refresh token: {error}");
+            None
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn hub_auth_state(state: State<'_, SharedState>) -> AppResult<hub::AuthState> {
     let settings = {
@@ -1301,9 +1347,7 @@ pub async fn hub_login(
         &password,
     )
     .await?;
-    if let Ok(entry) = keyring::Entry::new("com.cyborgoat.nest.hub", "active") {
-        let _ = entry.set_password(&session.refresh_token);
-    }
+    store_refresh_token(state.inner(), &session.refresh_token);
     let user = session.user.clone();
     *state.hub_auth.lock() = Some(session);
     Ok(hub::AuthState {
@@ -1331,9 +1375,7 @@ pub async fn hub_register(
         name.trim(),
     )
     .await?;
-    if let Ok(entry) = keyring::Entry::new("com.cyborgoat.nest.hub", "active") {
-        let _ = entry.set_password(&session.refresh_token);
-    }
+    store_refresh_token(state.inner(), &session.refresh_token);
     let user = session.user.clone();
     *state.hub_auth.lock() = Some(session);
     Ok(hub::AuthState {
@@ -1345,9 +1387,7 @@ pub async fn hub_register(
 #[tauri::command]
 pub fn hub_logout(state: State<'_, SharedState>) -> AppResult<()> {
     state.hub_auth.lock().take();
-    if let Ok(entry) = keyring::Entry::new("com.cyborgoat.nest.hub", "active") {
-        let _ = entry.delete_credential();
-    }
+    clear_refresh_token(state.inner());
     Ok(())
 }
 
@@ -1397,9 +1437,7 @@ pub async fn hub_change_password(
         &new_password,
     )
     .await?;
-    if let Ok(entry) = keyring::Entry::new("com.cyborgoat.nest.hub", "active") {
-        let _ = entry.set_password(&session.refresh_token);
-    }
+    store_refresh_token(state.inner(), &session.refresh_token);
     let user = session.user.clone();
     *state.hub_auth.lock() = Some(session);
     Ok(hub::AuthState {
@@ -2031,10 +2069,7 @@ async fn ensure_hub_access(
     let session = match session {
         Some(session) => session,
         None => {
-            let refresh = keyring::Entry::new("com.cyborgoat.nest.hub", "active")
-                .ok()
-                .and_then(|entry| entry.get_password().ok());
-            let Some(refresh) = refresh else {
+            let Some(refresh) = load_refresh_token(state) else {
                 return Ok(None);
             };
             let restored = match hub::refresh_remote(
@@ -2045,13 +2080,36 @@ async fn ensure_hub_access(
             .await
             {
                 Ok(value) => value,
-                Err(_) => {
-                    if let Ok(entry) = keyring::Entry::new("com.cyborgoat.nest.hub", "active") {
-                        let _ = entry.delete_credential();
+                Err(error) => {
+                    // Only a definitive rejection (401: the refresh token is
+                    // actually invalid/expired) should sign the user out.
+                    // Anything else — offline at launch, Hub briefly down,
+                    // a timeout — is transient, and wiping the stored
+                    // refresh token here would silently force a fresh login
+                    // on every relaunch that happens to race the network.
+                    if error.is_unauthorized() {
+                        crate::nest_debug!(
+                            "hub",
+                            "stored refresh token rejected, clearing it: {error}"
+                        );
+                        clear_refresh_token(state);
+                    } else {
+                        crate::nest_debug!(
+                            "hub",
+                            "session restore failed, keeping stored refresh token for retry: {error}"
+                        );
                     }
                     return Ok(None);
                 }
             };
+            // The Hub rotates refresh tokens on every use — the one just
+            // exchanged above is now revoked server-side, so `restored`
+            // carries a brand-new one that must be persisted immediately.
+            // Skipping this meant every cold start silently burned the
+            // stored token without saving its replacement, so only the
+            // *first* relaunch after login ever worked — the next one
+            // presented an already-revoked token and got signed out.
+            store_refresh_token(state, &restored.refresh_token);
             *state.hub_auth.lock() = Some(restored.clone());
             restored
         }
@@ -2071,17 +2129,21 @@ async fn ensure_hub_access(
     .await
     {
         Ok(value) => value,
-        Err(_) => {
+        Err(error) => {
             *state.hub_auth.lock() = None;
-            if let Ok(entry) = keyring::Entry::new("com.cyborgoat.nest.hub", "active") {
-                let _ = entry.delete_credential();
+            if error.is_unauthorized() {
+                crate::nest_debug!("hub", "refresh token rejected, clearing it: {error}");
+                clear_refresh_token(state);
+            } else {
+                crate::nest_debug!(
+                    "hub",
+                    "token refresh failed, keeping stored refresh token for retry: {error}"
+                );
             }
             return Ok(None);
         }
     };
-    if let Ok(entry) = keyring::Entry::new("com.cyborgoat.nest.hub", "active") {
-        let _ = entry.set_password(&refreshed.refresh_token);
-    }
+    store_refresh_token(state, &refreshed.refresh_token);
     let token = refreshed.access_token.clone();
     *state.hub_auth.lock() = Some(refreshed);
     Ok(Some(token))

@@ -505,6 +505,47 @@ pub fn save_settings(conn: &Connection, settings: &AppSettings) -> AppResult<()>
     Ok(())
 }
 
+const HUB_REFRESH_TOKEN_KEY: &str = "hub_refresh_token";
+
+/// The Hub refresh token lives in the same `settings` key/value table as
+/// everything else (same storage, same guarantees as `llm_api_key`), but
+/// deliberately outside the `AppSettings` struct so it's never round-tripped
+/// through `settings_get`/`settings_set` and exposed to the frontend.
+///
+/// This replaces OS-keychain storage: on an ad-hoc-signed build (no Apple
+/// Developer Team ID), macOS does not reliably persist Keychain items across
+/// process launches — `SecItemAdd` can report success while the item is
+/// unreadable by the very next launch of the same binary — which made the
+/// Hub session silently fail to survive an app restart.
+pub fn get_hub_refresh_token(conn: &Connection) -> AppResult<Option<String>> {
+    conn.query_row(
+        "SELECT value FROM settings WHERE key = ?1",
+        params![HUB_REFRESH_TOKEN_KEY],
+        |row| row.get::<_, String>(0),
+    )
+    .optional()
+    .map_err(AppError::from)
+}
+
+pub fn set_hub_refresh_token(conn: &Connection, token: Option<&str>) -> AppResult<()> {
+    match token {
+        Some(token) => {
+            conn.execute(
+                "INSERT INTO settings(key, value) VALUES (?1, ?2)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                params![HUB_REFRESH_TOKEN_KEY, token],
+            )?;
+        }
+        None => {
+            conn.execute(
+                "DELETE FROM settings WHERE key = ?1",
+                params![HUB_REFRESH_TOKEN_KEY],
+            )?;
+        }
+    }
+    Ok(())
+}
+
 pub fn clear_chunks(conn: &Connection) -> AppResult<()> {
     conn.execute_batch(
         "DELETE FROM chunks_fts; DELETE FROM chunks; UPDATE index_meta SET indexed_files = 0, indexed_chunks = 0, message = NULL WHERE id = 1;",
