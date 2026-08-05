@@ -1,8 +1,15 @@
 import { useContext, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
-import { Search, ShieldCheck, Trash2, Users as UsersIcon } from "lucide-react";
+import {
+  KeyRound,
+  Search,
+  ShieldCheck,
+  Trash2,
+  Users as UsersIcon,
+} from "lucide-react";
 import type { AdminUser as User } from "@nest/shared";
+import { toast } from "sonner";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Metric } from "../components/Metric";
 import {
@@ -30,6 +37,7 @@ export function UsersPage() {
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState<RoleFilter>("all");
   const [deleteTarget, setDeleteTarget] = useState<User | null>(null);
+  const [resetTarget, setResetTarget] = useState<User | null>(null);
   const role = useMutation({
     mutationFn: ({ user, role }: { user: User; role: User["role"] }) =>
       api(`/api/admin/users/${user.uuid}`, {
@@ -49,6 +57,19 @@ export function UsersPage() {
         qc.invalidateQueries({ queryKey: adminQueryKeys.packs }),
         qc.invalidateQueries({ queryKey: adminQueryKeys.reviews }),
       ]);
+    },
+  });
+  const resetPassword = useMutation({
+    mutationFn: (user: User) =>
+      api(`/api/admin/users/${user.uuid}/reset-password`, {
+        method: "POST",
+      }),
+    onSuccess: (_data, user) => {
+      setResetTarget(null);
+      void qc.invalidateQueries({ queryKey: adminQueryKeys.users });
+      toast.success(`Reset @${user.id}'s password`, {
+        description: "Their password has been reset to the default.",
+      });
     },
   });
 
@@ -126,19 +147,30 @@ export function UsersPage() {
         id: "actions",
         header: "",
         cell: ({ row }) => {
-          const canDelete =
+          const canManage =
             row.original.role !== "superuser" &&
             (auth.user.role === "superuser" || row.original.role === "user");
-          return canDelete ? (
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label={`Delete ${row.original.name}`}
-              onClick={() => setDeleteTarget(row.original)}
-            >
-              <Trash2 />
-            </Button>
-          ) : null;
+          if (!canManage) return null;
+          return (
+            <div className="flex justify-end gap-1">
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label={`Reset password for ${row.original.name}`}
+                onClick={() => setResetTarget(row.original)}
+              >
+                <KeyRound />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label={`Delete ${row.original.name}`}
+                onClick={() => setDeleteTarget(row.original)}
+              >
+                <Trash2 />
+              </Button>
+            </div>
+          );
         },
       },
     ],
@@ -159,8 +191,10 @@ export function UsersPage() {
           />
         }
       />
-      {(users.error || role.error || remove.error) && (
-        <ErrorBox error={users.error || role.error || remove.error} />
+      {(users.error || role.error || remove.error || resetPassword.error) && (
+        <ErrorBox
+          error={users.error || role.error || remove.error || resetPassword.error}
+        />
       )}
       <div className="mb-6 grid gap-4 sm:grid-cols-3">
         <Metric
@@ -216,6 +250,24 @@ export function UsersPage() {
         <p className="text-sm leading-6 text-muted-foreground">
           Sessions, messages, access grants, and pending submissions will be
           removed. Published packs and reviewed publishing history will remain.
+        </p>
+      </ConfirmDialog>
+      <ConfirmDialog
+        open={Boolean(resetTarget)}
+        onOpenChange={(open) => !open && setResetTarget(null)}
+        title="Reset password"
+        description={`Reset @${resetTarget?.id ?? "this user"}'s password to the Hub's configured default password.`}
+        confirmLabel="Reset password"
+        busyLabel="Resetting…"
+        tone="primary"
+        icon={<KeyRound />}
+        busy={resetPassword.isPending}
+        disabled={!resetTarget}
+        onConfirm={() => resetTarget && resetPassword.mutate(resetTarget)}
+      >
+        <p className="text-sm leading-6 text-muted-foreground">
+          Their active sessions will be signed out. Tell them the default
+          password out of band so they can sign in and change it.
         </p>
       </ConfirmDialog>
     </>

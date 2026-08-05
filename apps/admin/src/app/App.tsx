@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { RouterProvider } from "@tanstack/react-router";
 import type { HubUser } from "@nest/shared";
+import { Toaster } from "../components/ui";
 import { createAdminApi, type AdminApi as Api } from "../lib/api";
 import { Login } from "../pages/Login";
 import { ApiContext, AuthContext, type Auth } from "./contexts";
@@ -56,6 +57,7 @@ export function App() {
     <ApiContext.Provider value={api}>
       <AuthContext.Provider value={{ auth, signOut }}>
         <RouterProvider router={router} />
+        <Toaster position="bottom-right" closeButton />
       </AuthContext.Provider>
     </ApiContext.Provider>
   );

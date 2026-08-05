@@ -20,8 +20,10 @@ import type {
 import {
   assertCanChangeRole,
   assertCanDeleteTarget,
+  assertCanResetPassword,
   isAssignableRole,
 } from '../auth/access-policy';
+import { hashPassword } from '../auth/password';
 import { HubRuntimeConfig } from '../hub.config';
 import { PacksService } from '../packs/packs.service';
 import { sortSemVerDesc } from '../packs/semver';
@@ -156,6 +158,39 @@ export class AdminService {
         fs.unlink(staging_path).catch(() => undefined),
       ),
     );
+    return { success: true };
+  }
+
+  async resetPassword(actor: AuthUser, uuid: string) {
+    const defaultPassword = this.config.value.defaultResetPassword;
+    if (!defaultPassword) {
+      throw new BadRequestException(
+        'DEFAULT_RESET_PASSWORD is not configured on the Hub',
+      );
+    }
+    const target = this.database.db
+      .prepare('SELECT uuid, role, managed_by_env FROM users WHERE uuid = ?')
+      .get(uuid) as
+      { uuid: string; role: UserRole; managed_by_env: number } | undefined;
+    if (!target) throw new NotFoundException('User not found');
+    assertCanResetPassword(actor, {
+      role: target.role,
+      managed: target.managed_by_env === 1,
+    });
+    const passwordHash = await hashPassword(defaultPassword);
+    this.database.db.transaction(() => {
+      this.database.db
+        .prepare(
+          'UPDATE users SET password_hash = ?, updated_at = ? WHERE uuid = ?',
+        )
+        .run(passwordHash, now(), uuid);
+      this.database.db
+        .prepare(
+          'UPDATE auth_sessions SET revoked_at = ? WHERE user_uuid = ? AND revoked_at IS NULL',
+        )
+        .run(now(), uuid);
+      this.audit.record(actor, 'user.password_reset', 'user', uuid, {});
+    })();
     return { success: true };
   }
 

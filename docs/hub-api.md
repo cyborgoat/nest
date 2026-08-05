@@ -66,6 +66,7 @@ Every `/api/admin/*` route requires role `admin` or `superuser`.
 | `GET` | `/api/admin/users` | List accounts and managed status |
 | `PATCH` | `/api/admin/users/:uuid` | Set `role` to `user` or `admin` |
 | `DELETE` | `/api/admin/users/:uuid` | Delete an account according to role hierarchy |
+| `POST` | `/api/admin/users/:uuid/reset-password` | Reset a user's password to the configured `DEFAULT_RESET_PASSWORD` and revoke their sessions (role hierarchy applies) |
 | `GET` | `/api/admin/publish-requests` | List pending submissions |
 | `GET` | `/api/admin/publish-requests/history` | Cursor-paginated approved/rejected history; filter with `status=all\|approved\|rejected` |
 | `GET` | `/api/admin/publish-requests/:id/review` | Review metadata, frozen base version, change totals, and changed-file list |

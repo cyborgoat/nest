@@ -32,7 +32,7 @@ The Hub service listens on `PORT` (from `.env`, typically `8787`). Configure the
 
 | App | File | Variables |
 |-----|------|-----------|
-| Hub (`apps/hub`) | `apps/hub/.env.example` | `HOST`, `PORT`, `REGISTRY_PATH`, `DEBUG_MODE`, `CORS_ORIGIN`, `DOWNLOAD_TIMEOUT_MS`, `DATABASE_PATH`, `STAGING_PATH`, `MAX_PACK_UPLOAD_BYTES`, `JWT_SECRET`, `MIN_PASSWORD_LENGTH`, and optional `SUPERUSER_*` bootstrap values |
+| Hub (`apps/hub`) | `apps/hub/.env.example` | `HOST`, `PORT`, `REGISTRY_PATH`, `DEBUG_MODE`, `CORS_ORIGIN`, `DOWNLOAD_TIMEOUT_MS`, `DATABASE_PATH`, `STAGING_PATH`, `MAX_PACK_UPLOAD_BYTES`, `JWT_SECRET`, `MIN_PASSWORD_LENGTH`, optional `SUPERUSER_*` bootstrap values, and optional `DEFAULT_RESET_PASSWORD` (admin "reset password" action) |
 | Desktop | `apps/desktop/.env.example` | `NEST_DEBUG` (logs from the Rust side when set for the process) |
 | Desktop Tauri | `apps/desktop/src-tauri/.env.example` | `NEST_DEBUG` |
 

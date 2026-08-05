@@ -71,6 +71,12 @@ export class AdminController {
   ) {
     return this.admin.removeUser(req.authUser!, uuid);
   }
+  @Post('users/:uuid/reset-password') resetPassword(
+    @Req() req: Request,
+    @Param('uuid') uuid: string,
+  ) {
+    return this.admin.resetPassword(req.authUser!, uuid);
+  }
   @Get('publish-requests') requests() {
     return this.publishing.listPending();
   }

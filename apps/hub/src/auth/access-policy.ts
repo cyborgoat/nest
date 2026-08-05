@@ -49,3 +49,15 @@ export function assertCanDeleteTarget(
     throw new ForbiddenException('Admins may only remove regular users');
   }
 }
+
+export function assertCanResetPassword(
+  actor: Pick<AuthUser, 'role'>,
+  target: { role: UserRole; managed: boolean },
+): void {
+  assertCanManageTarget(target);
+  if (actor.role === 'admin' && target.role !== 'user') {
+    throw new ForbiddenException(
+      'Admins may only reset passwords for regular users',
+    );
+  }
+}

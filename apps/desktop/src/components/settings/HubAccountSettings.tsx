@@ -1,11 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  KeyRound,
-  LogIn,
-  LogOut,
-  Save,
-  UserPlus,
-} from "lucide-react";
+import { KeyRound, LogIn, LogOut, Save, UserPlus } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -14,6 +8,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -23,13 +18,23 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
 import { appErrorMessage } from "@/lib/errors";
 import { queryKeys } from "@/lib/query-keys";
+import { useUiStore } from "@/stores/ui";
 
 export function HubAccountSettings() {
   const queryClient = useQueryClient();
+  const setSettingsSection = useUiStore((state) => state.setSettingsSection);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [profileName, setProfileName] = useState("");
-  const auth = useQuery({ queryKey: queryKeys.hubAuth, queryFn: api.hubAuthState });
+  const auth = useQuery({
+    queryKey: queryKeys.hubAuth,
+    queryFn: api.hubAuthState,
+  });
+  const settings = useQuery({
+    queryKey: queryKeys.settings,
+    queryFn: api.settingsGet,
+  });
+  const hubConfigured = Boolean(settings.data?.hub_base_url?.trim());
   useEffect(() => {
     if (auth.data?.user) setProfileName(auth.data.user.name);
   }, [auth.data?.user]);
@@ -153,7 +158,18 @@ export function HubAccountSettings() {
                 Your local library remains fully available without an account.
               </p>
             </div>
-            <Button onClick={() => setDialogOpen(true)}>
+            <Button
+              onClick={() => {
+                if (!hubConfigured) {
+                  setSettingsSection("general");
+                  toast.error("Hub URL is not configured", {
+                    description: "Set it in Settings before signing in.",
+                  });
+                  return;
+                }
+                setDialogOpen(true);
+              }}
+            >
               <LogIn className="size-4" /> Sign in or create account
             </Button>
           </div>
@@ -302,6 +318,7 @@ function HubAuthDialog({
   const [id, setId] = useState("");
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
+  const [forgotOpen, setForgotOpen] = useState(false);
   const login = useMutation({
     mutationFn: () => api.hubLogin(id, password),
     onSuccess: async () => {
@@ -337,93 +354,131 @@ function HubAuthDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={changeOpen}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Nest Hub account</DialogTitle>
-          <DialogDescription>
-            Accounts are only needed for publishing and restricted packs.
-          </DialogDescription>
-        </DialogHeader>
-        <Tabs value={mode} onValueChange={changeMode}>
-          <TabsList className="grid h-11 w-full grid-cols-2 bg-muted/80">
-            <TabsTrigger
-              value="login"
-              className="h-9 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow"
-            >
-              <LogIn className="size-4" /> Sign in
-            </TabsTrigger>
-            <TabsTrigger
-              value="register"
-              className="h-9 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow"
-            >
-              <UserPlus className="size-4" /> Create account
-            </TabsTrigger>
-          </TabsList>
-        </Tabs>
-        <form
-          className="space-y-4"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (mode === "login") login.mutate();
-            else register.mutate();
-          }}
-        >
-          {mode === "register" && (
+    <>
+      <Dialog open={open} onOpenChange={changeOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Nest Hub account</DialogTitle>
+            <DialogDescription>
+              Accounts are only needed for publishing and restricted packs.
+            </DialogDescription>
+          </DialogHeader>
+          <Tabs value={mode} onValueChange={changeMode}>
+            <TabsList className="grid h-11 w-full grid-cols-2 bg-muted/80">
+              <TabsTrigger
+                value="login"
+                className="h-9 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow"
+              >
+                <LogIn className="size-4" /> Sign in
+              </TabsTrigger>
+              <TabsTrigger
+                value="register"
+                className="h-9 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow"
+              >
+                <UserPlus className="size-4" /> Create account
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+          <form
+            className="space-y-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (mode === "login") login.mutate();
+              else register.mutate();
+            }}
+          >
+            {mode === "register" && (
+              <div className="space-y-1.5">
+                <Label htmlFor="hub-name">Display name</Label>
+                <Input
+                  id="hub-name"
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  required
+                />
+              </div>
+            )}
             <div className="space-y-1.5">
-              <Label htmlFor="hub-name">Display name</Label>
+              <Label htmlFor="hub-id">Account ID</Label>
               <Input
-                id="hub-name"
-                value={name}
-                onChange={(event) => setName(event.target.value)}
+                id="hub-id"
+                value={id}
+                onChange={(event) => setId(event.target.value)}
+                autoComplete="username"
                 required
               />
             </div>
-          )}
-          <div className="space-y-1.5">
-            <Label htmlFor="hub-id">Account ID</Label>
-            <Input
-              id="hub-id"
-              value={id}
-              onChange={(event) => setId(event.target.value)}
-              autoComplete="username"
-              required
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="hub-password">Password</Label>
-            <Input
-              id="hub-password"
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              autoComplete={
-                mode === "login" ? "current-password" : "new-password"
-              }
-              required
-            />
-            {mode === "register" && (
-              <p className="text-xs text-muted-foreground">
-                Password requirements are configured by your Hub service.
-              </p>
-            )}
-          </div>
-          {Boolean(error) && (
-            <div
-              role="alert"
-              className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive"
-            >
-              {appErrorMessage(error)}
+            <div className="space-y-1.5">
+              <Label htmlFor="hub-password">Password</Label>
+              <Input
+                id="hub-password"
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                autoComplete={
+                  mode === "login" ? "current-password" : "new-password"
+                }
+                required
+              />
+              {mode === "register" && (
+                <p className="text-xs text-muted-foreground">
+                  Password requirements are configured by your Hub service.
+                </p>
+              )}
+              {mode === "login" && (
+                <button
+                  type="button"
+                  className="text-xs text-muted-foreground underline-offset-2 hover:underline"
+                  onClick={() => setForgotOpen(true)}
+                >
+                  Forgot password?
+                </button>
+              )}
             </div>
-          )}
-          <Button type="submit" className="w-full" disabled={busy}>
-            {busy
-              ? "Please wait…"
-              : mode === "login"
-                ? "Sign in"
-                : "Create account"}
-          </Button>
-        </form>
+            {Boolean(error) && (
+              <div
+                role="alert"
+                className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+              >
+                {appErrorMessage(error)}
+              </div>
+            )}
+            <Button type="submit" className="w-full" disabled={busy}>
+              {busy
+                ? "Please wait…"
+                : mode === "login"
+                  ? "Sign in"
+                  : "Create account"}
+            </Button>
+          </form>
+        </DialogContent>
+      </Dialog>
+      <ForgotPasswordDialog open={forgotOpen} onOpenChange={setForgotOpen} />
+    </>
+  );
+}
+
+function ForgotPasswordDialog({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Forgot your password?</DialogTitle>
+          <DialogDescription>
+            Nest Hub accounts don&apos;t support self-service password resets.
+            Contact your Hub administrator and ask them to reset your password
+            from the admin dashboard.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button onClick={() => onOpenChange(false)}>Got it</Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

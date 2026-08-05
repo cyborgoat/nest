@@ -3,6 +3,7 @@ import {
   assertCanChangeRole,
   assertCanDeleteTarget,
   assertCanManageTarget,
+  assertCanResetPassword,
   isAssignableRole,
   isRegistryAdmin,
 } from './access-policy';
@@ -54,5 +55,32 @@ describe('access policy', () => {
         { role: 'admin', managed: false },
       ),
     ).not.toThrow();
+  });
+
+  it('allows admins to reset user passwords but not peer admins', () => {
+    expect(() =>
+      assertCanResetPassword(
+        { role: 'admin' },
+        { role: 'user', managed: false },
+      ),
+    ).not.toThrow();
+    expect(() =>
+      assertCanResetPassword(
+        { role: 'admin' },
+        { role: 'admin', managed: false },
+      ),
+    ).toThrow(ForbiddenException);
+    expect(() =>
+      assertCanResetPassword(
+        { role: 'superuser' },
+        { role: 'admin', managed: false },
+      ),
+    ).not.toThrow();
+    expect(() =>
+      assertCanResetPassword(
+        { role: 'superuser' },
+        { role: 'superuser', managed: true },
+      ),
+    ).toThrow(ForbiddenException);
   });
 });

@@ -1,12 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   AppSettings,
+  HubConnectionStatus,
   VaultChangeMode,
   VaultChangePreview,
 } from "@nest/shared";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
   Bot,
+  CheckCircle2,
   Cloud,
   FolderOpen,
   Info,
@@ -15,6 +17,7 @@ import {
   Palette,
   Settings2,
   UserRound,
+  XCircle,
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -89,6 +92,34 @@ function persistKey(settings: AppSettings): string {
   return JSON.stringify(rest);
 }
 
+function describeHubStatus(status: HubConnectionStatus): string {
+  return status.online
+    ? `Connected to ${status.hub_base_url}`
+    : status.message || "Hub is not accessible.";
+}
+
+/** Mirrors the Rust-side `validate_http_base_url`/`validate_proxy_url` checks,
+ * so a URL field that's merely mid-typing doesn't get auto-saved (and error) on
+ * every keystroke pause — only once it's empty or a plausibly complete URL. */
+function isCompleteOrEmptyUrl(
+  value: string,
+  extraSchemes: string[] = [],
+): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) return true;
+  try {
+    const url = new URL(trimmed);
+    return (
+      ["http:", "https:", ...extraSchemes].includes(url.protocol) &&
+      Boolean(url.hostname)
+    );
+  } catch {
+    return false;
+  }
+}
+
+const HUB_AUTO_TEST_DELAY_MS = 2000;
+
 export function SettingsPanel() {
   const { t } = useI18n();
   const queryClient = useQueryClient();
@@ -146,6 +177,17 @@ export function SettingsPanel() {
     if (!hydrated.current) return;
     const key = persistKey(form);
     if (key === lastSavedKey.current) return;
+    // Don't attempt (and error-toast) a save while a URL field is still
+    // mid-typing and not yet a complete address — wait for it to either
+    // finish or empty out. Other fields keep saving normally in the meantime.
+    if (
+      !isCompleteOrEmptyUrl(form.hub_base_url) ||
+      !isCompleteOrEmptyUrl(form.llm_base_url) ||
+      (form.proxy_enabled &&
+        !isCompleteOrEmptyUrl(form.proxy_url, ["socks5:", "socks5h:"]))
+    ) {
+      return;
+    }
 
     const timer = window.setTimeout(() => {
       void (async () => {
@@ -239,9 +281,7 @@ export function SettingsPanel() {
         form.proxy_enabled ? form.proxy_url : "",
       ),
     onSuccess: (status) => {
-      const message = status.online
-        ? `Connected to ${status.hub_base_url}`
-        : status.message || "Hub is not accessible.";
+      const message = describeHubStatus(status);
       setHubTestResult({ online: status.online, message });
       if (status.online) {
         toast.success(t("settings.connected"), { description: message });
@@ -256,6 +296,33 @@ export function SettingsPanel() {
     },
   });
 
+  // Auto-validates the Hub URL a couple seconds after the user stops typing,
+  // instead of on every keystroke. Silent (no toast) since it's not a direct
+  // user action; the manual "Test connection" button still confirms with one.
+  useEffect(() => {
+    if (!hydrated.current) return;
+    const url = form.hub_base_url.trim();
+    if (!url || !isCompleteOrEmptyUrl(url)) return;
+    const proxy = form.proxy_enabled ? form.proxy_url : "";
+    const timer = window.setTimeout(() => {
+      void api
+        .hubTestConnection(url, proxy)
+        .then((status) => {
+          setHubTestResult({
+            online: status.online,
+            message: describeHubStatus(status),
+          });
+        })
+        .catch((e: unknown) => {
+          setHubTestResult({
+            online: false,
+            message: e instanceof Error ? e.message : String(e),
+          });
+        });
+    }, HUB_AUTO_TEST_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [form.hub_base_url, form.proxy_enabled, form.proxy_url]);
+
   const changeVault = useMutation({
     mutationFn: ({
       knowledgeDir,
@@ -266,9 +333,9 @@ export function SettingsPanel() {
     }) => api.settingsChangeKnowledgeDir(knowledgeDir, mode),
     onSuccess: (result) => {
       const installed =
-        queryClient.getQueryData<
-          import("@nest/shared").InstalledPack[]
-        >(queryKeys.installedPacks) ?? [];
+        queryClient.getQueryData<import("@nest/shared").InstalledPack[]>(
+          queryKeys.installedPacks,
+        ) ?? [];
       for (const pack of installed) clearPathsUnder(pack.local_path);
       const refreshed = result.settings;
       lastSavedKey.current = persistKey(refreshed);
@@ -479,10 +546,7 @@ export function SettingsPanel() {
                           https://openrouter.ai/api/v1
                         </span>{" "}
                         with{" "}
-                        <span className="font-mono">
-                          openai/gpt-4o-mini
-                        </span>
-                        .
+                        <span className="font-mono">openai/gpt-4o-mini</span>.
                       </p>
                     </div>
                   }
@@ -541,10 +605,15 @@ export function SettingsPanel() {
                         <p
                           className={
                             hubTestResult.online
-                              ? "text-xs text-primary"
-                              : "text-xs text-destructive"
+                              ? "flex items-center gap-1.5 text-xs text-primary"
+                              : "flex items-center gap-1.5 text-xs text-destructive"
                           }
                         >
+                          {hubTestResult.online ? (
+                            <CheckCircle2 className="size-3.5 shrink-0" />
+                          ) : (
+                            <XCircle className="size-3.5 shrink-0" />
+                          )}
                           {hubTestResult.message}
                         </p>
                       ) : (
@@ -622,19 +691,24 @@ export function SettingsPanel() {
                   until this change finishes.
                 </p>
                 <div className="rounded-md border bg-muted/40 p-3 text-xs">
-                  <p className="truncate" title={pendingVaultChange?.current_path}>
+                  <p
+                    className="truncate"
+                    title={pendingVaultChange?.current_path}
+                  >
                     From: {pendingVaultChange?.current_path}
                   </p>
-                  <p className="mt-1 truncate" title={pendingVaultChange?.target_path}>
+                  <p
+                    className="mt-1 truncate"
+                    title={pendingVaultChange?.target_path}
+                  >
                     To: {pendingVaultChange?.target_path}
                   </p>
                 </div>
                 <p>
-                  Migrate copies and verifies every managed pack before
-                  removing its old folder. Start fresh removes the old managed
-                  packs and installs new English and Simplified Chinese
-                  Getting Started packs. Unrelated files in the old directory
-                  are preserved.
+                  Migrate copies and verifies every managed pack before removing
+                  its old folder. Start fresh removes the old managed packs and
+                  installs new English and Simplified Chinese Getting Started
+                  packs. Unrelated files in the old directory are preserved.
                 </p>
               </div>
             </AlertDialogDescription>

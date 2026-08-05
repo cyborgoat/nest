@@ -51,6 +51,7 @@ describe('Hub (e2e)', () => {
     process.env.SUPERUSER_PASSWORD = 'test-superuser-password';
     process.env.SUPERUSER_NAME = 'Root Admin';
     process.env.MIN_PASSWORD_LENGTH = '12';
+    process.env.DEFAULT_RESET_PASSWORD = 'test-default-reset-password';
   });
 
   beforeEach(async () => {

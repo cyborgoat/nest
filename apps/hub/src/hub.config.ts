@@ -20,6 +20,7 @@ type HubConfig = {
   superuserId?: string;
   superuserPassword?: string;
   superuserName: string;
+  defaultResetPassword?: string;
 };
 
 function optionalString(
@@ -94,6 +95,14 @@ export function loadHubConfig(config: ConfigService): HubConfig {
     throw new Error('JWT_SECRET must contain at least 32 characters');
   }
 
+  const minPasswordLength = positiveInteger(config, 'MIN_PASSWORD_LENGTH');
+  const defaultResetPassword = optionalString(config, 'DEFAULT_RESET_PASSWORD');
+  if (defaultResetPassword && defaultResetPassword.length < minPasswordLength) {
+    throw new Error(
+      `DEFAULT_RESET_PASSWORD must contain at least ${minPasswordLength} characters`,
+    );
+  }
+
   return {
     host,
     port,
@@ -111,10 +120,11 @@ export function loadHubConfig(config: ConfigService): HubConfig {
     ),
     maxPackUploadBytes: positiveInteger(config, 'MAX_PACK_UPLOAD_BYTES'),
     jwtSecret,
-    minPasswordLength: positiveInteger(config, 'MIN_PASSWORD_LENGTH'),
+    minPasswordLength,
     superuserId: optionalString(config, 'SUPERUSER_ID')?.toLowerCase(),
     superuserPassword: optionalString(config, 'SUPERUSER_PASSWORD'),
     superuserName: optionalString(config, 'SUPERUSER_NAME') ?? 'Administrator',
+    defaultResetPassword,
   };
 }
 
