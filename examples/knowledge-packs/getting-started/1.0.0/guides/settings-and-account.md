@@ -1,42 +1,28 @@
 # Settings and Account
 
-## Connect to your team's Hub
+## Connect to Hub
 
-Before opening the shared Hub catalog:
-
-1. Ask your team or Hub administrator for the Hub URL.
-2. Open **Settings** and enter the address under **Hub URL**.
+1. Ask your team for the Hub URL.
+2. Open **Settings** and enter it under **Hub URL**.
 3. Select **Test connection**.
-4. Continue after the status shows **Hub connected**.
 
-Connecting lets you browse public packs. You do not need a Hub connection to
-import a folder or ZIP, or to read, edit, and export local packs.
+A Hub connection is optional — you don't need one to import a folder or ZIP,
+or to read, edit, and export local packs.
 
-## Sign in when needed
+## Sign in
 
-Create or sign in to a Hub account from **Settings → Account**. Your account ID
-is permanent; your display name and password can be changed later. Signing out
-removes the local Hub session but does not remove installed packs.
+Create or sign in to a Hub account from **Settings → Account**. An account is
+required for publishing and restricted content, but not for local work or
+public downloads. Signing out removes the local session, not installed packs.
 
-An account is required for publishing and restricted content. It is not
-required for local work or public Hub downloads.
+## Storage settings
 
-## Reading and storage settings
+- **Font size** changes the app text scale.
+- **Knowledge directory** chooses where packs are stored (empty uses the
+  default). To move it, choose a new empty folder; Nest offers to migrate
+  your current packs or start fresh with the default tutorial packs.
 
-- **Font size** changes the application text scale.
-- **Knowledge directory** chooses where local packs are stored. Leaving it
-  empty uses the app default.
+## Chat model (optional)
 
-## Moving the knowledge directory
-
-Use an absolute path. After choosing a new empty directory, Nest asks whether
-to migrate the current packs or delete them and start fresh with the default
-tutorial packs. Migration verifies the copy before removing old pack folders.
-Unrelated files in the old directory are left untouched.
-
-## Optional: connect a model for Chat
-
-Chat requires an OpenAI-compatible API base URL, API key, and model name. These
-settings are not needed for finding, importing, reading, editing, exporting, or
-publishing packs. The model endpoint is contacted only when you use Chat. Keep
-API keys private.
+Chat needs an OpenAI-compatible API base URL, API key, and model name, set in
+**Settings**. These are only used when you use Chat.

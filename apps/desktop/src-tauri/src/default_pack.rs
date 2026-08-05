@@ -259,9 +259,6 @@ mod tests {
         assert!(DEFAULT_PACK_DIR
             .get_file("guides/publishing-and-messages.md")
             .is_some());
-        assert!(DEFAULT_PACK_DIR
-            .get_file("guides/publishing-rules.md")
-            .is_some());
 
         let zh_metadata = ZH_CN_PACK_DIR
             .get_file("pack.json")
@@ -272,7 +269,6 @@ mod tests {
         assert_eq!(zh_meta.name, ZH_CN_PACK_NAME);
         assert_eq!(zh_meta.version, "1.0.0");
         assert!(ZH_CN_PACK_DIR.get_file("guides/设置与账户.md").is_some());
-        assert!(ZH_CN_PACK_DIR.get_file("guides/发布规则.md").is_some());
     }
 
     #[test]
