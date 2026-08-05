@@ -10,7 +10,7 @@ import { gfm } from "@milkdown/kit/preset/gfm";
 import "@milkdown/kit/prose/view/style/prosemirror.css";
 import { Milkdown, MilkdownProvider, useEditor } from "@milkdown/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Code2, Eye, Redo2, Save, Sparkles, Undo2, X } from "lucide-react";
+import { Code2, Eye, Redo2, Save, Undo2, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -41,7 +41,6 @@ import {
   undoEditorHistory,
   type EditorHistory,
 } from "@/lib/editor-history";
-import { formatMarkdown } from "@/lib/markdown-format";
 import { detectMarkdownStyle } from "@/lib/markdown-style";
 import { fileMutationInvalidations, queryKeys } from "@/lib/query-keys";
 import { useEditorStore } from "@/stores/editor";
@@ -174,7 +173,7 @@ export function MarkdownEditor({ path }: { path: string }) {
   const [history, setHistory] = useState<EditorHistory | null>(null);
   const [editorRevision, setEditorRevision] = useState(0);
   const [cancelOpen, setCancelOpen] = useState(false);
-  const [mode, setMode] = useState<"wysiwyg" | "source">("wysiwyg");
+  const [mode, setMode] = useState<"wysiwyg" | "source">("source");
   const savedRef = useRef<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const sourceRef = useRef<HTMLTextAreaElement>(null);
@@ -254,34 +253,6 @@ export function MarkdownEditor({ path }: { path: string }) {
   const redoRef = useRef(redo);
   redoRef.current = redo;
 
-  // Explicit, opt-in normalization to plain remark-default Markdown style —
-  // never runs on its own. Goes through the same `updateMarkdown` path as
-  // typing (records undo history, marks dirty), so it still requires an
-  // explicit Save and can be undone with Cmd/Ctrl+Z.
-  const [formatting, setFormatting] = useState(false);
-  const format = async () => {
-    if (markdown === null || formatting) return;
-    setFormatting(true);
-    try {
-      const formatted = await formatMarkdown(markdown);
-      if (formatted === markdown) {
-        toast.info("Already using standard Markdown formatting");
-        return;
-      }
-      updateMarkdown(formatted);
-      setEditorRevision((revision) => revision + 1);
-      toast.success("Formatted — review and Save to keep it");
-    } catch (e) {
-      toast.error("Could not format document", {
-        description: e instanceof Error ? e.message : String(e),
-      });
-    } finally {
-      setFormatting(false);
-    }
-  };
-  const formatRef = useRef(format);
-  formatRef.current = format;
-
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
@@ -290,14 +261,6 @@ export function MarkdownEditor({ path }: { path: string }) {
         if (dirtyRef.current && !saveRef.current.isPending) {
           saveRef.current.mutate();
         }
-      } else if (
-        (e.metaKey || e.ctrlKey) &&
-        e.shiftKey &&
-        e.key.toLowerCase() === "f"
-      ) {
-        if (!containerRef.current?.contains(document.activeElement)) return;
-        e.preventDefault();
-        void formatRef.current();
       } else if (
         (e.metaKey || e.ctrlKey) &&
         (e.key.toLowerCase() === "y" ||
@@ -383,25 +346,6 @@ export function MarkdownEditor({ path }: { path: string }) {
             >
               <Redo2 className="size-3.5" />
             </Button>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span>
-                  <Button
-                    size="icon-sm"
-                    variant="ghost"
-                    aria-label="Format document"
-                    disabled={markdown === null || formatting}
-                    onClick={() => void format()}
-                  >
-                    <Sparkles className="size-3.5" />
-                  </Button>
-                </span>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">
-                Format document — normalizes Markdown style; review and Save
-                to keep it
-              </TooltipContent>
-            </Tooltip>
             <Button
               size="sm"
               variant={dirty ? "default" : "outline"}
