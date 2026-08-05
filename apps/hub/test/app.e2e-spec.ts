@@ -50,7 +50,7 @@ describe('Hub (e2e)', () => {
     process.env.SUPERUSER_ID = 'root-admin';
     process.env.SUPERUSER_PASSWORD = 'test-superuser-password';
     process.env.SUPERUSER_NAME = 'Root Admin';
-    process.env.MIN_PASSWORD_LENGTH = '12';
+    process.env.MIN_PASSWORD_LENGTH = '8';
     process.env.DEFAULT_RESET_PASSWORD = 'test-default-reset-password';
   });
 
@@ -196,10 +196,10 @@ describe('Hub (e2e)', () => {
   it('returns the configured password requirement when registration is too short', async () => {
     const response = await request(app.getHttpServer())
       .post('/api/auth/register')
-      .send({ id: 'short-password', password: 'too-short', name: 'Short' })
+      .send({ id: 'short-password', password: 'short', name: 'Short' })
       .expect(409);
     expect(response.body.message).toBe(
-      'Password must contain at least 12 characters',
+      'Password must contain at least 8 characters',
     );
   });
 
