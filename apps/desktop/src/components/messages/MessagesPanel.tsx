@@ -235,7 +235,7 @@ export function MessagesPanel() {
             </Tabs>
           </div>
           <ScrollArea className="min-h-0 flex-1">
-            <div className="mx-auto max-w-3xl">
+            <div className="w-full">
               {messages.isLoading ? (
                 <div className="flex justify-center py-10">
                   <Spinner className="size-5 text-muted-foreground" />
