@@ -128,7 +128,7 @@ The desktop viewer renders Markdown with:
 
 ## Persistence
 
-Under the OS app data directory for `com.cyborgoat.nest.app`:
+Under the OS app data directory for `Nest`:
 
 | Store                                     | Purpose                                                   |
 | ----------------------------------------- | --------------------------------------------------------- |

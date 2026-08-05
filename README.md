@@ -87,4 +87,4 @@ The bundled `getting-started` pack is seeded once per app data directory and is 
 
 ## Data locations
 
-App data (vault + `nest.db` + vector DB) lives in the OS app data directory for `com.cyborgoat.nest.app`.
+App data (vault + `nest.db` + vector DB) lives in the OS app data directory for `Nest`.
