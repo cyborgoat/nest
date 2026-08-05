@@ -53,7 +53,11 @@ impl Default for AppSettings {
 }
 
 fn default_font_size_pt() -> u32 {
-    10
+    if cfg!(target_os = "windows") {
+        12
+    } else {
+        10
+    }
 }
 
 fn default_display_language() -> String {
