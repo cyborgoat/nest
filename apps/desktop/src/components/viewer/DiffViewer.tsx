@@ -18,22 +18,32 @@ const ROW_BG: Record<DiffRow["type"], { old: string; new: string }> = {
 };
 
 function DiffColumn({ rows, side }: { rows: DiffRow[]; side: "old" | "new" }) {
+  const lineCount = rows.reduce((n, row) => n + (row[side] !== null ? 1 : 0), 0);
+  const gutterChars = Math.max(2, String(lineCount).length);
+  let lineNo = 0;
   return (
     <div className="min-w-0 flex-1 border-border first:border-r">
-      <ScrollArea className="h-full">
+      <ScrollArea className="h-full" orientation="both">
         <div className="font-mono text-xs">
           {rows.map((row, i) => {
             const value = row[side];
+            if (value !== null) lineNo++;
             return (
               <div
                 key={i}
                 className={cn(
-                  "flex px-2 py-0.5",
+                  "flex",
                   ROW_BG[row.type][side],
                   value === null && "opacity-0",
                 )}
               >
-                <span className="select-none whitespace-pre">
+                <span
+                  className="sticky left-0 shrink-0 select-none whitespace-pre bg-background py-0.5 pr-2 pl-2 text-right text-muted-foreground/60"
+                  style={{ width: `calc(${gutterChars}ch + 1rem)` }}
+                >
+                  {value !== null ? lineNo : ""}
+                </span>
+                <span className="select-none whitespace-pre py-0.5 pr-2">
                   {value ?? " "}
                 </span>
               </div>

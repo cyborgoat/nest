@@ -4,8 +4,14 @@ import { cn } from "@/lib/utils";
 
 export const ScrollArea = React.forwardRef<
   React.ElementRef<typeof ScrollAreaPrimitive.Root>,
-  React.ComponentPropsWithoutRef<typeof ScrollAreaPrimitive.Root>
->(({ className, children, ...props }, ref) => (
+  React.ComponentPropsWithoutRef<typeof ScrollAreaPrimitive.Root> & {
+    /** Radix only scrolls an axis once its scrollbar is mounted — without a
+     * horizontal one, overflow-x is forced to `hidden` and content clips
+     * instead of scrolling. Pass "both" wherever content can overflow
+     * horizontally (e.g. unwrapped diff/code lines). */
+    orientation?: "vertical" | "both";
+  }
+>(({ className, children, orientation = "vertical", ...props }, ref) => (
   <ScrollAreaPrimitive.Root
     ref={ref}
     className={cn("relative overflow-hidden", className)}
@@ -15,6 +21,7 @@ export const ScrollArea = React.forwardRef<
       {children}
     </ScrollAreaPrimitive.Viewport>
     <ScrollBar />
+    {orientation === "both" && <ScrollBar orientation="horizontal" />}
     <ScrollAreaPrimitive.Corner />
   </ScrollAreaPrimitive.Root>
 ));
