@@ -216,9 +216,10 @@
     "Noto Color Emoji";
 }
 
-/* Source and rich editing share one surface size so switching modes does not
-   resize the document window. Milkdown adds two wrappers around ProseMirror,
-   so carry the same minimum height through those wrappers as well. */
+/* Radix wraps scroll content in an internal div that doesn't inherit height
+   on its own. Give it min-height: 100% so the flex column below
+   (.markdown-editor-layout / .markdown-editor-surface) has a real
+   percentage basis instead of collapsing to content height. */
 .markdown-editor-scroll [data-radix-scroll-area-viewport] > div {
   min-height: 100%;
 }
@@ -235,13 +236,6 @@
   flex: 1 0 auto;
   width: 100%;
   min-height: 60vh;
-}
-
-.markdown-editor-surface .milkdown,
-.markdown-editor-surface .ProseMirror {
-  box-sizing: border-box;
-  width: 100%;
-  min-height: inherit;
 }
 
 .markdown-source-marker {
@@ -290,19 +284,6 @@
 
 .markdown-source-separator {
   color: var(--source-separator);
-}
-
-/* WKWebView/WebKit draws a default blue focus ring on any contenteditable
-   element — Milkdown's ProseMirror root is one, so editing showed a stray
-   blue outline around the whole document. */
-.ProseMirror {
-  outline: none;
-}
-
-.ProseMirror:focus,
-.ProseMirror:focus-visible {
-  outline: none;
-  box-shadow: none;
 }
 
 .markdown-body > :first-child {

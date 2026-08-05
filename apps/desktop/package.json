@@ -13,8 +13,6 @@
     "tauri": "tauri"
   },
   "dependencies": {
-    "@milkdown/kit": "^7.21.3",
-    "@milkdown/react": "^7.21.3",
     "@nest/shared": "file:../../packages/shared",
     "@radix-ui/react-accordion": "^1.2.16",
     "@radix-ui/react-alert-dialog": "^1.1.19",

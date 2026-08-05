@@ -1,16 +1,5 @@
-import {
-  defaultValueCtx,
-  Editor,
-  remarkStringifyOptionsCtx,
-  rootCtx,
-} from "@milkdown/kit/core";
-import { listener, listenerCtx } from "@milkdown/kit/plugin/listener";
-import { commonmark } from "@milkdown/kit/preset/commonmark";
-import { gfm } from "@milkdown/kit/preset/gfm";
-import "@milkdown/kit/prose/view/style/prosemirror.css";
-import { Milkdown, MilkdownProvider, useEditor } from "@milkdown/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Code2, Eye, Redo2, Save, Undo2, X } from "lucide-react";
+import { Eye, Redo2, Save, Undo2, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -26,7 +15,6 @@ import {
 } from "@/components/ui/alert-dialog";
 import { PanelHeader } from "@/components/ui/panel-header";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Tooltip,
   TooltipContent,
@@ -41,47 +29,8 @@ import {
   undoEditorHistory,
   type EditorHistory,
 } from "@/lib/editor-history";
-import { detectMarkdownStyle } from "@/lib/markdown-style";
 import { fileMutationInvalidations, queryKeys } from "@/lib/query-keys";
 import { useEditorStore } from "@/stores/editor";
-
-/** Mounted only while in WYSIWYG mode — remounting on mode switch is what
- * re-parses the raw source into the rich view (and vice versa). */
-function MilkdownEditorCore({
-  initialMarkdown,
-  onChange,
-}: {
-  initialMarkdown: string;
-  onChange: (markdown: string) => void;
-}) {
-  useEditor((root) =>
-    Editor.make()
-      .config((ctx) => {
-        ctx.set(rootCtx, root);
-        ctx.set(defaultValueCtx, initialMarkdown);
-        // Milkdown's markdown serializer defaults (bullet `-`, fence `` ` ``,
-        // rule `-`, ...) don't remember the file's own conventions, so
-        // without this a single-character edit would reformat every list/
-        // fence/rule in the document to those defaults on save. Match what
-        // the file already uses so a compliant document round-trips as-is.
-        ctx.update(remarkStringifyOptionsCtx, (prev) => ({
-          ...prev,
-          ...detectMarkdownStyle(initialMarkdown),
-        }));
-        ctx.get(listenerCtx).markdownUpdated((_ctx, markdown) => {
-          onChange(markdown);
-        });
-      })
-      .use(commonmark)
-      .use(gfm)
-      .use(listener),
-  );
-  return (
-    <div className="markdown-body markdown-editor-surface">
-      <Milkdown />
-    </div>
-  );
-}
 
 function fitSourceHeight(source: HTMLTextAreaElement) {
   source.style.height = "auto";
@@ -171,9 +120,7 @@ export function MarkdownEditor({ path }: { path: string }) {
 
   const [markdown, setMarkdown] = useState<string | null>(null);
   const [history, setHistory] = useState<EditorHistory | null>(null);
-  const [editorRevision, setEditorRevision] = useState(0);
   const [cancelOpen, setCancelOpen] = useState(false);
-  const [mode, setMode] = useState<"wysiwyg" | "source">("source");
   const savedRef = useRef<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const sourceRef = useRef<HTMLTextAreaElement>(null);
@@ -237,7 +184,6 @@ export function MarkdownEditor({ path }: { path: string }) {
     setHistory(next);
     setMarkdown(value);
     setDirty(path, value !== savedRef.current);
-    setEditorRevision((revision) => revision + 1);
   };
   const redo = () => {
     if (!history || history.index >= history.entries.length - 1) return;
@@ -246,7 +192,6 @@ export function MarkdownEditor({ path }: { path: string }) {
     setHistory(next);
     setMarkdown(value);
     setDirty(path, value !== savedRef.current);
-    setEditorRevision((revision) => revision + 1);
   };
   const undoRef = useRef(undo);
   undoRef.current = undo;
@@ -292,14 +237,12 @@ export function MarkdownEditor({ path }: { path: string }) {
   };
 
   useLayoutEffect(() => {
-    if (mode !== "source") return;
     const source = sourceRef.current;
     if (!source) return;
     fitSourceHeight(source);
-  }, [markdown, mode]);
+  }, [markdown]);
 
   useEffect(() => {
-    if (mode !== "source") return;
     const container = containerRef.current;
     if (!container) return;
     const observer = new ResizeObserver(() => {
@@ -308,7 +251,7 @@ export function MarkdownEditor({ path }: { path: string }) {
     });
     observer.observe(container);
     return () => observer.disconnect();
-  }, [mode]);
+  }, []);
 
   return (
     <div ref={containerRef} className="flex h-full flex-col">
@@ -316,18 +259,6 @@ export function MarkdownEditor({ path }: { path: string }) {
         size="compact"
         actions={
           <>
-            <Tabs value={mode} onValueChange={(v) => setMode(v as typeof mode)}>
-              <TabsList className="h-7 rounded-md p-0.5">
-                <TabsTrigger value="wysiwyg" className="h-6 px-2 py-0 text-xs">
-                  <Eye className="size-3.5" />
-                  Editor
-                </TabsTrigger>
-                <TabsTrigger value="source" className="h-6 px-2 py-0 text-xs">
-                  <Code2 className="size-3.5" />
-                  Source
-                </TabsTrigger>
-              </TabsList>
-            </Tabs>
             <Button
               size="icon-sm"
               variant="ghost"
@@ -406,14 +337,6 @@ export function MarkdownEditor({ path }: { path: string }) {
                 {(fileQuery.error as Error).message}
               </p>
             ) : null
-          ) : mode === "wysiwyg" ? (
-            <MilkdownProvider>
-              <MilkdownEditorCore
-                key={editorRevision}
-                initialMarkdown={markdown}
-                onChange={updateMarkdown}
-              />
-            </MilkdownProvider>
           ) : (
             <div className="relative flex flex-1">
               <pre
