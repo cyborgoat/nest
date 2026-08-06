@@ -4,12 +4,12 @@
 
 ## 步骤
 
-1. 打开 **Hub → 导入 → 导入知识包 ZIP**。
+1. 点击右上角 **Hub → Import → Import pack ZIP**。
 2. 拖入 ZIP 或浏览选择文件。
-3. 如果没有 `pack.json`，检查自动填写的信息后选择**创建知识包**；否则选择
-   **导入 ZIP**。
+3. 如果没有 `pack.json`，检查自动填写的信息后选择 **Create pack**；否则选择
+   **Import ZIP**。
 4. 如果相同知识包已安装，确认替换。
 
-Nest 每个知识包 ID 只保留一个版本，原始 ZIP 保持不变。使用**导出 ZIP** 生成的
+Nest 每个知识包 ID 只保留一个版本，原始 ZIP 保持不变。使用 **Export ZIP** 生成的
 文件已包含 `pack.json`；普通 ZIP 只需至少一个 Markdown 文件，其余由 Nest 自动
 补全。

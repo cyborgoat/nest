@@ -4,6 +4,15 @@ Nest is a local-first workspace for reading, editing, and sharing Markdown
 knowledge packs. Installed packs live on your computer; an optional team
 **Hub** lets you discover, install, and publish shared packs.
 
+## Where to find the main controls
+
+- **Hub**, **Messages**, **Settings**, and **Chat** are in the upper-right
+  corner of the app header.
+- The activity bar on the far left contains **Explorer**, **Source Control**,
+  and **Under Review**. Hover an icon to see its name.
+- Use **Explorer** to open packs and files, **Source Control** to review and
+  publish changes, and **Under Review** to see pending publish requests.
+
 ## Tutorial
 
 1. [First 10 minutes](guides/first-10-minutes.md)

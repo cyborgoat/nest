@@ -6,9 +6,12 @@ Nest generates it when you import a folder.
 
 ## Main areas
 
+The upper-right app header contains **Hub**, **Messages**, **Settings**, and
+**Chat**. The activity bar on the far left contains **Explorer**, **Source
+Control**, and **Under Review**.
+
 - **Explorer** browses installed packs and opens Markdown files.
-- **Source Control** shows changes to editable packs installed from Hub. A
-  local pack appears there temporarily while its publish request is reviewed.
+- **Source Control** shows new, modified, and deleted files before publishing.
 - **Hub** discovers, installs, updates, imports, exports, and publishes packs.
 - **Messages** records publishing submissions, approvals, and rejections.
 - **Chat** answers questions using active packs and optional `@` references.
@@ -22,5 +25,6 @@ publishing, restricted-pack access, and review notifications.
 
 ## Versions
 
-Nest installs one version of each pack. Publish a new version or submit a live
-patch, describe the change with a commit message, and wait for approval.
+Nest installs one version of each pack. Use **New release** for a new semantic
+version or **Live patch** to update an existing release's files. Both require
+review; installed users are notified when an approved patch is available.

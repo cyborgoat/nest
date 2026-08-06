@@ -1,5 +1,8 @@
 # Explorer and Knowledge Packs
 
+Open **Explorer** from the first icon in the activity bar on the far left.
+Hover the icon if you need to confirm its name.
+
 ## Add a pack
 
 - [Install from Hub](import-from-hub.md) — packs published by your team.
@@ -9,19 +12,10 @@
 
 Nest keeps one installed version per pack ID.
 
-When you create a pack with the Explorer **+** button, Nest keeps the display
-name you enter and derives a publishable ID and folder. Chinese characters are
-retained, cased letters become lowercase, and punctuation becomes hyphens.
-
 ## Browse and read
 
 Explorer shows installed packs and their files. Open a Markdown file to read
 it; open files appear in tabs.
-
-Right-click a pack or folder to import Markdown files and images. You can also
-drag files and folders between editable packs. The destination folder is
-highlighted while you drag; dropping moves the item rather than copying it.
-New folders appear in Explorer immediately and remain visible while empty.
 
 ## Update, export, remove
 

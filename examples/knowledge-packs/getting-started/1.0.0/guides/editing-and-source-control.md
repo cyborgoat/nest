@@ -1,28 +1,20 @@
 # Editing and Source Control
 
+Open **Source Control** from the branching icon in the activity bar on the far
+left. Hover the icon to see its name.
+
 ## Edit Markdown
 
 Open a file, switch between rendered and source mode, and save normally. Nest
 supports GitHub Flavored Markdown: tables, task lists, fenced code, links,
-local images, Mermaid diagrams, and KaTeX math equations. Use `$E = mc^2$`
-for inline math. For display math, put `$$` on separate lines around the
-equation.
+local images, and Mermaid diagrams.
 
 ```mermaid
 flowchart LR
   Edit --> Save
-  Save --> Review[Review Hub pack changes in Source Control]
+  Save --> Review[Review in Source Control]
   Review --> Publish
 ```
-
-## What Source Control tracks
-
-Source Control normally tracks editable packs installed from Hub. Ordinary
-local-pack edits stay local and do not show change status. If you submit a
-local pack to the registry, its submitted changes appear while the request is
-under review.
-
-Change colors and status badges appear only in Source Control, not Explorer.
 
 ## Status markers
 
@@ -38,10 +30,9 @@ unsaved intent, so review the diff first.
 
 ## After publishing
 
-While a request is under review, the pack is locked and its submitted changes
-remain visible but cannot be edited or discarded. Follow the inline link to
-**Under Review** if you need to cancel and unlock it.
-
-Use Source Control's refresh button. An approved request shows **Merge with
-remote** — this makes the reviewed release the new baseline. A rejected
-request unlocks the pack; open Messages to read the reviewer comment.
+While a request is pending, the pack is read-only and identifies who submitted
+it. Only the original submitter sees the cancellation link. Use Source
+Control's refresh button. An approved request shows **Merge with remote**;
+non-conflicting files merge automatically and conflicting files ask you to
+choose **Local** or **Approved Hub**. A rejected request shows a badge; open
+**Messages** in the upper-right header to read the comment.

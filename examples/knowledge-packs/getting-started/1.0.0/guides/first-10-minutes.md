@@ -2,6 +2,10 @@
 
 Your first goal: bring one knowledge pack into Nest and open it.
 
+The main **Hub**, **Messages**, **Settings**, and **Chat** buttons are in the
+upper-right corner. **Explorer**, **Source Control**, and **Under Review** are
+in the activity bar on the far left; hover an icon to see its name.
+
 ## 1. Connect Hub (optional)
 
 Skip this if you're only importing a local folder or ZIP.

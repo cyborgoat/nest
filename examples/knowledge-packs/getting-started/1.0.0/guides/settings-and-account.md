@@ -1,5 +1,7 @@
 # Settings and Account
 
+Open **Settings** from the upper-right corner of the app header.
+
 ## Connect to Hub
 
 1. Ask your team for the Hub URL.
@@ -13,9 +15,7 @@ or to read, edit, and export local packs.
 
 Create or sign in to a Hub account from **Settings → Account**. An account is
 required for publishing and restricted content, but not for local work or
-public downloads. When creating an account, enter the password twice so Nest
-can confirm it before submission. Signing out removes the local session, not
-installed packs.
+public downloads. Signing out removes the local session, not installed packs.
 
 ## Storage settings
 

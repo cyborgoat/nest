@@ -3,5 +3,5 @@
   "name": "Getting Started",
   "description": "A practical guide to finding, importing, reading, and publishing knowledge packs in Nest, with editing and Chat covered as optional next steps.",
   "version": "1.0.0",
-  "yanked": false
+  "path": "getting-started"
 }
