@@ -1,5 +1,11 @@
-import { isValidElement, type ReactNode } from "react";
-import ReactMarkdown, { type Components } from "react-markdown";
+import {
+  createElement,
+  isValidElement,
+  type ComponentPropsWithoutRef,
+  type ReactNode,
+  useMemo,
+} from "react";
+import ReactMarkdown, { type Components, type ExtraProps } from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
@@ -7,6 +13,10 @@ import remarkMath from "remark-math";
 import "katex/dist/katex.min.css";
 import { MermaidDiagram } from "@/components/markdown/MermaidDiagram";
 import { VaultImage } from "@/components/markdown/VaultImage";
+import {
+  extractMarkdownHeadings,
+  type MarkdownHeading,
+} from "@/lib/markdown-headings";
 import { cn } from "@/lib/utils";
 import { useUiStore } from "@/stores/ui";
 
@@ -14,6 +24,7 @@ type MarkdownBodyProps = {
   children: string;
   className?: string;
   basePath?: string;
+  headings?: MarkdownHeading[];
 };
 
 function extractText(node: ReactNode): string {
@@ -55,9 +66,46 @@ function resolveVaultMarkdownPath(baseDir: string, href: string): string | null 
   return parts.join("/") || null;
 }
 
-export function MarkdownBody({ children, className, basePath }: MarkdownBodyProps) {
+export function MarkdownBody({
+  children,
+  className,
+  basePath,
+  headings,
+}: MarkdownBodyProps) {
   const openFileTab = useUiStore((state) => state.openFileTab);
+  const parsedHeadings = useMemo(
+    () => headings ?? extractMarkdownHeadings(children),
+    [children, headings],
+  );
+  const headingIdByOffset = new Map(
+    parsedHeadings.map((heading) => [heading.sourceOffset, heading.id]),
+  );
+  const renderHeading = (level: MarkdownHeading["level"]) =>
+    ({
+      node,
+      children: headingChildren,
+      ...props
+    }: ComponentPropsWithoutRef<"h1"> & ExtraProps) => {
+      const sourceOffset = node?.position?.start.offset;
+      return createElement(
+        `h${level}`,
+        {
+          ...props,
+          id:
+            sourceOffset == null
+              ? undefined
+              : headingIdByOffset.get(sourceOffset),
+        },
+        headingChildren,
+      );
+    };
   const components: Components = {
+    h1: renderHeading(1),
+    h2: renderHeading(2),
+    h3: renderHeading(3),
+    h4: renderHeading(4),
+    h5: renderHeading(5),
+    h6: renderHeading(6),
     a: ({ href, children: linkChildren, ...props }) => {
       const vaultPath = href
         ? resolveVaultMarkdownPath(basePath ?? "", href)

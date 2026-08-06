@@ -323,6 +323,10 @@
   max-height: 1000000px;
 }
 
+.markdown-body :is(h1, h2, h3, h4, h5, h6) {
+  scroll-margin-top: 1.25rem;
+}
+
 .markdown-body p {
   @apply mb-3;
 }
