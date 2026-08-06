@@ -29,13 +29,20 @@ Restricted projects are available to their owner, explicitly granted users, admi
 | `GET` | `/api/auth/me` | User | Current immutable ID, name, and role |
 | `PATCH` | `/api/auth/profile` | User | Change display name (managed superuser forbidden) |
 | `POST` | `/api/auth/password` | User | Change password and rotate sessions (managed superuser forbidden) |
-| `POST` | `/api/publish-requests` | User | Legacy release-only submission with multipart `file` |
-| `POST` | `/api/publish-requests/releases` | User | Submit a new version release with multipart `file` |
-| `POST` | `/api/publish-requests/live-patches/:packId/:version` | Pack maintainer | Submit a reviewed replacement for an existing version with multipart `file` |
+| `POST` | `/api/publish-requests` | User | Legacy release-only submission with multipart `file` and optional `commit_message` |
+| `POST` | `/api/publish-requests/releases` | User | Submit a new version release with multipart `file` and `commit_message` |
+| `POST` | `/api/publish-requests/live-patches/:packId/:version` | Pack maintainer | Submit a reviewed replacement with multipart `file` and `commit_message` |
 | `GET` | `/api/publish-requests/mine` | User | Author's submissions |
+| `GET` | `/api/publish-requests/pack/:packId/pending` | Pack maintainer, submitter, or registry admin | Current pending request plus whether the caller may cancel it |
 | `GET` | `/api/publish-requests/:id` | Submitter, pack maintainer, or registry admin | One submission |
+| `DELETE` | `/api/publish-requests/:id` | Original submitter | Cancel a pending submission and remove it from review |
 
 Account IDs cannot be changed. The desktop surfaces Hub validation responses directly and keeps authentication errors inside the account dialog.
+
+The desktop requires a trimmed publish commit message for both new releases and
+live patches. Messages are limited to 500 characters, stored with the review,
+and returned as `commit_message` in publish-request responses. The Hub accepts
+an omitted message as empty only for compatibility with legacy API clients.
 
 Live patches use the same review endpoints and pack-wide pending-request lock
 as releases. The route identifies the target release; the server does not infer
@@ -43,6 +50,12 @@ the operation from optional multipart fields. The target must exist and not be
 yanked; its identity and metadata cannot change. Approval atomically replaces
 its full file snapshot and increments `patch_revision` without changing SemVer.
 Downloads advertise the installed revision in `X-Pack-Patch-Revision`.
+
+While a request is pending, the desktop makes the pack read-only and continues
+to show the submitted Source Control changes. The original submitter may cancel
+the request; cancellation removes its staged ZIP and derived review artifact,
+records an audit event, and releases the lock. Admin review lists emphasize the
+commit message, while the routed review detail also retains the pack description.
 
 ## Messages
 

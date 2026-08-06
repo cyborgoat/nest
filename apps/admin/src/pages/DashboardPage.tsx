@@ -88,10 +88,14 @@ export function DashboardPage() {
                 key={item.id}
                 className="flex items-center justify-between rounded-lg border border-border p-3"
               >
-                <div>
+                <div className="min-w-0">
                   <p className="text-sm font-medium">{item.name}</p>
                   <p className="text-xs text-muted-foreground">
                     {item.pack_id}@{item.version} · @{item.submitter_id}
+                  </p>
+                  <p className="mt-1 line-clamp-1 text-sm text-foreground">
+                    {item.commit_message ||
+                      "No publish commit message provided."}
                   </p>
                 </div>
                 <Badge>Pending</Badge>

@@ -31,7 +31,7 @@ import {
   undoEditorHistory,
   type EditorHistory,
 } from "@/lib/editor-history";
-import { canEditPack } from "@/lib/pack-permissions";
+import { canEditPack, packEditBlockReason } from "@/lib/pack-permissions";
 import { fileMutationInvalidations, queryKeys } from "@/lib/query-keys";
 import {
   markdownForVaultDrop,
@@ -320,7 +320,12 @@ export function MarkdownEditor({ path }: { path: string }) {
         if (paths.length === 0) return;
         if (!canDropImportRef.current) {
           toast.error("Cannot import here", {
-            description: "You don't have edit access to this pack.",
+            description: installedPack
+              ? packEditBlockReason(
+                  installedPack,
+                  hubAuthQuery.data?.user ?? null,
+                )
+              : "You don't have edit access to this pack.",
           });
           return;
         }
@@ -379,7 +384,7 @@ export function MarkdownEditor({ path }: { path: string }) {
               size="icon-sm"
               variant="ghost"
               aria-label="Undo"
-              disabled={!history || history.index === 0}
+              disabled={!canDropImport || !history || history.index === 0}
               onClick={undo}
             >
               <Undo2 className="size-3.5" />
@@ -388,7 +393,11 @@ export function MarkdownEditor({ path }: { path: string }) {
               size="icon-sm"
               variant="ghost"
               aria-label="Redo"
-              disabled={!history || history.index >= history.entries.length - 1}
+              disabled={
+                !canDropImport ||
+                !history ||
+                history.index >= history.entries.length - 1
+              }
               onClick={redo}
             >
               <Redo2 className="size-3.5" />
@@ -397,7 +406,7 @@ export function MarkdownEditor({ path }: { path: string }) {
               size="sm"
               variant={dirty ? "default" : "outline"}
               className="h-7"
-              disabled={!dirty || save.isPending}
+              disabled={!canDropImport || !dirty || save.isPending}
               onClick={() => save.mutate()}
             >
               <Save className="size-3.5" />
@@ -465,6 +474,7 @@ export function MarkdownEditor({ path }: { path: string }) {
                 ref={sourceRef}
                 autoFocus
                 value={markdown}
+                disabled={!canDropImport}
                 onChange={(e) => updateMarkdown(e.target.value)}
                 spellCheck={false}
                 rows={1}

@@ -242,11 +242,13 @@ export class AdminController {
     @Req() req: Request,
     @UploadedFile() file: UploadedPackFile,
     @Body('metadata') metadata?: string,
+    @Body('commit_message') commitMessage?: string,
   ) {
     return this.publishing.submitRelease(
       req.authUser!,
       file,
       parseUploadMetadata(metadata),
+      commitMessage,
     );
   }
 }

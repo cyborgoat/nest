@@ -21,7 +21,10 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
-import { canEditPack } from "@/lib/pack-permissions";
+import {
+  hasPackEditPermission,
+  shouldTrackPackChanges,
+} from "@/lib/pack-permissions";
 import { queryKeys } from "@/lib/query-keys";
 import { I18nProvider } from "@/lib/i18n";
 import { animatePanelSize, cancelPanelAnimation } from "@/lib/panel-animation";
@@ -96,20 +99,23 @@ export default function App() {
     queryKey: queryKeys.hubAuth,
     queryFn: api.hubAuthState,
   });
-  const editablePacks = (installedQuery.data ?? []).filter((pack) =>
-    canEditPack(pack, hubAuthQuery.data?.user ?? null),
+  const trackedPacks = (installedQuery.data ?? []).filter((pack) =>
+    shouldTrackPackChanges(pack, hubAuthQuery.data?.user ?? null),
   );
   const packStatusQueries = useQueries({
-    queries: editablePacks.map((pack) => ({
+    queries: trackedPacks.map((pack) => ({
       queryKey: queryKeys.packStatus(pack.pack_id),
       queryFn: () => api.hubPackChangeStatus(pack.pack_id),
     })),
   });
   const hasSourceControlChanges = packStatusQueries.some(
     (query) => (query.data?.length ?? 0) > 0,
-  ) || editablePacks.some(
-    (pack) => pack.publish_review_status === "approved_awaiting_merge",
-  );
+  ) ||
+    (installedQuery.data ?? []).some(
+      (pack) =>
+        pack.publish_review_status === "approved_awaiting_merge" &&
+        hasPackEditPermission(pack, hubAuthQuery.data?.user ?? null),
+    );
   const hasPacksUnderReview = (installedQuery.data ?? []).some(
     (pack) => pack.publish_review_status === "pending",
   );

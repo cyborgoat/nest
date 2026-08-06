@@ -302,6 +302,7 @@ mod tests {
             pending_request_id: None,
             publish_review_status: None,
             publish_review_created_at: None,
+            pending_can_cancel: false,
         };
         let out = format_active_packs_for_prompt(&[pack]);
         assert!(out.contains("Cooking Basics"));

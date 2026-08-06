@@ -55,6 +55,7 @@ export type PublishRequest = {
   version: string;
   name: string;
   description: string;
+  commit_message: string;
   status: PublishRequestStatus;
   request_type: PublishRequestType;
   patch_revision: number | null;
@@ -247,6 +248,8 @@ export type InstalledPack = {
    * requests stay actionable until their exact Hub release is merged. */
   publish_review_status: "pending" | "approved_awaiting_merge" | null;
   publish_review_created_at: string | null;
+  /** Whether the signed-in user submitted and may cancel the pending request. */
+  pending_can_cancel: boolean;
 };
 
 export type PackInstallConflict = {

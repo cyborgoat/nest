@@ -14,6 +14,10 @@ Nest keeps one installed version per pack ID.
 Explorer shows installed packs and their files. Open a Markdown file to read
 it; open files appear in tabs.
 
+Right-click a pack or folder to import Markdown files and images. You can also
+drag files and folders between editable packs. The destination folder is
+highlighted while you drag; dropping moves the item rather than copying it.
+
 ## Update, export, remove
 
 - **Update** installs a newer Hub release.

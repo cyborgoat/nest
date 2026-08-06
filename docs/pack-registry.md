@@ -69,7 +69,7 @@ yank state, and publishing history remain database-owned.
 - Do **not** stack `vault/<id>/<version>/` for RAG (avoids duplicate citations).
 - `sync_state` stores `pack_id`, installed `version`, `patch_revision`, and **`active`** (RAG inclusion; default `true` on install).
 - `sync_state.origin` records `local`, `registry`, `bundled`, or `unknown`; legacy rows migrate to `unknown`. Local packs and editable registry packs may be submitted.
-- Approved requests remain locally actionable until **Merge with remote** downloads the exact release as the source-control baseline. The working pack is preserved and its differences are shown normally.
+- Pending requests lock in-app pack mutations while preserving a read-only view of the submitted differences. The original submitter may cancel to remove the request and unlock the pack. Approved requests remain locally actionable until **Merge with remote** downloads the exact release as the source-control baseline.
 - Local zip import still installs from embedded `pack.json`.
 - Importing or creating a local pack whose ID is already installed requires confirmation and atomically replaces the single installed version.
 - The repository example registry contains only the canonical
@@ -93,8 +93,8 @@ Bundled default pack notes:
 ## Publishing and access lifecycle
 
 1. A user creates an account from **Settings → Account**. The account ID is immutable; name and password can be maintained there.
-2. Only a pack with local origin (created from a folder or imported by the user) exposes **Publish** in the installed-pack action menu. Registry downloads, bundled packs, and legacy unknown-origin packs cannot be republished.
-3. Desktop exports the installed tree as a ZIP and submits it to Hub. Hub validates the archive size, safe paths, `pack.json`, SemVer, and Markdown content before storing a pending artifact.
+2. Local packs and editable registry packs expose **Publish**. Bundled and legacy unknown-origin packs cannot be published.
+3. Desktop requires a publish commit message, exports the installed tree as a ZIP, and submits both to Hub. Hub validates the archive size, safe paths, `pack.json`, SemVer, Markdown content, and commit-message length before storing a pending artifact.
 4. An admin or the superuser approves the exact staged artifact with an optional comment or rejects it with a required comment. Hub creates a durable submitted/approved/rejected message for the author and retains review metadata for administrator history.
 5. Approved releases change only through a new semantic release or reviewed live patch. A live patch keeps only the latest approved file snapshot, increments `patch_revision`, and preserves the semantic version. Administrators can edit project metadata, yank a release, archive or delete a project, upload an immediate release, and change visibility.
 6. Every project is `public` by default. A `restricted` project is visible only to its owner, explicitly granted users, admins, and the superuser. Authentication is therefore optional for all local work and public browsing.

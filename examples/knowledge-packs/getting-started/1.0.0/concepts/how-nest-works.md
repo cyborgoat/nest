@@ -7,7 +7,8 @@ Nest generates it when you import a folder.
 ## Main areas
 
 - **Explorer** browses installed packs and opens Markdown files.
-- **Source Control** shows new, modified, and deleted files before publishing.
+- **Source Control** shows changes to editable packs installed from Hub. A
+  local pack appears there temporarily while its publish request is reviewed.
 - **Hub** discovers, installs, updates, imports, exports, and publishes packs.
 - **Messages** records publishing submissions, approvals, and rejections.
 - **Chat** answers questions using active packs and optional `@` references.
@@ -21,5 +22,5 @@ publishing, restricted-pack access, and review notifications.
 
 ## Versions
 
-Nest installs one version of each pack. Published releases are immutable: to
-update one, raise the version, submit it, and wait for approval.
+Nest installs one version of each pack. Publish a new version or submit a live
+patch, describe the change with a commit message, and wait for approval.

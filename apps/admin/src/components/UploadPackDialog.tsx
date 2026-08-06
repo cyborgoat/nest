@@ -25,7 +25,11 @@ export function UploadPackDialog({
   busy: boolean;
   error: unknown;
   onInspect: (file: File) => Promise<LocalPackInspection>;
-  onUpload: (file: File, metadata?: KnowledgePackMeta) => void;
+  onUpload: (
+    file: File,
+    commitMessage: string,
+    metadata?: KnowledgePackMeta,
+  ) => void;
 }) {
   const [file, setFile] = useState<File | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -35,6 +39,7 @@ export function UploadPackDialog({
   );
   const [inspectError, setInspectError] = useState<unknown>(null);
   const [metadata, setMetadata] = useState<KnowledgePackMeta>(EMPTY_METADATA);
+  const [commitMessage, setCommitMessage] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
   function reset(next: boolean) {
@@ -43,6 +48,7 @@ export function UploadPackDialog({
       setInspection(null);
       setInspectError(null);
       setMetadata(EMPTY_METADATA);
+      setCommitMessage("");
     }
     onOpenChange(next);
   }
@@ -68,6 +74,7 @@ export function UploadPackDialog({
     !busy &&
     !inspecting &&
     !inspectError &&
+    !!commitMessage.trim() &&
     (!needsMetadata ||
       (metadata.id.trim() && metadata.name.trim() && metadata.version.trim()));
 
@@ -164,6 +171,17 @@ export function UploadPackDialog({
           </Field>
         </div>
       )}
+      <div className="mt-3">
+        <Field label="Publish commit message">
+          <textarea
+            className="input min-h-20 resize-y"
+            value={commitMessage}
+            onChange={(event) => setCommitMessage(event.target.value)}
+            placeholder="Summarize what changed in this publish"
+            maxLength={500}
+          />
+        </Field>
+      </div>
       {inspectError != null && (
         <div className="mt-3">
           <ErrorBox error={inspectError} />
@@ -183,7 +201,12 @@ export function UploadPackDialog({
         <Button
           disabled={!canUpload}
           onClick={() =>
-            file && onUpload(file, needsMetadata ? metadata : undefined)
+            file &&
+            onUpload(
+              file,
+              commitMessage.trim(),
+              needsMetadata ? metadata : undefined,
+            )
           }
         >
           {busy && <Loader2 className="size-4 animate-spin" />}

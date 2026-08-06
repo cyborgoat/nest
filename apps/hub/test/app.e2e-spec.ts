@@ -379,9 +379,13 @@ describe('Hub (e2e)', () => {
     const submission = await request(app.getHttpServer())
       .post('/api/publish-requests/releases')
       .set('Authorization', `Bearer ${authorLogin.body.access_token}`)
+      .field('commit_message', 'Add the initial reviewed knowledge')
       .attach('file', zip.toBuffer(), 'authored-pack.zip')
       .expect(201);
     expect(submission.body.status).toBe('pending');
+    expect(submission.body.commit_message).toBe(
+      'Add the initial reviewed knowledge',
+    );
     const submittedMessages = await request(app.getHttpServer())
       .get('/api/messages')
       .set('Authorization', `Bearer ${authorLogin.body.access_token}`)
@@ -470,10 +474,12 @@ describe('Hub (e2e)', () => {
     const submission = await request(app.getHttpServer())
       .post('/api/publish-requests/live-patches/authored-pack/1.0.0')
       .set('Authorization', `Bearer ${authorLogin.body.access_token}`)
+      .field('commit_message', 'Correct the reviewed guidance')
       .attach('file', zip.toBuffer(), 'authored-pack-patch.zip')
       .expect(201);
     expect(submission.body).toMatchObject({
       request_type: 'live_patch',
+      commit_message: 'Correct the reviewed guidance',
       version: '1.0.0',
       base_patch_revision: 0,
       patch_revision: 1,
@@ -487,6 +493,7 @@ describe('Hub (e2e)', () => {
         expect.objectContaining({
           id: submission.body.id,
           request_type: 'live_patch',
+          commit_message: 'Correct the reviewed guidance',
           pack_id: 'authored-pack',
           version: '1.0.0',
           patch_revision: 1,
@@ -499,6 +506,7 @@ describe('Hub (e2e)', () => {
       .expect(200);
     expect(review.body).toMatchObject({
       request_type: 'live_patch',
+      commit_message: 'Correct the reviewed guidance',
       base_version: '1.0.0',
       base_patch_revision: 0,
       patch_revision: 1,
@@ -830,6 +838,12 @@ describe('Hub (e2e)', () => {
     expect(pendingStatus.body.pending).toEqual(
       expect.objectContaining({ id: second.body.id, version: '0.2.0' }),
     );
+    expect(pendingStatus.body.can_cancel).toBe(true);
+    const adminPendingStatus = await request(app.getHttpServer())
+      .get('/api/publish-requests/pack/locked-pack/pending')
+      .set('Authorization', `Bearer ${adminLogin.body.access_token}`)
+      .expect(200);
+    expect(adminPendingStatus.body.can_cancel).toBe(false);
     const strangerLogin = await request(app.getHttpServer())
       .post('/api/auth/register')
       .send({
@@ -844,12 +858,32 @@ describe('Hub (e2e)', () => {
       .expect(200);
     expect(strangerStatus.body.pending).toBeNull();
 
-    // Once 0.2.0 is resolved, the lock releases and 0.3.0 succeeds.
     await request(app.getHttpServer())
-      .post(`/api/admin/publish-requests/${second.body.id}/reject`)
+      .delete(`/api/publish-requests/${second.body.id}`)
       .set('Authorization', `Bearer ${adminLogin.body.access_token}`)
-      .send({ note: 'Needs another look.' })
-      .expect(201);
+      .expect(403);
+
+    // Once the original submitter cancels 0.2.0, the lock releases and
+    // 0.3.0 succeeds. The cancelled request is no longer addressable.
+    await request(app.getHttpServer())
+      .delete(`/api/publish-requests/${second.body.id}`)
+      .set('Authorization', `Bearer ${authorLogin.body.access_token}`)
+      .expect(200)
+      .expect(({ body }) => {
+        expect(body).toMatchObject({
+          success: true,
+          request_id: second.body.id,
+          pack_id: 'locked-pack',
+        });
+      });
+    await request(app.getHttpServer())
+      .get(`/api/publish-requests/${second.body.id}`)
+      .set('Authorization', `Bearer ${authorLogin.body.access_token}`)
+      .expect(404);
+    await request(app.getHttpServer())
+      .delete(`/api/publish-requests/${first.body.id}`)
+      .set('Authorization', `Bearer ${authorLogin.body.access_token}`)
+      .expect(409);
     await request(app.getHttpServer())
       .post('/api/publish-requests')
       .set('Authorization', `Bearer ${authorLogin.body.access_token}`)

@@ -71,13 +71,16 @@ export function PacksPage() {
   const upload = useMutation({
     mutationFn: ({
       file,
+      commitMessage,
       metadata,
     }: {
       file: File;
+      commitMessage: string;
       metadata?: KnowledgePackMeta;
     }) => {
       const body = new FormData();
       body.append("file", file);
+      body.append("commit_message", commitMessage);
       if (metadata) body.append("metadata", JSON.stringify(metadata));
       return api("/api/admin/packs/upload", { method: "POST", body });
     },
@@ -275,7 +278,9 @@ export function PacksPage() {
         busy={upload.isPending}
         error={upload.error}
         onInspect={(file) => inspect.mutateAsync(file)}
-        onUpload={(file, metadata) => upload.mutate({ file, metadata })}
+        onUpload={(file, commitMessage, metadata) =>
+          upload.mutate({ file, commitMessage, metadata })
+        }
       />
     </>
   );

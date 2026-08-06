@@ -119,6 +119,7 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
         version TEXT NOT NULL,
         name TEXT NOT NULL,
         description TEXT NOT NULL DEFAULT '',
+        commit_message TEXT NOT NULL DEFAULT '',
         submitter_uuid TEXT REFERENCES users(uuid) ON DELETE SET NULL,
         staging_path TEXT NOT NULL,
         checksum TEXT NOT NULL,
@@ -251,6 +252,7 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
       ['patched_at', 'TEXT'],
     ]);
     addMissing('publish_requests', [
+      ['commit_message', "TEXT NOT NULL DEFAULT ''"],
       ['request_type', "TEXT NOT NULL DEFAULT 'release'"],
       ['patch_revision', 'INTEGER'],
       ['base_patch_revision', 'INTEGER'],

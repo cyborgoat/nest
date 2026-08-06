@@ -1,15 +1,34 @@
 import type { InstalledPack, TreeNode } from "@nest/shared";
-import { useQueryClient } from "@tanstack/react-query";
-import { Clock3, FileSearch, MessageSquare, PackageSearch } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  Clock3,
+  FileSearch,
+  Loader2,
+  MessageSquare,
+  PackageSearch,
+  XCircle,
+} from "lucide-react";
+import { useState } from "react";
 import { toast } from "sonner";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { RefreshButton } from "@/components/ui/refresh-button";
 import { SidebarPaneHeader } from "@/components/ui/sidebar-pane-header";
 import { api } from "@/lib/api";
 import { pendingPublishVersionLabel } from "@/lib/publish-request-labels";
 import { queryKeys } from "@/lib/query-keys";
+import { cn } from "@/lib/utils";
 import { useUiStore } from "@/stores/ui";
 
 function firstFileUnder(nodes: TreeNode[], prefix: string): string | null {
@@ -31,12 +50,49 @@ export function UnderReviewPanel({
   tree: TreeNode[];
 }) {
   const queryClient = useQueryClient();
+  const authQuery = useQuery({
+    queryKey: queryKeys.hubAuth,
+    queryFn: api.hubAuthState,
+  });
+  const [cancelTarget, setCancelTarget] = useState<InstalledPack | null>(null);
   const setActivityView = useUiStore((state) => state.setActivitySidebarView);
   const openFileTab = useUiStore((state) => state.openFileTab);
   const openPublishMessage = useUiStore((state) => state.openPublishMessage);
   const pending = installed.filter(
     (pack) => pack.publish_review_status === "pending",
   );
+
+  const cancelPublish = useMutation({
+    mutationFn: (pack: InstalledPack) => {
+      if (!pack.pending_request_id) {
+        throw new Error("This publish request is no longer available.");
+      }
+      return api.hubCancelPublishRequest(pack.pack_id, pack.pending_request_id);
+    },
+    onSuccess: (updated) => {
+      queryClient.setQueryData<InstalledPack[]>(
+        queryKeys.installedPacks,
+        (current) =>
+          current?.map((pack) =>
+            pack.pack_id === updated.pack_id ? updated : pack,
+          ) ?? [updated],
+      );
+      void queryClient.invalidateQueries({ queryKey: ["pack-status"] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.messages });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.messageCount });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.publishReconcile,
+      });
+      setCancelTarget(null);
+      toast.success("Publish request cancelled", {
+        description: `${updated.name} is editable again.`,
+      });
+    },
+    onError: (error: Error) =>
+      toast.error("Could not cancel publish request", {
+        description: error.message,
+      }),
+  });
 
   const refresh = async () => {
     try {
@@ -98,6 +154,10 @@ export function UnderReviewPanel({
                     {new Date(pack.publish_review_created_at).toLocaleString()}
                   </p>
                 )}
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  Editing is locked until this request is resolved or
+                  cancelled.
+                </p>
                 <div className="mt-3 grid grid-cols-2 gap-1.5">
                   <Button
                     size="sm"
@@ -122,12 +182,61 @@ export function UnderReviewPanel({
                     <MessageSquare className="size-4" />
                     Message
                   </Button>
+                  {pack.pending_can_cancel &&
+                    authQuery.data?.authenticated === true && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="col-span-2 text-destructive hover:text-destructive"
+                      disabled={cancelPublish.isPending}
+                      onClick={() => setCancelTarget(pack)}
+                    >
+                      {cancelPublish.isPending &&
+                      cancelPublish.variables?.pack_id === pack.pack_id ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        <XCircle className="size-4" />
+                      )}
+                      Cancel publish request
+                    </Button>
+                    )}
                 </div>
               </article>
             );
           })}
         </div>
       )}
+      <AlertDialog
+        open={Boolean(cancelTarget)}
+        onOpenChange={(open) => {
+          if (!open && !cancelPublish.isPending) setCancelTarget(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Cancel publish request?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This removes {cancelTarget?.name ?? "the pack"} from the review
+              queue and unlocks it for editing. You can submit it again later.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={cancelPublish.isPending}>
+              Keep under review
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className={cn(buttonVariants({ variant: "destructive" }))}
+              disabled={!cancelTarget || cancelPublish.isPending}
+              onClick={() => cancelTarget && cancelPublish.mutate(cancelTarget)}
+            >
+              {cancelPublish.isPending && (
+                <Loader2 className="size-4 animate-spin" />
+              )}
+              Cancel publish
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

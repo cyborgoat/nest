@@ -20,7 +20,7 @@ import {
   isPointOverExplorer,
   vaultFolderPathAtPoint,
 } from "@/lib/drop-targets";
-import { canEditPack } from "@/lib/pack-permissions";
+import { canEditPack, packEditBlockReason } from "@/lib/pack-permissions";
 import {
   fileMutationInvalidations,
   packMutationInvalidations,
@@ -87,7 +87,9 @@ export function ExplorerPanel({
     const pack = byPath.get(packRoot);
     if (!pack || !canEditPack(pack, hubUser)) {
       toast.error("Cannot import here", {
-        description: "You don't have edit access to this pack.",
+        description: pack
+          ? packEditBlockReason(pack, hubUser)
+          : "You don't have edit access to this pack.",
       });
       return;
     }

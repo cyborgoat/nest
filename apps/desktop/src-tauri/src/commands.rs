@@ -37,6 +37,7 @@ pub fn vault_write_file(
     path: String,
     content: String,
 ) -> AppResult<()> {
+    ensure_vault_path_not_review_locked(state.inner(), &path)?;
     let vault = state.vault_path();
     vault::write_file(&vault, &path, &content)?;
     indexing::schedule(state.inner())?;
@@ -49,6 +50,7 @@ pub fn vault_create_file(
     path: String,
     initial_content: Option<String>,
 ) -> AppResult<()> {
+    ensure_vault_path_not_review_locked(state.inner(), &path)?;
     let vault = state.vault_path();
     vault::create_file(&vault, &path, initial_content.as_deref().unwrap_or(""))?;
     indexing::schedule(state.inner())?;
@@ -57,6 +59,7 @@ pub fn vault_create_file(
 
 #[tauri::command]
 pub fn vault_create_folder(state: State<'_, SharedState>, path: String) -> AppResult<()> {
+    ensure_vault_path_not_review_locked(state.inner(), &path)?;
     let vault = state.vault_path();
     vault::create_folder(&vault, &path)?;
     Ok(())
@@ -64,6 +67,7 @@ pub fn vault_create_folder(state: State<'_, SharedState>, path: String) -> AppRe
 
 #[tauri::command]
 pub fn vault_delete_file(state: State<'_, SharedState>, path: String) -> AppResult<()> {
+    ensure_vault_path_not_review_locked(state.inner(), &path)?;
     let vault = state.vault_path();
     vault::delete_file(&vault, &path)?;
     indexing::schedule(state.inner())?;
@@ -72,6 +76,7 @@ pub fn vault_delete_file(state: State<'_, SharedState>, path: String) -> AppResu
 
 #[tauri::command]
 pub fn vault_delete_folder(state: State<'_, SharedState>, path: String) -> AppResult<()> {
+    ensure_vault_path_not_review_locked(state.inner(), &path)?;
     let vault = state.vault_path();
     vault::delete_folder(&vault, &path)?;
     indexing::schedule(state.inner())?;
@@ -84,6 +89,8 @@ pub fn vault_rename_entry(
     from: String,
     to: String,
 ) -> AppResult<()> {
+    ensure_vault_path_not_review_locked(state.inner(), &from)?;
+    ensure_vault_path_not_review_locked(state.inner(), &to)?;
     let vault = state.vault_path();
     vault::rename_entry(&vault, &from, &to)?;
     indexing::schedule(state.inner())?;
@@ -110,10 +117,11 @@ pub fn vault_import_files(
     dest_dir: String,
     source_paths: Vec<String>,
 ) -> AppResult<vault::ImportFilesResult> {
+    ensure_vault_path_not_review_locked(state.inner(), &dest_dir)?;
     let vault = state.vault_path();
     let paths: Vec<PathBuf> = source_paths.into_iter().map(PathBuf::from).collect();
     let result = vault::import_files(&vault, &dest_dir, &paths)?;
-    if result.imported.iter().any(|p| vault::is_markdown_path(p)) {
+    if result.imported.iter().any(vault::is_markdown_path) {
         indexing::schedule(state.inner())?;
     }
     Ok(result)
@@ -126,6 +134,38 @@ fn require_installed_pack(conn: &rusqlite::Connection, pack_id: &str) -> AppResu
     let pack_id = pack_id.trim();
     db::get_sync_state(conn, pack_id)?
         .ok_or_else(|| AppError::msg(format!("Pack not installed: {pack_id}")))
+}
+
+fn ensure_pack_not_review_locked(pack: &InstalledPack) -> AppResult<()> {
+    if pack.publish_review_status.as_deref() == Some("pending") {
+        return Err(AppError::msg(format!(
+            "{} is locked while its publish request is under review. Cancel the request to edit it again.",
+            pack.name
+        )));
+    }
+    Ok(())
+}
+
+fn ensure_vault_path_not_review_locked(state: &SharedState, path: &str) -> AppResult<()> {
+    let conn = state.db.lock();
+    let candidate = Path::new(path);
+    if let Some(pack) = db::list_sync_state(&conn)?.into_iter().find(|pack| {
+        let root = Path::new(&pack.local_path);
+        candidate == root || candidate.starts_with(root)
+    }) {
+        ensure_pack_not_review_locked(&pack)?;
+    }
+    Ok(())
+}
+
+fn ensure_existing_pack_not_review_locked(
+    conn: &rusqlite::Connection,
+    pack_id: &str,
+) -> AppResult<()> {
+    if let Some(pack) = db::get_sync_state(conn, pack_id.trim())? {
+        ensure_pack_not_review_locked(&pack)?;
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -248,6 +288,11 @@ pub fn hub_pack_discard_file(
     pack_id: String,
     path: String,
 ) -> AppResult<()> {
+    {
+        let conn = state.db.lock();
+        let installed = require_installed_pack(&conn, &pack_id)?;
+        ensure_pack_not_review_locked(&installed)?;
+    }
     let (pack_dir, snapshot_dir, local_path) = pack_dirs(&state, &pack_id)?;
     let pack_relative = strip_pack_prefix(&local_path, &path)?;
     crate::snapshot::discard_file(&pack_dir, &snapshot_dir, &pack_relative)?;
@@ -950,6 +995,13 @@ pub async fn hub_download_pack(
         let conn = state.db.lock();
         db::get_settings(&conn)?
     };
+    {
+        let conn = state.db.lock();
+        ensure_existing_pack_not_review_locked(&conn, &pack_id)?;
+        if let Some(replaced) = replace_local_pack_id.as_deref() {
+            ensure_existing_pack_not_review_locked(&conn, replaced)?;
+        }
+    }
 
     let vault = state.vault_path();
     if sync_patch.unwrap_or(false) {
@@ -1155,6 +1207,10 @@ pub async fn hub_import_local_pack(
 
     let vault = state.vault_path();
     let inspected = hub::inspect_local_pack(&source, &vault)?;
+    {
+        let conn = state.db.lock();
+        ensure_existing_pack_not_review_locked(&conn, &inspected.metadata.id)?;
+    }
     if !overwrite {
         let conn = state.db.lock();
         if db::get_sync_state(&conn, &inspected.metadata.id)?.is_some() {
@@ -1194,6 +1250,10 @@ pub async fn hub_create_pack_from_zip(
     metadata: PackMeta,
     overwrite: bool,
 ) -> AppResult<InstalledPack> {
+    {
+        let conn = state.db.lock();
+        ensure_existing_pack_not_review_locked(&conn, metadata.id.trim())?;
+    }
     if !overwrite {
         let conn = state.db.lock();
         if db::get_sync_state(&conn, metadata.id.trim())?.is_some() {
@@ -1231,6 +1291,10 @@ pub async fn hub_create_pack_from_folder(
     metadata: PackMeta,
     overwrite: bool,
 ) -> AppResult<InstalledPack> {
+    {
+        let conn = state.db.lock();
+        ensure_existing_pack_not_review_locked(&conn, metadata.id.trim())?;
+    }
     if !overwrite {
         let conn = state.db.lock();
         if db::get_sync_state(&conn, metadata.id.trim())?.is_some() {
@@ -1480,11 +1544,15 @@ pub async fn hub_publish_release(
     state: State<'_, SharedState>,
     pack_id: String,
     version: String,
+    commit_message: String,
 ) -> AppResult<hub::PublishRequest> {
     publish_pack(
         state.inner(),
         pack_id,
-        PublishOperation::Release { version },
+        PublishOperation::Release {
+            version,
+            commit_message,
+        },
     )
     .await
 }
@@ -1494,18 +1562,28 @@ pub async fn hub_publish_live_patch(
     state: State<'_, SharedState>,
     pack_id: String,
     target_version: String,
+    commit_message: String,
 ) -> AppResult<hub::PublishRequest> {
     publish_pack(
         state.inner(),
         pack_id,
-        PublishOperation::LivePatch { target_version },
+        PublishOperation::LivePatch {
+            target_version,
+            commit_message,
+        },
     )
     .await
 }
 
 enum PublishOperation {
-    Release { version: String },
-    LivePatch { target_version: String },
+    Release {
+        version: String,
+        commit_message: String,
+    },
+    LivePatch {
+        target_version: String,
+        commit_message: String,
+    },
 }
 
 impl PublishOperation {
@@ -1513,6 +1591,14 @@ impl PublishOperation {
         match self {
             Self::Release { .. } => "release",
             Self::LivePatch { .. } => "live_patch",
+        }
+    }
+
+    fn commit_message(&self) -> &str {
+        match self {
+            Self::Release { commit_message, .. } | Self::LivePatch { commit_message, .. } => {
+                commit_message
+            }
         }
     }
 }
@@ -1526,7 +1612,7 @@ async fn publish_operation_remote(
     vault: &Path,
 ) -> AppResult<hub::PublishRequest> {
     match operation {
-        PublishOperation::Release { .. } => {
+        PublishOperation::Release { commit_message, .. } => {
             hub::publish_release_remote(
                 &settings.hub_base_url,
                 settings.effective_proxy_url(),
@@ -1534,10 +1620,11 @@ async fn publish_operation_remote(
                 pack,
                 source_local_path,
                 vault,
+                commit_message,
             )
             .await
         }
-        PublishOperation::LivePatch { .. } => {
+        PublishOperation::LivePatch { commit_message, .. } => {
             hub::publish_live_patch_remote(
                 &settings.hub_base_url,
                 settings.effective_proxy_url(),
@@ -1545,6 +1632,7 @@ async fn publish_operation_remote(
                 pack,
                 source_local_path,
                 vault,
+                commit_message,
             )
             .await
         }
@@ -1568,6 +1656,15 @@ async fn publish_pack(
         require_installed_pack(&conn, &pack_id)?
     };
     ensure_pack_publishable(&installed)?;
+    let commit_message = operation.commit_message().trim();
+    if commit_message.is_empty() {
+        return Err(AppError::msg("Publish commit message is required"));
+    }
+    if commit_message.chars().count() > 500 {
+        return Err(AppError::msg(
+            "Publish commit message must be 500 characters or fewer",
+        ));
+    }
     if let Some(pending_version) = &installed.pending_version {
         return Err(AppError::msg(format!(
             "{} already has a submission awaiting review (v{pending_version}). Wait for it to be approved or rejected before submitting again.",
@@ -1577,7 +1674,7 @@ async fn publish_pack(
     let vault = state.vault_path();
     let source_local_path = installed.local_path.clone();
     let pack = match &operation {
-        PublishOperation::Release { version } => {
+        PublishOperation::Release { version, .. } => {
             let version = version.trim();
             if version.is_empty() {
                 return Err(AppError::msg("Release version is required"));
@@ -1593,7 +1690,7 @@ async fn publish_pack(
                 path: installed.local_path.clone(),
             }
         }
-        PublishOperation::LivePatch { target_version } => {
+        PublishOperation::LivePatch { target_version, .. } => {
             let target_version = target_version.trim();
             if target_version.is_empty() {
                 return Err(AppError::msg("Live patch target version is required"));
@@ -1660,11 +1757,14 @@ async fn publish_pack(
         db::set_pending_publish(
             &conn,
             &pack.id,
-            &request.id,
-            &pack.version,
-            Some(&request.created_at),
-            &request.request_type,
-            request.patch_revision,
+            db::PendingPublishUpdate {
+                request_id: &request.id,
+                version: &pack.version,
+                created_at: Some(&request.created_at),
+                request_type: &request.request_type,
+                patch_revision: request.patch_revision,
+                can_cancel: true,
+            },
         )?;
     }
     result
@@ -1700,6 +1800,56 @@ pub async fn hub_reconcile_publish_requests(
     db::list_sync_state(&conn)
 }
 
+#[tauri::command]
+pub async fn hub_cancel_publish_request(
+    state: State<'_, SharedState>,
+    pack_id: String,
+    request_id: String,
+) -> AppResult<InstalledPack> {
+    let settings = {
+        let conn = state.db.lock();
+        db::get_settings(&conn)?
+    };
+    let token = ensure_hub_access(state.inner(), &settings, false)
+        .await?
+        .ok_or_else(|| AppError::msg("Sign in to cancel a publish request"))?;
+    let installed = {
+        let conn = state.db.lock();
+        require_installed_pack(&conn, &pack_id)?
+    };
+    if installed.publish_review_status.as_deref() != Some("pending")
+        || installed.pending_request_id.as_deref() != Some(request_id.as_str())
+    {
+        return Err(AppError::msg(
+            "This publish request is no longer pending for the pack",
+        ));
+    }
+    if !installed.pending_can_cancel {
+        return Err(AppError::msg(
+            "Only the original submitter can cancel this publish request",
+        ));
+    }
+
+    let cancelled = hub::cancel_publish_request_remote(
+        &settings.hub_base_url,
+        settings.effective_proxy_url(),
+        &token,
+        &request_id,
+    )
+    .await?;
+    if !cancelled.success || cancelled.request_id != request_id || cancelled.pack_id != pack_id {
+        return Err(AppError::msg(
+            "Hub returned an invalid publish cancellation response",
+        ));
+    }
+    let conn = state.db.lock();
+    let current = require_installed_pack(&conn, &pack_id)?;
+    if current.pending_request_id.as_deref() == Some(request_id.as_str()) {
+        db::clear_pending_publish(&conn, &pack_id)?;
+    }
+    require_installed_pack(&conn, &pack_id)
+}
+
 /// Best-effort per pack — a transient network error or a lookup this device
 /// can't see (e.g. someone else's request) must not abort reconciliation for
 /// the rest of the library, so every fallible step here just skips forward.
@@ -1733,11 +1883,14 @@ async fn reconcile_one_pack(
         let _ = db::set_pending_publish(
             &conn,
             &pack.pack_id,
-            &remote.id,
-            &remote.version,
-            Some(&remote.created_at),
-            &remote.request_type,
-            remote.patch_revision,
+            db::PendingPublishUpdate {
+                request_id: &remote.id,
+                version: &remote.version,
+                created_at: Some(&remote.created_at),
+                request_type: &remote.request_type,
+                patch_revision: remote.patch_revision,
+                can_cancel: remote.can_cancel,
+            },
         );
         return;
     }
@@ -1748,17 +1901,27 @@ async fn reconcile_one_pack(
     // We locally thought this pack still had a pending request; the Hub now
     // says it doesn't, so it just resolved. Learn the outcome to decide
     // whether to advance the version/snapshot baseline.
-    let Ok(resolved) = hub::get_publish_request_remote(
+    let resolved = match hub::get_publish_request_remote(
         &settings.hub_base_url,
         settings.effective_proxy_url(),
         token,
         request_id,
     )
     .await
-    else {
-        // Keep the local marker when the resolution cannot be confirmed.
-        // A transient network/auth failure must never discard a merge action.
-        return;
+    {
+        Ok(resolved) => resolved,
+        Err(AppError::HubResponse { status: 404, .. }) => {
+            // Cancelled requests are deleted by the Hub. A confirmed 404,
+            // unlike a network/auth failure, safely releases this stale lock.
+            let conn = state.db.lock();
+            let _ = db::clear_pending_publish(&conn, &pack.pack_id);
+            return;
+        }
+        Err(_) => {
+            // Keep the local marker when the resolution cannot be confirmed.
+            // A transient network/auth failure must never discard a merge action.
+            return;
+        }
     };
     if resolved.status == "approved" {
         let conn = state.db.lock();
@@ -1934,6 +2097,7 @@ pub fn hub_update_pack_metadata(
         let conn = state.db.lock();
         require_installed_pack(&conn, &pack_id)?
     };
+    ensure_pack_not_review_locked(&installed)?;
     let pack_dir = state.vault_path().join(&installed.local_path);
     let updated = hub::update_pack_description(&pack_dir, &description)?;
     let conn = state.db.lock();
@@ -1969,6 +2133,7 @@ pub fn hub_rename_pack(
         let conn = state.db.lock();
         require_installed_pack(&conn, &pack_id)?
     };
+    ensure_pack_not_review_locked(&installed)?;
     if installed.origin != "local" {
         return Err(AppError::msg(
             "Only locally-created or imported packs can be renamed",
@@ -2200,6 +2365,7 @@ mod publishing_origin_tests {
             pending_request_id: None,
             publish_review_status: None,
             publish_review_created_at: None,
+            pending_can_cancel: false,
         }
     }
 
@@ -2210,6 +2376,16 @@ mod publishing_origin_tests {
         for origin in ["bundled", "unknown"] {
             assert!(ensure_pack_publishable(&installed(origin)).is_err());
         }
+    }
+
+    #[test]
+    fn pending_review_locks_mutations_but_approved_merge_state_does_not() {
+        let mut pack = installed("local");
+        pack.publish_review_status = Some("pending".into());
+        assert!(ensure_pack_not_review_locked(&pack).is_err());
+
+        pack.publish_review_status = Some("approved_awaiting_merge".into());
+        assert!(ensure_pack_not_review_locked(&pack).is_ok());
     }
 }
 

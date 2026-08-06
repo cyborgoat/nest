@@ -1,9 +1,4 @@
-import type {
-  FileChangeStatus,
-  HubUser,
-  InstalledPack,
-  TreeNode,
-} from "@nest/shared";
+import type { HubUser, InstalledPack, TreeNode } from "@nest/shared";
 import { open as openDialog, save } from "@tauri-apps/plugin-dialog";
 import {
   ChevronDown,
@@ -55,7 +50,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
   ContextMenu,
@@ -77,15 +71,13 @@ import { PackDetailsDialog } from "@/components/hub/PackDetailsDialog";
 import { RenamePackDialog } from "@/components/hub/RenamePackDialog";
 import { api } from "@/lib/api";
 import { appErrorMessage } from "@/lib/errors";
-import {
-  STATUS_BADGE_VARIANT,
-  STATUS_LETTER,
-  STATUS_TEXT_CLASSES,
-} from "@/lib/file-status-ui";
 import { useI18n } from "@/lib/i18n";
-import { mergeDeletedIntoTree } from "@/lib/merge-deleted-tree";
 import { afterMenuClose } from "@/lib/menu-actions";
-import { canEditPack, canRenamePack } from "@/lib/pack-permissions";
+import {
+  canEditPack,
+  canRenamePack,
+  isPackReviewLocked,
+} from "@/lib/pack-permissions";
 import { pendingPublishVersionLabel } from "@/lib/publish-request-labels";
 import {
   fileMutationInvalidations,
@@ -241,7 +233,6 @@ function TreeItem({
   canRename,
   packId,
   installedPack,
-  statusMap,
   onSetActive,
   setActivePending,
   authenticated,
@@ -261,7 +252,6 @@ function TreeItem({
   canRename?: boolean;
   packId: string;
   installedPack?: InstalledPack;
-  statusMap: Map<string, FileChangeStatus>;
   onSetActive?: (active: boolean) => void;
   setActivePending?: boolean;
   authenticated?: boolean;
@@ -305,9 +295,7 @@ function TreeItem({
   const isRoot = depth === 0 && isFolder;
   const isImage = !isFolder && isImagePath(node.path);
   const isSelected = activeMainTabId === node.path;
-  const status = statusMap.get(node.path);
-  const isDeleted = status === "deleted";
-  const editableHere = canEdit && !isDeleted;
+  const editableHere = canEdit;
   const {
     externalDropTargetPath,
     internalDropTargetNodePath,
@@ -341,21 +329,23 @@ function TreeItem({
       }
     };
   }, [internalDropTargetNodePath, isFolder, node.path, open]);
-  const editReason = isDeleted
-    ? "This file has already been deleted."
+  const editReason = installedPack && isPackReviewLocked(installedPack)
+      ? "This pack is locked while its publish request is under review."
     : !canEdit
       ? "You don't have edit access to this pack."
       : undefined;
   const renameReason = canRename
     ? undefined
-    : "Only local packs can be renamed.";
+    : installedPack && isPackReviewLocked(installedPack)
+      ? "Cancel the pending publish request before renaming this pack."
+      : "Only local packs can be renamed.";
   const publishLocked = Boolean(installedPack?.pending_version);
-  const publishReason = !canEdit
-    ? "You don't have edit access to this pack."
-    : publishLocked
+  const publishReason = publishLocked
       ? installedPack?.publish_review_status === "approved_awaiting_merge"
         ? `${pendingPublishVersionLabel(installedPack!)} is approved and must be merged first.`
         : `${pendingPublishVersionLabel(installedPack!)} is already awaiting review.`
+    : !canEdit
+      ? "You don't have edit access to this pack."
       : undefined;
   const origin = installedPack?.origin;
   // Packs downloaded from the hub get a distinct stroke color in the tree.
@@ -499,10 +489,10 @@ function TreeItem({
       className="flex min-w-0 flex-1 select-none items-center gap-1.5 py-1.5 text-left"
       onClick={() => {
         if (isFolder) setOpen((v) => !v);
-        else if (!isDeleted) openFileTab(node.path);
+        else openFileTab(node.path);
       }}
       onDoubleClick={() => {
-        if (!isFolder && !isDeleted) openFileTab(node.path, { preview: false });
+        if (!isFolder) openFileTab(node.path, { preview: false });
       }}
     >
       {isFolder ? (
@@ -548,19 +538,10 @@ function TreeItem({
         className={cn(
           "truncate",
           !packActive && "opacity-80",
-          status && STATUS_TEXT_CLASSES[status],
         )}
       >
         {node.name}
       </span>
-      {status && (
-        <Badge
-          variant={STATUS_BADGE_VARIANT[status]}
-          className="ml-auto shrink-0 px-1 py-0 text-[10px] leading-4"
-        >
-          {STATUS_LETTER[status]}
-        </Badge>
-      )}
     </button>
   );
 
@@ -703,7 +684,6 @@ function TreeItem({
             </>
           )}
           <ContextMenuItem
-            disabled={isDeleted}
             onSelect={() =>
               afterMenuClose(() => {
                 void api
@@ -929,7 +909,6 @@ function TreeItem({
                 packActive={packActive}
                 canEdit={canEdit}
                 packId={packId}
-                statusMap={statusMap}
               />
             ))}
           </motion.div>
@@ -939,8 +918,6 @@ function TreeItem({
   );
 }
 
-/** Fetches a pack's change status once per root and merges deleted files into
- * the tree, so `TreeItem`'s recursion never needs N queries for N files. */
 function PackRootTreeItem({
   node,
   canEdit,
@@ -978,40 +955,15 @@ function PackRootTreeItem({
   onRenamePack: (packId: string, name: string) => void;
   renamePackPending: boolean;
 }) {
-  const statusQuery = useQuery({
-    queryKey: queryKeys.packStatus(packId),
-    queryFn: () => api.hubPackChangeStatus(packId),
-    enabled: canEdit,
-  });
-
-  const statusMap = useMemo(() => {
-    const map = new Map<string, FileChangeStatus>();
-    for (const s of statusQuery.data ?? []) map.set(s.path, s.status);
-    return map;
-  }, [statusQuery.data]);
-
-  const deletedPaths = useMemo(
-    () =>
-      (statusQuery.data ?? [])
-        .filter((s) => s.status === "deleted")
-        .map((s) => s.path),
-    [statusQuery.data],
-  );
-  const mergedNode = useMemo(
-    () => mergeDeletedIntoTree(node, deletedPaths),
-    [node, deletedPaths],
-  );
-
   return (
     <TreeItem
-      node={mergedNode}
+      node={node}
       forceOpen={forceOpen}
       packActive={packActive}
       canEdit={canEdit}
       canRename={canRename}
       packId={packId}
       installedPack={installedPack}
-      statusMap={statusMap}
       setActivePending={setActivePending}
       onSetActive={onSetActive}
       authenticated={authenticated}
@@ -1230,6 +1182,20 @@ export function LibraryTree({
     const sourcePack = findPackForPath(source.path);
     const destinationFolder = destinationFolderForNode(target);
     const destinationPack = findPackForPath(destinationFolder);
+    if (
+      (sourcePack && isPackReviewLocked(sourcePack)) ||
+      (destinationPack && isPackReviewLocked(destinationPack))
+    ) {
+      return {
+        sourcePack,
+        destinationPack,
+        validation: {
+          valid: false as const,
+          reason:
+            "Files cannot be moved into or out of a pack while its publish request is under review.",
+        },
+      };
+    }
     return {
       sourcePack,
       destinationPack,

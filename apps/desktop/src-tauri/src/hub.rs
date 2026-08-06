@@ -43,6 +43,8 @@ pub struct PublishRequest {
     pub version: String,
     pub name: String,
     pub description: String,
+    #[serde(default)]
+    pub commit_message: String,
     pub status: String,
     pub request_type: String,
     #[serde(default)]
@@ -52,6 +54,8 @@ pub struct PublishRequest {
     pub review_note: Option<String>,
     pub created_at: String,
     pub reviewed_at: Option<String>,
+    #[serde(default)]
+    pub can_cancel: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -579,6 +583,7 @@ pub async fn publish_release_remote(
     pack: &PackMeta,
     source_local_path: &str,
     vault_root: &Path,
+    commit_message: &str,
 ) -> AppResult<PublishRequest> {
     if hub_base_url.trim().is_empty() {
         return Err(AppError::msg(
@@ -595,8 +600,11 @@ pub async fn publish_release_remote(
         pack,
         source_local_path,
         vault_root,
-        endpoint,
-        "Release publish",
+        PublishUploadTarget {
+            endpoint,
+            label: "Release publish",
+        },
+        commit_message,
     )
     .await
 }
@@ -608,6 +616,7 @@ pub async fn publish_live_patch_remote(
     pack: &PackMeta,
     source_local_path: &str,
     vault_root: &Path,
+    commit_message: &str,
 ) -> AppResult<PublishRequest> {
     if hub_base_url.trim().is_empty() {
         return Err(AppError::msg(
@@ -626,10 +635,18 @@ pub async fn publish_live_patch_remote(
         pack,
         source_local_path,
         vault_root,
-        endpoint,
-        "Live patch publish",
+        PublishUploadTarget {
+            endpoint,
+            label: "Live patch publish",
+        },
+        commit_message,
     )
     .await
+}
+
+struct PublishUploadTarget<'a> {
+    endpoint: String,
+    label: &'a str,
 }
 
 async fn upload_publish_archive(
@@ -638,9 +655,10 @@ async fn upload_publish_archive(
     pack: &PackMeta,
     source_local_path: &str,
     vault_root: &Path,
-    endpoint: String,
-    label: &str,
+    target: PublishUploadTarget<'_>,
+    commit_message: &str,
 ) -> AppResult<PublishRequest> {
+    let PublishUploadTarget { endpoint, label } = target;
     let temp = std::env::temp_dir().join(format!(
         "nest-publish-{}-{}.zip",
         pack.id,
@@ -652,7 +670,9 @@ async fn upload_publish_archive(
     let part = reqwest::multipart::Part::bytes(bytes)
         .file_name(format!("{}-{}.zip", pack.id, pack.version))
         .mime_str("application/zip")?;
-    let form = reqwest::multipart::Form::new().part("file", part);
+    let form = reqwest::multipart::Form::new()
+        .text("commit_message", commit_message.to_string())
+        .part("file", part);
     crate::nest_debug!(
         "hub",
         "{label} start pack_id={} endpoint={endpoint}",
@@ -697,6 +717,8 @@ pub async fn get_publish_request_remote(
 #[derive(Debug, Clone, Deserialize)]
 struct PackPendingStatus {
     pending: Option<PublishRequest>,
+    #[serde(default)]
+    can_cancel: bool,
 }
 
 /// The pack's current pending request, if any — reflects the Hub's true
@@ -723,7 +745,40 @@ pub async fn get_pack_pending_remote(
         return Err(hub_error_from_response(response, "Pack pending status").await);
     }
     let status: PackPendingStatus = response.json().await?;
-    Ok(status.pending)
+    Ok(status.pending.map(|mut pending| {
+        pending.can_cancel = status.can_cancel;
+        pending
+    }))
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CancelPublishResult {
+    pub success: bool,
+    pub request_id: String,
+    pub pack_id: String,
+}
+
+pub async fn cancel_publish_request_remote(
+    hub_base_url: &str,
+    proxy_url: &str,
+    access_token: &str,
+    request_id: &str,
+) -> AppResult<CancelPublishResult> {
+    let url = format!(
+        "{}/api/publish-requests/{}",
+        hub_base_url.trim_end_matches('/'),
+        request_id
+    );
+    let response = http::build_hub_client(proxy_url)?
+        .delete(url)
+        .bearer_auth(access_token)
+        .send()
+        .await
+        .map_err(|e| map_hub_http_error("Cancel publish request", e))?;
+    if !response.status().is_success() {
+        return Err(hub_error_from_response(response, "Cancel publish request").await);
+    }
+    Ok(response.json().await?)
 }
 
 async fn message_request(

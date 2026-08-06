@@ -11,11 +11,13 @@ export type PublishPackInput =
       packId: string;
       version: string;
       description: string;
+      commitMessage: string;
     }
   | {
       kind: "live_patch";
       packId: string;
       targetVersion: string;
+      commitMessage: string;
     };
 
 export function usePublishPack() {
@@ -26,9 +28,17 @@ export function usePublishPack() {
     mutationFn: async (input: PublishPackInput) => {
       if (input.kind === "release") {
         await api.hubUpdatePackMetadata(input.packId, input.description);
-        return api.hubPublishRelease(input.packId, input.version);
+        return api.hubPublishRelease(
+          input.packId,
+          input.version,
+          input.commitMessage,
+        );
       }
-      return api.hubPublishLivePatch(input.packId, input.targetVersion);
+      return api.hubPublishLivePatch(
+        input.packId,
+        input.targetVersion,
+        input.commitMessage,
+      );
     },
     onMutate: () => {
       toastIdRef.current = toast.loading("Uploading knowledge pack to Hub…");

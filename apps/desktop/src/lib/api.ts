@@ -195,15 +195,25 @@ export const api = {
       currentPassword,
       newPassword,
     }),
-  hubPublishRelease: (packId: string, version: string) =>
+  hubPublishRelease: (
+    packId: string,
+    version: string,
+    commitMessage: string,
+  ) =>
     invoke<PublishRequest>("hub_publish_release", {
       packId,
       version,
+      commitMessage,
     }),
-  hubPublishLivePatch: (packId: string, targetVersion: string) =>
+  hubPublishLivePatch: (
+    packId: string,
+    targetVersion: string,
+    commitMessage: string,
+  ) =>
     invoke<PublishRequest>("hub_publish_live_patch", {
       packId,
       targetVersion,
+      commitMessage,
     }),
   hubUpdatePackMetadata: (packId: string, description: string) =>
     invoke<InstalledPack>("hub_update_pack_metadata", {
@@ -214,6 +224,11 @@ export const api = {
     invoke<InstalledPack>("hub_rename_pack", { packId, name }),
   hubReconcilePublishRequests: () =>
     invoke<InstalledPack[]>("hub_reconcile_publish_requests"),
+  hubCancelPublishRequest: (packId: string, requestId: string) =>
+    invoke<InstalledPack>("hub_cancel_publish_request", {
+      packId,
+      requestId,
+    }),
   hubMergeApprovedPack: (packId: string, requestId: string) =>
     invoke<InstalledPack>("hub_merge_approved_pack", { packId, requestId }),
   hubListMessages: (filter: "all" | "unread", cursor?: string) =>

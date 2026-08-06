@@ -60,6 +60,7 @@ type PublishRequestRow = {
   version: string;
   name: string;
   description: string;
+  commit_message: string;
   submitter_uuid: string | null;
   staging_path: string;
   checksum: string;
@@ -104,14 +105,26 @@ export class PublishingService {
     private readonly publishReview: PublishReviewService,
   ) {}
 
+  private normalizeCommitMessage(value?: string): string {
+    const normalized = typeof value === 'string' ? value.trim() : '';
+    if ([...normalized].length > 500) {
+      throw new BadRequestException(
+        'Publish commit message must be 500 characters or fewer',
+      );
+    }
+    return normalized;
+  }
+
   submitRelease(
     user: AuthUser,
     file: UploadedPackFile,
     metadata?: KnowledgePackMeta,
+    commitMessage?: string,
   ): Promise<PublishRequestView> {
     return this.submitWithDiagnostics(user, file, {
       requestType: 'release',
       metadata,
+      commitMessage: this.normalizeCommitMessage(commitMessage),
     });
   }
 
@@ -120,11 +133,13 @@ export class PublishingService {
     file: UploadedPackFile,
     packId: string,
     targetVersion: string,
+    commitMessage?: string,
   ): Promise<PublishRequestView> {
     return this.submitWithDiagnostics(user, file, {
       requestType: 'live_patch',
       packId,
       targetVersion,
+      commitMessage: this.normalizeCommitMessage(commitMessage),
     });
   }
 
@@ -132,11 +147,16 @@ export class PublishingService {
     user: AuthUser,
     file: UploadedPackFile,
     operation:
-      | { requestType: 'release'; metadata?: KnowledgePackMeta }
+      | {
+          requestType: 'release';
+          metadata?: KnowledgePackMeta;
+          commitMessage: string;
+        }
       | {
           requestType: 'live_patch';
           packId: string;
           targetVersion: string;
+          commitMessage: string;
         },
   ): Promise<PublishRequestView> {
     try {
@@ -166,11 +186,16 @@ export class PublishingService {
     user: AuthUser,
     file: UploadedPackFile,
     operation:
-      | { requestType: 'release'; metadata?: KnowledgePackMeta }
+      | {
+          requestType: 'release';
+          metadata?: KnowledgePackMeta;
+          commitMessage: string;
+        }
       | {
           requestType: 'live_patch';
           packId: string;
           targetVersion: string;
+          commitMessage: string;
         },
   ): Promise<PublishRequestView> {
     this.assertUploadable(file);
@@ -179,6 +204,7 @@ export class PublishingService {
       operation.requestType === 'release' ? operation.metadata : undefined,
     );
     const requestType = operation.requestType;
+    const commitMessage = operation.commitMessage;
     if (
       requestType === 'live_patch' &&
       (operation.packId !== pack.id || operation.targetVersion !== pack.version)
@@ -282,19 +308,20 @@ export class PublishingService {
       db.transaction(() => {
         db.prepare(
           `INSERT INTO publish_requests(
-            id, pack_id, version, name, description, submitter_uuid,
+            id, pack_id, version, name, description, commit_message, submitter_uuid,
             submitter_id_snapshot, submitter_name_snapshot, staging_path,
             checksum, status, validation_json, base_version,
             review_artifact_path, request_type, patch_revision,
             base_patch_revision, created_at
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)`,
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)`,
         ).run(
           requestId,
           pack.id,
           pack.version,
           pack.name,
           pack.description,
+          commitMessage,
           user.uuid,
           user.id,
           user.name,
@@ -358,7 +385,7 @@ export class PublishingService {
   listMine(user: AuthUser): PublishRequestView[] {
     return this.database.db
       .prepare(
-        `SELECT id, pack_id, version, name, description, status, request_type,
+        `SELECT id, pack_id, version, name, description, commit_message, status, request_type,
                 patch_revision, base_patch_revision, review_note, created_at, reviewed_at
       FROM publish_requests WHERE submitter_uuid = ? ORDER BY created_at DESC`,
       )
@@ -368,7 +395,7 @@ export class PublishingService {
   listPending(): PendingRequestView[] {
     return this.database.db
       .prepare(
-        `SELECT r.id, r.pack_id, r.version, r.name, r.description, r.status,
+        `SELECT r.id, r.pack_id, r.version, r.name, r.description, r.commit_message, r.status,
       r.request_type, r.patch_revision, r.base_patch_revision, r.checksum,
       r.validation_json, r.created_at, u.login_id AS submitter_id, u.name AS submitter_name
       FROM publish_requests r JOIN users u ON u.uuid = r.submitter_uuid
@@ -409,7 +436,7 @@ export class PublishingService {
     const rows = this.database.db
       .prepare(
         `SELECT
-          r.id, r.pack_id, r.version, r.name, r.description, r.status,
+          r.id, r.pack_id, r.version, r.name, r.description, r.commit_message, r.status,
           r.request_type, r.patch_revision, r.base_patch_revision,
           r.checksum, r.validation_json, r.review_note, r.created_at,
           r.reviewed_at,
@@ -506,6 +533,24 @@ export class PublishingService {
     const timestamp = now();
     try {
       this.database.db.transaction(() => {
+        const resolved = this.database.db
+          .prepare(
+            `UPDATE publish_requests
+             SET status = 'approved', review_note = ?, reviewer_uuid = ?,
+                 reviewer_id_snapshot = ?, reviewer_name_snapshot = ?,
+                 reviewed_at = ?
+             WHERE id = ? AND status = 'pending'`,
+          )
+          .run(
+            note?.trim() || null,
+            reviewer.uuid,
+            reviewer.id,
+            reviewer.name,
+            timestamp,
+            requestId,
+          );
+        if (resolved.changes !== 1)
+          throw new ConflictException('Request has already been resolved');
         const packInsert = this.database.db
           .prepare(
             `INSERT OR IGNORE INTO packs(id, name, description, owner_uuid, visibility, archived, created_at, updated_at)
@@ -564,22 +609,6 @@ export class PublishingService {
               timestamp,
             );
         }
-        this.database.db
-          .prepare(
-            `UPDATE publish_requests
-             SET status = 'approved', review_note = ?, reviewer_uuid = ?,
-                 reviewer_id_snapshot = ?, reviewer_name_snapshot = ?,
-                 reviewed_at = ?
-             WHERE id = ?`,
-          )
-          .run(
-            note?.trim() || null,
-            reviewer.uuid,
-            reviewer.id,
-            reviewer.name,
-            timestamp,
-            requestId,
-          );
         this.audit_log.record(
           reviewer,
           isLivePatch ? 'publish.live_patch.approve' : 'publish.approve',
@@ -640,13 +669,13 @@ export class PublishingService {
       throw new ConflictException('Request has already been reviewed');
     const timestamp = now();
     this.database.db.transaction(() => {
-      this.database.db
+      const resolved = this.database.db
         .prepare(
           `UPDATE publish_requests
            SET status = 'rejected', review_note = ?, reviewer_uuid = ?,
                reviewer_id_snapshot = ?, reviewer_name_snapshot = ?,
                reviewed_at = ?
-           WHERE id = ?`,
+           WHERE id = ? AND status = 'pending'`,
         )
         .run(
           note.trim(),
@@ -656,6 +685,8 @@ export class PublishingService {
           timestamp,
           requestId,
         );
+      if (resolved.changes !== 1)
+        throw new ConflictException('Request has already been resolved');
       this.audit_log.record(
         reviewer,
         request.request_type === 'live_patch'
@@ -690,6 +721,56 @@ export class PublishingService {
     })();
     await fs.unlink(request.staging_path).catch(() => undefined);
     return this.getRequest(requestId, reviewer);
+  }
+
+  async cancel(
+    requestId: string,
+    user: AuthUser,
+  ): Promise<{ success: true; request_id: string; pack_id: string }> {
+    const request = this.requestRow(requestId);
+    if (request.submitter_uuid !== user.uuid)
+      throw new ForbiddenException(
+        'Only the original submitter can cancel this publish request',
+      );
+    if (request.status !== 'pending')
+      throw new ConflictException(
+        'Only pending publish requests can be cancelled',
+      );
+
+    this.database.db.transaction(() => {
+      const deleted = this.database.db
+        .prepare(
+          "DELETE FROM publish_requests WHERE id = ? AND submitter_uuid = ? AND status = 'pending'",
+        )
+        .run(requestId, user.uuid);
+      if (deleted.changes !== 1)
+        throw new ConflictException(
+          'Publish request has already been resolved',
+        );
+      this.audit_log.record(
+        user,
+        request.request_type === 'live_patch'
+          ? 'publish.live_patch.cancel'
+          : 'publish.cancel',
+        'publish_request',
+        requestId,
+        {
+          pack_id: request.pack_id,
+          version: request.version,
+          patch_revision: request.patch_revision,
+        },
+      );
+    })();
+
+    await Promise.all([
+      fs.unlink(request.staging_path).catch(() => undefined),
+      request.review_artifact_path
+        ? fs
+            .rm(request.review_artifact_path, { recursive: true, force: true })
+            .catch(() => undefined)
+        : Promise.resolve(),
+    ]);
+    return { success: true, request_id: requestId, pack_id: request.pack_id };
   }
 
   getRequest(id: string, user: AuthUser): PublishRequestView {
@@ -735,6 +816,12 @@ export class PublishingService {
     return visible ? this.toView(row) : null;
   }
 
+  canCancel(request: PublishRequestView | null, user: AuthUser): boolean {
+    if (!request) return false;
+    const row = this.requestRow(request.id);
+    return row.status === 'pending' && row.submitter_uuid === user.uuid;
+  }
+
   private toView(row: PublishRequestRow): PublishRequestView {
     return {
       id: row.id,
@@ -742,6 +829,7 @@ export class PublishingService {
       version: row.version,
       name: row.name,
       description: row.description,
+      commit_message: row.commit_message,
       request_type: row.request_type,
       patch_revision: row.patch_revision,
       base_patch_revision: row.base_patch_revision,
@@ -1118,7 +1206,7 @@ export class PublishingService {
     const row = this.database.db
       .prepare(
         `SELECT
-          r.id, r.pack_id, r.version, r.name, r.description, r.status,
+          r.id, r.pack_id, r.version, r.name, r.description, r.commit_message, r.status,
           r.request_type, r.patch_revision, r.base_patch_revision,
           r.checksum, r.validation_json, r.review_note, r.created_at,
           r.reviewed_at,

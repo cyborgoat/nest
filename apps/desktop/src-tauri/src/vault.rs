@@ -470,9 +470,7 @@ pub fn import_files(
     }
     let dest = resolve_vault_path(root, dest_rel)?;
     if dest.exists() && !dest.is_dir() {
-        return Err(AppError::msg(format!(
-            "{dest_rel} is a file, not a folder"
-        )));
+        return Err(AppError::msg(format!("{dest_rel} is a file, not a folder")));
     }
     ensure_dir(&dest)?;
 
@@ -531,10 +529,7 @@ fn unique_file_name(dir: &Path, file_name: &str) -> String {
         return file_name.to_string();
     }
     let path = Path::new(file_name);
-    let stem = path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("file");
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("file");
     let ext = path
         .extension()
         .and_then(|e| e.to_str())
@@ -697,7 +692,7 @@ mod tests {
         let src = src_dir.join("photo.png");
         fs::write(&src, [9, 9, 9]).unwrap();
 
-        let first = import_files(&dir, "pack", &[src.clone()]).unwrap();
+        let first = import_files(&dir, "pack", std::slice::from_ref(&src)).unwrap();
         assert_eq!(first.imported, vec!["pack/photo.png"]);
         assert!(first.skipped.is_empty());
 

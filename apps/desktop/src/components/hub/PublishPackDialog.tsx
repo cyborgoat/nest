@@ -15,8 +15,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { nextPatchVersion } from "@/lib/semver";
 
 export type PublishPackIntent =
-  | { kind: "release"; version: string; description: string }
-  | { kind: "live_patch"; targetVersion: string };
+  | {
+      kind: "release";
+      version: string;
+      description: string;
+      commitMessage: string;
+    }
+  | { kind: "live_patch"; targetVersion: string; commitMessage: string };
 
 export function PublishPackDialog({
   open,
@@ -57,6 +62,7 @@ export function PublishPackDialog({
   );
   const [version, setVersion] = useState(currentVersion);
   const [description, setDescription] = useState(currentDescription);
+  const [commitMessage, setCommitMessage] = useState("");
 
   useLayoutEffect(() => {
     if (open) {
@@ -64,6 +70,7 @@ export function PublishPackDialog({
         isFirstPublish ? currentVersion : nextPatchVersion(currentVersion),
       );
       setDescription(currentDescription);
+      setCommitMessage("");
       setRequestType("release");
     }
   }, [open, currentVersion, currentDescription, isFirstPublish]);
@@ -183,6 +190,15 @@ export function PublishPackDialog({
               cannot change.
             </p>
           )}
+          <Field label="Publish commit message">
+            <Textarea
+              value={commitMessage}
+              onChange={(e) => setCommitMessage(e.target.value)}
+              placeholder="Summarize what changed in this publish"
+              rows={2}
+              maxLength={500}
+            />
+          </Field>
         </div>
         <DialogFooter>
           <Button
@@ -196,6 +212,7 @@ export function PublishPackDialog({
           <Button
             disabled={
               publishing ||
+              !commitMessage.trim() ||
               (requestType === "live_patch"
                 ? !currentVersion.trim()
                 : !version.trim())
@@ -205,12 +222,14 @@ export function PublishPackDialog({
                 onPublish({
                   kind: "live_patch",
                   targetVersion: currentVersion,
+                  commitMessage: commitMessage.trim(),
                 });
               } else {
                 onPublish({
                   kind: "release",
                   version: version.trim(),
                   description: description.trim(),
+                  commitMessage: commitMessage.trim(),
                 });
               }
             }}

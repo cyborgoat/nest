@@ -184,6 +184,8 @@ pub struct InstalledPack {
     pub publish_review_status: Option<String>,
     #[serde(default)]
     pub publish_review_created_at: Option<String>,
+    #[serde(default)]
+    pub pending_can_cancel: bool,
 }
 
 fn default_true() -> bool {
@@ -326,6 +328,12 @@ fn ensure_sync_state_pending_columns(conn: &Connection) -> AppResult<()> {
     if !table_has_column(conn, "sync_state", "publish_review_created_at")? {
         conn.execute(
             "ALTER TABLE sync_state ADD COLUMN publish_review_created_at TEXT",
+            [],
+        )?;
+    }
+    if !table_has_column(conn, "sync_state", "pending_can_cancel")? {
+        conn.execute(
+            "ALTER TABLE sync_state ADD COLUMN pending_can_cancel INTEGER NOT NULL DEFAULT 0",
             [],
         )?;
     }
@@ -1041,7 +1049,7 @@ pub fn list_active_pack_roots(conn: &Connection) -> AppResult<Vec<String>> {
 
 pub fn list_sync_state(conn: &Connection) -> AppResult<Vec<InstalledPack>> {
     let mut stmt = conn.prepare(
-        "SELECT pack_id, name, local_path, version, last_synced, COALESCE(active, 1), COALESCE(origin, 'unknown'), owner_id, COALESCE(description, ''), pending_version, pending_request_id, publish_review_status, publish_review_created_at, COALESCE(patch_revision, 0), pending_request_type, pending_patch_revision
+        "SELECT pack_id, name, local_path, version, last_synced, COALESCE(active, 1), COALESCE(origin, 'unknown'), owner_id, COALESCE(description, ''), pending_version, pending_request_id, publish_review_status, publish_review_created_at, COALESCE(patch_revision, 0), pending_request_type, pending_patch_revision, COALESCE(pending_can_cancel, 0)
          FROM sync_state ORDER BY name",
     )?;
     let rows = stmt.query_map([], |row| {
@@ -1062,6 +1070,7 @@ pub fn list_sync_state(conn: &Connection) -> AppResult<Vec<InstalledPack>> {
             pending_request_id: row.get(10)?,
             publish_review_status: row.get(11)?,
             publish_review_created_at: row.get(12)?,
+            pending_can_cancel: row.get::<_, i64>(16)? != 0,
         })
     })?;
     Ok(rows.filter_map(|r| r.ok()).collect())
@@ -1069,7 +1078,7 @@ pub fn list_sync_state(conn: &Connection) -> AppResult<Vec<InstalledPack>> {
 
 pub fn get_sync_state(conn: &Connection, pack_id: &str) -> AppResult<Option<InstalledPack>> {
     conn.query_row(
-        "SELECT pack_id, name, local_path, version, last_synced, COALESCE(active, 1), COALESCE(origin, 'unknown'), owner_id, COALESCE(description, ''), pending_version, pending_request_id, publish_review_status, publish_review_created_at, COALESCE(patch_revision, 0), pending_request_type, pending_patch_revision
+        "SELECT pack_id, name, local_path, version, last_synced, COALESCE(active, 1), COALESCE(origin, 'unknown'), owner_id, COALESCE(description, ''), pending_version, pending_request_id, publish_review_status, publish_review_created_at, COALESCE(patch_revision, 0), pending_request_type, pending_patch_revision, COALESCE(pending_can_cancel, 0)
          FROM sync_state WHERE pack_id = ?1",
         params![pack_id],
         |row| {
@@ -1090,6 +1099,7 @@ pub fn get_sync_state(conn: &Connection, pack_id: &str) -> AppResult<Option<Inst
                 pending_request_id: row.get(10)?,
                 publish_review_status: row.get(11)?,
                 publish_review_created_at: row.get(12)?,
+                pending_can_cancel: row.get::<_, i64>(16)? != 0,
             })
         },
     )
@@ -1100,29 +1110,36 @@ pub fn get_sync_state(conn: &Connection, pack_id: &str) -> AppResult<Option<Inst
 /// Records that `pack_id` has an unresolved publish request awaiting Hub
 /// review. `version`/snapshot baseline are deliberately left untouched —
 /// see the explicit publish commands for why.
+pub struct PendingPublishUpdate<'a> {
+    pub request_id: &'a str,
+    pub version: &'a str,
+    pub created_at: Option<&'a str>,
+    pub request_type: &'a str,
+    pub patch_revision: Option<i64>,
+    pub can_cancel: bool,
+}
+
 pub fn set_pending_publish(
     conn: &Connection,
     pack_id: &str,
-    request_id: &str,
-    version: &str,
-    created_at: Option<&str>,
-    request_type: &str,
-    patch_revision: Option<i64>,
+    pending: PendingPublishUpdate<'_>,
 ) -> AppResult<()> {
     conn.execute(
         "UPDATE sync_state
          SET pending_request_id = ?1, pending_version = ?2,
              publish_review_status = 'pending',
              pending_request_type = ?4, pending_patch_revision = ?5,
+             pending_can_cancel = ?7,
              publish_review_created_at = COALESCE(?3, publish_review_created_at)
          WHERE pack_id = ?6",
         params![
-            request_id,
-            version,
-            created_at,
-            request_type,
-            patch_revision,
-            pack_id
+            pending.request_id,
+            pending.version,
+            pending.created_at,
+            pending.request_type,
+            pending.patch_revision,
+            pack_id,
+            if pending.can_cancel { 1 } else { 0 }
         ],
     )?;
     Ok(())
@@ -1137,7 +1154,8 @@ pub fn set_publish_approved_awaiting_merge(
     conn.execute(
         "UPDATE sync_state
          SET pending_request_id = ?1, pending_version = ?2,
-             publish_review_status = 'approved_awaiting_merge'
+             publish_review_status = 'approved_awaiting_merge',
+             pending_can_cancel = 0
          WHERE pack_id = ?3",
         params![request_id, version, pack_id],
     )?;
@@ -1152,6 +1170,7 @@ pub fn clear_pending_publish(conn: &Connection, pack_id: &str) -> AppResult<()> 
         "UPDATE sync_state
          SET pending_request_id = NULL, pending_version = NULL,
              pending_request_type = NULL, pending_patch_revision = NULL,
+             pending_can_cancel = 0,
              publish_review_status = NULL, publish_review_created_at = NULL
          WHERE pack_id = ?1",
         params![pack_id],
@@ -1398,11 +1417,14 @@ mod sync_state_tests {
         set_pending_publish(
             &conn,
             "sample",
-            "req-1",
-            "1.1.0",
-            Some("now"),
-            "release",
-            None,
+            PendingPublishUpdate {
+                request_id: "req-1",
+                version: "1.1.0",
+                created_at: Some("now"),
+                request_type: "release",
+                patch_revision: None,
+                can_cancel: true,
+            },
         )
         .unwrap();
         let pending = get_sync_state(&conn, "sample").unwrap().unwrap();
@@ -1412,6 +1434,7 @@ mod sync_state_tests {
         assert_eq!(pending.pending_patch_revision, None);
         assert_eq!(pending.publish_review_status.as_deref(), Some("pending"));
         assert_eq!(pending.publish_review_created_at.as_deref(), Some("now"));
+        assert!(pending.pending_can_cancel);
         // `version` (the last-approved value) must stay untouched by a pending marker.
         assert_eq!(pending.version, "1.0.0");
         let listed = list_sync_state(&conn).unwrap();
@@ -1425,6 +1448,7 @@ mod sync_state_tests {
             Some("approved_awaiting_merge")
         );
         assert_eq!(approved.version, "1.0.0");
+        assert!(!approved.pending_can_cancel);
 
         clear_pending_publish(&conn, "sample").unwrap();
         let cleared = get_sync_state(&conn, "sample").unwrap().unwrap();
@@ -1432,6 +1456,7 @@ mod sync_state_tests {
         assert_eq!(cleared.pending_version, None);
         assert_eq!(cleared.publish_review_status, None);
         assert_eq!(cleared.publish_review_created_at, None);
+        assert!(!cleared.pending_can_cancel);
         assert_eq!(cleared.version, "1.0.0", "clearing must not touch version");
     }
 }

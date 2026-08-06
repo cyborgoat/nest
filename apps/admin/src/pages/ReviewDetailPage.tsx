@@ -354,9 +354,22 @@ function ReviewOverview({ item }: { item: AdminPublishReviewDetail }) {
             <span className="text-destructive">−{summary.deletions}</span>
           </div>
         </div>
-        <p className="mt-4 text-sm text-muted-foreground">
-          {item.description || "No release description was provided."}
-        </p>
+        <div className="mt-4 rounded-md border border-border bg-muted/30 px-3 py-2">
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Publish commit message
+          </p>
+          <p className="mt-1 text-sm font-medium">
+            {item.commit_message || "No publish commit message provided."}
+          </p>
+          <div className="mt-3 border-t border-border pt-3">
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Pack description
+            </p>
+            <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">
+              {item.description || "No pack description provided."}
+            </p>
+          </div>
+        </div>
       </Card>
       <Card className="space-y-2 text-sm">
         <MetaRow

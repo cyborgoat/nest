@@ -211,8 +211,8 @@ function RequestSummary({ item }: { item: RequestItem }) {
           sha256 {item.checksum.slice(0, 14)}…
         </code>
       </p>
-      <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
-        {item.description || "No description provided."}
+      <p className="mt-2 line-clamp-2 text-sm font-medium">
+        {item.commit_message || "No publish commit message provided."}
       </p>
     </div>
   );
@@ -290,6 +290,10 @@ function History({
                     {item.reviewed_at
                       ? formatDate(item.reviewed_at)
                       : "Unknown time"}
+                  </p>
+                  <p className="mt-2 line-clamp-1 text-sm font-medium">
+                    {item.commit_message ||
+                      "No publish commit message provided."}
                   </p>
                   <p className="mt-1 line-clamp-1 text-sm text-muted-foreground">
                     {item.review_note || "No reviewer comment provided."}

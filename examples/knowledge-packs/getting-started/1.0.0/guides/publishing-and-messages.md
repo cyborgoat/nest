@@ -15,16 +15,20 @@ imports it with **Hub → Import → Import pack ZIP**. No account needed.
 Needs a Hub connection, a signed-in account with publishing permission, and no
 pending review for the pack.
 
-1. Review your changes in **Source Control**.
+1. For a Hub-installed pack, review its changes in **Source Control**.
 2. Use the pack's **Publish** action.
 3. Choose **New release** (a new version) or **Live patch** (replace files in
    an existing release).
-4. Track the result in **Under Review** or **Messages**.
+4. Enter a concise publish commit message describing what changed.
+5. Track the result in **Under Review** or **Messages**.
 
 ## After submission
 
+- **Pending:** the pack is locked. Its submitted changes stay visible and
+  read-only in Source Control. The original submitter can cancel from **Under
+  Review** to unlock it.
 - **Approved:** choose **Merge with remote** in Messages or Source Control to
-  sync your baseline — edits made after submitting stay visible.
+  sync your baseline.
 - **Rejected:** read the comment in Messages, make changes, and publish again.
 
 An approved live patch shows as **Patch available**; choose **Sync patch**

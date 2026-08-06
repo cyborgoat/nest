@@ -1,5 +1,7 @@
 import {
   Controller,
+  Body,
+  Delete,
   Get,
   Param,
   Post,
@@ -21,14 +23,32 @@ export class PublishingController {
   /** Legacy compatibility: the generic endpoint is release-only. */
   @Post()
   @UseInterceptors(FileInterceptor('file', { storage: undefined }))
-  submitLegacy(@Req() req: Request, @UploadedFile() file: UploadedPackFile) {
-    return this.publishing.submitRelease(req.authUser!, file);
+  submitLegacy(
+    @Req() req: Request,
+    @UploadedFile() file: UploadedPackFile,
+    @Body('commit_message') commitMessage?: string,
+  ) {
+    return this.publishing.submitRelease(
+      req.authUser!,
+      file,
+      undefined,
+      commitMessage,
+    );
   }
 
   @Post('releases')
   @UseInterceptors(FileInterceptor('file', { storage: undefined }))
-  submitRelease(@Req() req: Request, @UploadedFile() file: UploadedPackFile) {
-    return this.publishing.submitRelease(req.authUser!, file);
+  submitRelease(
+    @Req() req: Request,
+    @UploadedFile() file: UploadedPackFile,
+    @Body('commit_message') commitMessage?: string,
+  ) {
+    return this.publishing.submitRelease(
+      req.authUser!,
+      file,
+      undefined,
+      commitMessage,
+    );
   }
 
   @Post('live-patches/:packId/:version')
@@ -38,12 +58,14 @@ export class PublishingController {
     @Param('packId') packId: string,
     @Param('version') version: string,
     @UploadedFile() file: UploadedPackFile,
+    @Body('commit_message') commitMessage?: string,
   ) {
     return this.publishing.submitLivePatch(
       req.authUser!,
       file,
       packId,
       version,
+      commitMessage,
     );
   }
   @Get('mine') mine(@Req() req: Request) {
@@ -53,11 +75,16 @@ export class PublishingController {
     @Req() req: Request,
     @Param('packId') packId: string,
   ) {
+    const pending = this.publishing.getPendingForPack(packId, req.authUser!);
     return {
-      pending: this.publishing.getPendingForPack(packId, req.authUser!),
+      pending,
+      can_cancel: this.publishing.canCancel(pending, req.authUser!),
     };
   }
   @Get(':id') get(@Req() req: Request, @Param('id') id: string) {
     return this.publishing.getRequest(id, req.authUser!);
+  }
+  @Delete(':id') cancel(@Req() req: Request, @Param('id') id: string) {
+    return this.publishing.cancel(id, req.authUser!);
   }
 }

@@ -6,6 +6,7 @@ import {
   GitBranch,
   GitCompare,
   Loader2,
+  LockKeyhole,
   Merge,
   Package,
   Undo2,
@@ -44,7 +45,10 @@ import {
   STATUS_LETTER,
   STATUS_TEXT_CLASSES,
 } from "@/lib/file-status-ui";
-import { canEditPack } from "@/lib/pack-permissions";
+import {
+  hasPackEditPermission,
+  shouldTrackPackChanges,
+} from "@/lib/pack-permissions";
 import { pendingPublishVersionLabel } from "@/lib/publish-request-labels";
 import { fileMutationInvalidations, queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
@@ -71,10 +75,13 @@ function PackChanges({
   const activeMainTabId = useUiStore((s) => s.activeMainTabId);
   const openAccountSettingsTab = useUiStore((s) => s.openAccountSettingsTab);
   const openMessagesTab = useUiStore((s) => s.openMessagesTab);
+  const setActivityView = useUiStore((s) => s.setActivitySidebarView);
+  const setSidebarOpen = useUiStore((s) => s.setSidebarOpen);
   const setEditing = useEditorStore((s) => s.setEditing);
   const setDirty = useEditorStore((s) => s.setDirty);
 
   const mergeApproved = useMergeApprovedPack();
+  const reviewLocked = pack.publish_review_status === "pending";
 
   const discard = useMutation({
     mutationFn: (change: FileStatus) =>
@@ -109,19 +116,11 @@ function PackChanges({
   return (
     <section className="space-y-1">
       <SectionLabel className="flex min-w-0 items-center gap-1.5 px-3 pt-2">
-        <Package className="size-3.5 text-primary" />
+        <Package className="size-3.5 shrink-0 text-primary" />
         <span className="truncate">{pack.name}</span>
         <span className="shrink-0 font-normal normal-case tracking-normal opacity-70">
           ({statuses.length})
         </span>
-        {pack.publish_review_status === "pending" && pack.pending_version && (
-          <Badge
-            variant="accent"
-            className="shrink-0 normal-case tracking-normal"
-          >
-            {pendingPublishVersionLabel(pack)} under review
-          </Badge>
-        )}
         {pack.publish_review_status === "approved_awaiting_merge" &&
           pack.pending_version && (
             <Badge
@@ -177,6 +176,37 @@ function PackChanges({
           </TooltipContent>
         </Tooltip>
       </SectionLabel>
+      {reviewLocked && (
+        <div className="mx-3 mb-2 mt-1 border-t border-border/70 pt-2">
+          {pack.pending_version && (
+            <Badge
+              variant="accent"
+              className="normal-case tracking-normal"
+            >
+              {pendingPublishVersionLabel(pack)} under review
+            </Badge>
+          )}
+          <div className="mt-2 flex gap-2 rounded-md border border-accent/30 bg-accent/5 p-2.5">
+            <LockKeyhole className="mt-0.5 size-4 shrink-0 text-accent-foreground" />
+            <p className="text-xs leading-5 text-muted-foreground">
+              This pack is locked for review. Its submitted changes remain
+              visible here, but they cannot be edited or discarded until the
+              request is resolved or{" "}
+              <button
+                type="button"
+                className="font-medium text-primary underline underline-offset-2 hover:text-primary/80"
+                onClick={() => {
+                  setActivityView("reviews");
+                  setSidebarOpen(true);
+                }}
+              >
+                cancelled from Under Review
+              </button>
+              .
+            </p>
+          </div>
+        </div>
+      )}
       {pack.publish_review_status === "approved_awaiting_merge" &&
         pack.pending_request_id && (
           <div className="mx-3 mb-2 rounded-md border border-success/30 bg-success/5 p-2.5">
@@ -256,7 +286,7 @@ function PackChanges({
                           size="icon-xs"
                           variant="ghost"
                           aria-label={`Discard changes to ${filename}`}
-                          disabled={discard.isPending}
+                          disabled={reviewLocked || discard.isPending}
                           className={cn(
                             "shrink-0 opacity-0 transition-opacity group-hover:opacity-100",
                             selected && "opacity-100",
@@ -275,7 +305,7 @@ function PackChanges({
                         </Button>
                       </TooltipTrigger>
                       <TooltipContent side="right">
-                        Discard changes
+                        {reviewLocked ? "Locked for review" : "Discard changes"}
                       </TooltipContent>
                     </Tooltip>
                     <Badge
@@ -305,7 +335,7 @@ function PackChanges({
                   </ContextMenuItem>
                   <ContextMenuSeparator />
                   <ContextMenuItem
-                    disabled={discard.isPending}
+                    disabled={reviewLocked || discard.isPending}
                     className="text-destructive focus:text-destructive"
                     onSelect={() => discard.mutate(s)}
                   >
@@ -367,23 +397,31 @@ export function SourceControlPanel({
     [rejectionQuery.data],
   );
 
-  const editablePacks = useMemo(
-    () => installed.filter((p) => canEditPack(p, hubUser)),
+  const sourceControlPacks = useMemo(
+    () =>
+      installed.filter(
+        (pack) =>
+          shouldTrackPackChanges(pack, hubUser) ||
+          (pack.publish_review_status === "approved_awaiting_merge" &&
+            hasPackEditPermission(pack, hubUser)),
+      ),
     [installed, hubUser],
   );
 
   const statusQueries = useQueries({
-    queries: editablePacks.map((pack) => ({
+    queries: sourceControlPacks.map((pack) => ({
       queryKey: queryKeys.packStatus(pack.pack_id),
       queryFn: () => api.hubPackChangeStatus(pack.pack_id),
+      enabled: shouldTrackPackChanges(pack, hubUser),
     })),
   });
 
-  const sections = editablePacks
+  const sections = sourceControlPacks
     .map((pack, i) => ({ pack, statuses: statusQueries[i]?.data ?? [] }))
     .filter(
       (s) =>
         s.statuses.length > 0 ||
+        s.pack.publish_review_status === "pending" ||
         s.pack.publish_review_status === "approved_awaiting_merge",
     );
 
@@ -418,7 +456,7 @@ export function SourceControlPanel({
             variant="dashed"
             icon={<GitBranch className="size-6" />}
             title="No changes to review"
-            description="Source control shows changes for knowledge packs you own."
+            description="Source control shows changes for editable packs installed from the registry."
           />
         </div>
       ) : (

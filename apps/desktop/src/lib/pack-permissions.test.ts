@@ -1,6 +1,10 @@
 import type { HubUser, InstalledPack } from "@nest/shared";
 import { describe, expect, it } from "vitest";
-import { canEditPack, canRenamePack } from "./pack-permissions";
+import {
+  canEditPack,
+  canRenamePack,
+  shouldTrackPackChanges,
+} from "./pack-permissions";
 
 function pack(overrides: Partial<InstalledPack> = {}): InstalledPack {
   return {
@@ -20,6 +24,7 @@ function pack(overrides: Partial<InstalledPack> = {}): InstalledPack {
     pending_request_id: null,
     publish_review_status: null,
     publish_review_created_at: null,
+    pending_can_cancel: false,
     ...overrides,
   };
 }
@@ -40,6 +45,28 @@ describe("canEditPack", () => {
     expect(canEditPack(pack({ origin: "local", owner_id: null }), null)).toBe(
       true,
     );
+  });
+
+  it("locks pending packs regardless of origin or role", () => {
+    expect(
+      canEditPack(
+        pack({ origin: "local", publish_review_status: "pending" }),
+        user({ role: "superuser" }),
+      ),
+    ).toBe(false);
+  });
+
+  it("allows editing after approval while merge is pending", () => {
+    expect(
+      canEditPack(
+        pack({
+          origin: "registry",
+          owner_id: "alice",
+          publish_review_status: "approved_awaiting_merge",
+        }),
+        user(),
+      ),
+    ).toBe(true);
   });
 
   it("denies editing when signed out", () => {
@@ -105,6 +132,14 @@ describe("canRenamePack", () => {
     expect(canRenamePack(pack({ origin: "local" }))).toBe(true);
   });
 
+  it("does not allow renaming a local pack under review", () => {
+    expect(
+      canRenamePack(
+        pack({ origin: "local", publish_review_status: "pending" }),
+      ),
+    ).toBe(false);
+  });
+
   it("never allows renaming a registry pack, even for its owner or an admin", () => {
     // canRenamePack intentionally ignores ownership/role — a downloaded
     // pack's identity belongs to the hub regardless of who can edit its files.
@@ -114,5 +149,40 @@ describe("canRenamePack", () => {
   it("never allows renaming bundled or unknown-origin packs", () => {
     expect(canRenamePack(pack({ origin: "bundled" }))).toBe(false);
     expect(canRenamePack(pack({ origin: "unknown" }))).toBe(false);
+  });
+});
+
+describe("shouldTrackPackChanges", () => {
+  it("tracks editable registry packs", () => {
+    expect(
+      shouldTrackPackChanges(
+        pack({ origin: "registry", owner_id: "alice" }),
+        user(),
+      ),
+    ).toBe(true);
+  });
+
+  it("does not track ordinary local packs", () => {
+    expect(shouldTrackPackChanges(pack({ origin: "local" }), null)).toBe(
+      false,
+    );
+  });
+
+  it("tracks local packs only while their publish is pending", () => {
+    expect(
+      shouldTrackPackChanges(
+        pack({ origin: "local", publish_review_status: "pending" }),
+        null,
+      ),
+    ).toBe(true);
+    expect(
+      shouldTrackPackChanges(
+        pack({
+          origin: "local",
+          publish_review_status: "approved_awaiting_merge",
+        }),
+        null,
+      ),
+    ).toBe(false);
   });
 });
