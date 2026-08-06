@@ -1,7 +1,8 @@
 import type { InstalledPack, KnowledgePackMeta, TreeNode } from "@nest/shared";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { LibraryTree } from "@/components/library/LibraryTree";
 import { NewPackDialog } from "@/components/library/NewPackDialog";
@@ -14,7 +15,17 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
-import { packMutationInvalidations } from "@/lib/query-keys";
+import {
+  isPointOverEditor,
+  isPointOverExplorer,
+  vaultFolderPathAtPoint,
+} from "@/lib/drop-targets";
+import { canEditPack } from "@/lib/pack-permissions";
+import {
+  fileMutationInvalidations,
+  packMutationInvalidations,
+  queryKeys,
+} from "@/lib/query-keys";
 import { useEditorStore } from "@/stores/editor";
 import { useUiStore } from "@/stores/ui";
 
@@ -30,12 +41,30 @@ export function ExplorerPanel({
   error: Error | null;
 }) {
   const [newPackOpen, setNewPackOpen] = useState(false);
+  const [dropTargetPath, setDropTargetPath] = useState<string | null>(null);
+  const dropTargetRef = useRef<string | null>(null);
   const queryClient = useQueryClient();
   const openFileTab = useUiStore((s) => s.openFileTab);
   const setEditing = useEditorStore((s) => s.setEditing);
 
+  const hubAuthQuery = useQuery({
+    queryKey: queryKeys.hubAuth,
+    queryFn: api.hubAuthState,
+  });
+  const hubUser = hubAuthQuery.data?.user ?? null;
+
+  const byPath = useMemo(() => {
+    const map = new Map<string, InstalledPack>();
+    for (const p of installed) {
+      map.set(p.local_path, p);
+      map.set(p.pack_id, p);
+    }
+    return map;
+  }, [installed]);
+
   const createPack = useMutation({
-    mutationFn: (metadata: KnowledgePackMeta) => api.hubCreateEmptyPack(metadata),
+    mutationFn: (metadata: KnowledgePackMeta) =>
+      api.hubCreateEmptyPack(metadata),
     onSuccess: (pack) => {
       setNewPackOpen(false);
       for (const key of packMutationInvalidations) {
@@ -50,8 +79,88 @@ export function ExplorerPanel({
       toast.error("Could not create pack", { description: e.message }),
   });
 
+  const importIntoFolder = useRef(
+    async (_folder: string, _paths: string[]) => {},
+  );
+  importIntoFolder.current = async (folder: string, paths: string[]) => {
+    const packRoot = folder.split("/")[0] ?? folder;
+    const pack = byPath.get(packRoot);
+    if (!pack || !canEditPack(pack, hubUser)) {
+      toast.error("Cannot import here", {
+        description: "You don't have edit access to this pack.",
+      });
+      return;
+    }
+    try {
+      const result = await api.vaultImportFiles(folder, paths);
+      const packId = pack.pack_id;
+      for (const key of fileMutationInvalidations(packId)) {
+        void queryClient.invalidateQueries({ queryKey: key });
+      }
+      const n = result.imported.length;
+      if (n > 0) {
+        toast.success(
+          n === 1 ? "Imported 1 file" : `Imported ${n} files`,
+          result.skipped.length
+            ? { description: `Skipped: ${result.skipped.join("; ")}` }
+            : undefined,
+        );
+      }
+    } catch (e) {
+      toast.error("Could not import files", {
+        description: e instanceof Error ? e.message : String(e),
+      });
+    }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    void getCurrentWebview()
+      .onDragDropEvent((event) => {
+        if (cancelled) return;
+        const type = event.payload.type;
+        if (type === "leave") {
+          dropTargetRef.current = null;
+          setDropTargetPath(null);
+          return;
+        }
+        if (type === "enter" || type === "over") {
+          const { x, y } = event.payload.position;
+          if (!isPointOverExplorer(x, y) || isPointOverEditor(x, y)) {
+            dropTargetRef.current = null;
+            setDropTargetPath(null);
+            return;
+          }
+          const folder = vaultFolderPathAtPoint(x, y);
+          dropTargetRef.current = folder;
+          setDropTargetPath(folder);
+          return;
+        }
+        if (type === "drop") {
+          const { x, y } = event.payload.position;
+          const paths = event.payload.paths ?? [];
+          const folder =
+            dropTargetRef.current ?? vaultFolderPathAtPoint(x, y);
+          dropTargetRef.current = null;
+          setDropTargetPath(null);
+          if (!folder || paths.length === 0) return;
+          if (!isPointOverExplorer(x, y) || isPointOverEditor(x, y)) return;
+          void importIntoFolder.current(folder, paths);
+        }
+      })
+      .then((fn) => {
+        if (cancelled) fn();
+        else unlisten = fn;
+      });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="flex h-full min-h-0 flex-col" data-explorer-panel>
       <SidebarPaneHeader
         title="Explorer"
         actions={
@@ -80,7 +189,11 @@ export function ExplorerPanel({
         ) : error ? (
           <p className="p-4 text-sm text-destructive">{error.message}</p>
         ) : (
-          <LibraryTree tree={tree} installed={installed} />
+          <LibraryTree
+            tree={tree}
+            installed={installed}
+            dropTargetPath={dropTargetPath}
+          />
         )}
       </div>
       <NewPackDialog

@@ -7,10 +7,12 @@ import { MessagesPanel } from "@/components/messages/MessagesPanel";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { DiffViewer } from "@/components/viewer/DiffViewer";
+import { ImageViewer } from "@/components/viewer/ImageViewer";
 import { MarkdownEditor } from "@/components/viewer/MarkdownEditor";
 import { MarkdownViewer } from "@/components/viewer/MarkdownViewer";
 import { api } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
+import { isImagePath } from "@/lib/vault-paths";
 import { useEditorStore } from "@/stores/editor";
 import {
   HUB_TAB_ID,
@@ -51,7 +53,9 @@ export function MainTabArea() {
       />
     );
   } else if (activeMainTabId) {
-    content = editingPaths.has(activeMainTabId) ? (
+    content = isImagePath(activeMainTabId) ? (
+      <ImageViewer key={activeMainTabId} path={activeMainTabId} />
+    ) : editingPaths.has(activeMainTabId) ? (
       <MarkdownEditor key={activeMainTabId} path={activeMainTabId} />
     ) : (
       <MarkdownViewer path={activeMainTabId} />

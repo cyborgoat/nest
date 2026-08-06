@@ -13,6 +13,8 @@ import {
   FileText,
   Folder,
   FolderPlus,
+  FolderOpen,
+  Image as ImageIcon,
   Info,
   Minus,
   Package,
@@ -23,7 +25,14 @@ import {
   Trash2,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -80,8 +89,19 @@ import {
   queryKeys,
 } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
+import {
+  ensureImageExtension,
+  ensureMdExtension,
+  isImagePath,
+  joinPath,
+  parentDir,
+} from "@/lib/vault-paths";
 import { useEditorStore } from "@/stores/editor";
 import { useUiStore } from "@/stores/ui";
+
+const DropTargetContext = createContext<{
+  dropTargetPath: string | null;
+}>({ dropTargetPath: null });
 
 function filterTree(nodes: TreeNode[], query: string): TreeNode[] {
   const q = query.trim().toLowerCase();
@@ -104,19 +124,6 @@ function filterTree(nodes: TreeNode[], query: string): TreeNode[] {
   };
 
   return nodes.map(walk).filter((n): n is TreeNode => n != null);
-}
-
-function parentDir(path: string): string {
-  const idx = path.lastIndexOf("/");
-  return idx === -1 ? "" : path.slice(0, idx);
-}
-
-function joinPath(dir: string, name: string): string {
-  return dir ? `${dir}/${name}` : name;
-}
-
-function ensureMdExtension(name: string): string {
-  return name.toLowerCase().endsWith(".md") ? name : `${name}.md`;
 }
 
 /** A ContextMenuItem that stays visible but disabled — with a hover tooltip
@@ -265,10 +272,13 @@ function TreeItem({
   const queryClient = useQueryClient();
   const isFolder = node.kind === "folder";
   const isRoot = depth === 0 && isFolder;
+  const isImage = !isFolder && isImagePath(node.path);
   const isSelected = activeMainTabId === node.path;
   const status = statusMap.get(node.path);
   const isDeleted = status === "deleted";
   const editableHere = canEdit && !isDeleted;
+  const { dropTargetPath } = useContext(DropTargetContext);
+  const isDropTarget = isFolder && dropTargetPath === node.path;
   const editReason = isDeleted
     ? "This file has already been deleted."
     : !canEdit
@@ -354,7 +364,12 @@ function TreeItem({
   };
   const submitRename = (rawName: string) => {
     setRenaming(false);
-    const name = isFolder ? rawName : ensureMdExtension(rawName);
+    let name = rawName;
+    if (!isFolder) {
+      name = isImage
+        ? ensureImageExtension(rawName, node.name)
+        : ensureMdExtension(rawName);
+    }
     const to = joinPath(parentDir(node.path), name);
     if (to !== node.path) rename.mutate(to);
   };
@@ -399,6 +414,13 @@ function TreeItem({
             packActive ? "text-primary" : "text-muted-foreground",
           )}
         />
+      ) : isImage ? (
+        <ImageIcon
+          className={cn(
+            "size-3.5 shrink-0",
+            packActive ? "text-primary" : "text-muted-foreground",
+          )}
+        />
       ) : (
         <FileText
           className={cn(
@@ -429,9 +451,12 @@ function TreeItem({
 
   const row = (
     <div
+      data-vault-path={node.path}
+      data-vault-kind={isFolder ? "folder" : "file"}
       className={cn(
         "group flex select-none items-center gap-1 rounded-md pr-1 text-sm transition-colors",
         isSelected ? "bg-primary/10 text-foreground" : "hover:bg-muted/80",
+        isDropTarget && "bg-accent/20 ring-1 ring-accent/50",
         !packActive && "text-muted-foreground",
       )}
       style={{ paddingLeft: 8 + depth * 12 }}
@@ -448,6 +473,8 @@ function TreeItem({
             />
           ) : isFolder ? (
             <Folder className="size-3.5 shrink-0 text-muted-foreground" />
+          ) : isImage ? (
+            <ImageIcon className="size-3.5 shrink-0 text-muted-foreground" />
           ) : (
             <FileText className="size-3.5 shrink-0 text-muted-foreground" />
           )}
@@ -539,11 +566,29 @@ function TreeItem({
                 <FolderPlus className="size-3.5" />
                 New Folder
               </PermissionMenuItem>
+              <ContextMenuSeparator />
             </>
           )}
+          <ContextMenuItem
+            disabled={isDeleted}
+            onSelect={() =>
+              afterMenuClose(() => {
+                void api
+                  .vaultRevealInFolder(node.path)
+                  .catch((e: Error) =>
+                    toast.error("Could not reveal in folder", {
+                      description: e.message,
+                    }),
+                  );
+              })
+            }
+          >
+            <FolderOpen className="size-3.5" />
+            Reveal in Folder
+          </ContextMenuItem>
           {!isRoot && (
             <>
-              {isFolder && <ContextMenuSeparator />}
+              <ContextMenuSeparator />
               <PermissionMenuItem
                 disabled={!editableHere}
                 reason={editReason}
@@ -971,9 +1016,11 @@ function PackSection({
 export function LibraryTree({
   tree,
   installed,
+  dropTargetPath = null,
 }: {
   tree: TreeNode[];
   installed: InstalledPack[];
+  dropTargetPath?: string | null;
 }) {
   const { t } = useI18n();
   const [search, setSearch] = useState("");
@@ -1110,6 +1157,7 @@ export function LibraryTree({
   }
 
   return (
+    <DropTargetContext.Provider value={{ dropTargetPath }}>
     <div className="flex h-full min-h-0 flex-col">
       <div className="px-2 py-2">
         <div className="relative">
@@ -1122,7 +1170,7 @@ export function LibraryTree({
           />
         </div>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto py-1">
+      <div className="min-h-0 flex-1 overflow-y-auto py-1" data-explorer-tree>
         <PackSection
           title="Active"
           nodes={activeRoots}
@@ -1183,6 +1231,7 @@ export function LibraryTree({
           )}
       </div>
     </div>
+    </DropTargetContext.Provider>
   );
 }
 

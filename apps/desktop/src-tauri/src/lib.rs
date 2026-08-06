@@ -29,6 +29,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             nest_debug!("app", "app_data_dir bootstrap starting");
             let app_data = app
@@ -55,6 +56,8 @@ pub fn run() {
             commands::vault_delete_file,
             commands::vault_delete_folder,
             commands::vault_rename_entry,
+            commands::vault_reveal_in_folder,
+            commands::vault_import_files,
             commands::hub_pack_change_status,
             commands::hub_pack_file_diff,
             commands::hub_pack_discard_file,

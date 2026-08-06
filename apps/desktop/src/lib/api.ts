@@ -45,6 +45,13 @@ export const api = {
     invoke<void>("vault_delete_folder", { path }),
   vaultRenameEntry: (from: string, to: string) =>
     invoke<void>("vault_rename_entry", { from, to }),
+  vaultRevealInFolder: (path: string) =>
+    invoke<void>("vault_reveal_in_folder", { path }),
+  vaultImportFiles: (destDir: string, sourcePaths: string[]) =>
+    invoke<{ imported: string[]; skipped: string[] }>("vault_import_files", {
+      destDir,
+      sourcePaths,
+    }),
 
   hubPackChangeStatus: (packId: string) =>
     invoke<FileStatus[]>("hub_pack_change_status", { packId }),

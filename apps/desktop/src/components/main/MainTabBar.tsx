@@ -1,4 +1,4 @@
-import { Bell, Cloud, FileText, GitCompare, Settings2 } from "lucide-react";
+import { Bell, Cloud, FileText, GitCompare, Image as ImageIcon, Settings2 } from "lucide-react";
 import { useState } from "react";
 import {
   AlertDialog,
@@ -14,6 +14,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { TabStrip } from "@/components/ui/tab-strip";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { isImagePath } from "@/lib/vault-paths";
 import { useEditorStore } from "@/stores/editor";
 import {
   HUB_TAB_ID,
@@ -41,6 +42,8 @@ function tabIcon(id: string) {
     return <Bell className="size-3 shrink-0 text-accent" />;
   if (parseDiffTabId(id))
     return <GitCompare className="size-3 shrink-0 text-accent" />;
+  if (isImagePath(id))
+    return <ImageIcon className="size-3 shrink-0 text-primary" />;
   return <FileText className="size-3 shrink-0 text-primary" />;
 }
 

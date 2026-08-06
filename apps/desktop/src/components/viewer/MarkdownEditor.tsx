@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Eye, Redo2, Save, Undo2, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -21,6 +22,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
+import { isPointOverEditor } from "@/lib/drop-targets";
 import {
   createEditorHistory,
   currentEditorHistory,
@@ -29,7 +31,12 @@ import {
   undoEditorHistory,
   type EditorHistory,
 } from "@/lib/editor-history";
+import { canEditPack } from "@/lib/pack-permissions";
 import { fileMutationInvalidations, queryKeys } from "@/lib/query-keys";
+import {
+  markdownForVaultDrop,
+  parentDir,
+} from "@/lib/vault-paths";
 import { useEditorStore } from "@/stores/editor";
 
 function fitSourceHeight(source: HTMLTextAreaElement) {
@@ -253,8 +260,117 @@ export function MarkdownEditor({ path }: { path: string }) {
     return () => observer.disconnect();
   }, []);
 
+  const insertAtCaret = (snippet: string) => {
+    const source = sourceRef.current;
+    const current = markdown ?? "";
+    if (!source) {
+      const next =
+        current.length === 0
+          ? snippet
+          : current.endsWith("\n")
+            ? `${current}${snippet}`
+            : `${current}\n${snippet}`;
+      updateMarkdown(next);
+      return;
+    }
+    const start = source.selectionStart;
+    const end = source.selectionEnd;
+    const before = current.slice(0, start);
+    const after = current.slice(end);
+    const needsLeading =
+      before.length > 0 && !before.endsWith("\n") && !before.endsWith(" ");
+    const text = `${needsLeading ? "\n" : ""}${snippet}`;
+    const next = `${before}${text}${after}`;
+    updateMarkdown(next);
+    requestAnimationFrame(() => {
+      const pos = before.length + text.length;
+      source.focus();
+      source.setSelectionRange(pos, pos);
+    });
+  };
+
+  const insertAtCaretRef = useRef(insertAtCaret);
+  insertAtCaretRef.current = insertAtCaret;
+  const pathRef = useRef(path);
+  pathRef.current = path;
+
+  const installedPack = installedQuery.data?.find(
+    (p) => p.local_path === rootPath,
+  );
+  const hubAuthQuery = useQuery({
+    queryKey: queryKeys.hubAuth,
+    queryFn: api.hubAuthState,
+  });
+  const canDropImport = installedPack
+    ? canEditPack(installedPack, hubAuthQuery.data?.user ?? null)
+    : false;
+  const canDropImportRef = useRef(canDropImport);
+  canDropImportRef.current = canDropImport;
+
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    void getCurrentWebview()
+      .onDragDropEvent((event) => {
+        if (cancelled) return;
+        if (event.payload.type !== "drop") return;
+        const { x, y } = event.payload.position;
+        if (!isPointOverEditor(x, y)) return;
+        const paths = event.payload.paths ?? [];
+        if (paths.length === 0) return;
+        if (!canDropImportRef.current) {
+          toast.error("Cannot import here", {
+            description: "You don't have edit access to this pack.",
+          });
+          return;
+        }
+        const destDir = parentDir(pathRef.current);
+        void (async () => {
+          try {
+            const result = await api.vaultImportFiles(destDir, paths);
+            for (const key of fileMutationInvalidations(packId)) {
+              void queryClient.invalidateQueries({ queryKey: key });
+            }
+            if (result.imported.length === 0) {
+              if (result.skipped.length) {
+                toast.error("Nothing imported", {
+                  description: result.skipped.join("; "),
+                });
+              }
+              return;
+            }
+            const snippets = result.imported.map((p) =>
+              markdownForVaultDrop(pathRef.current, p),
+            );
+            insertAtCaretRef.current(snippets.join("\n"));
+            if (result.skipped.length) {
+              toast.message("Some files were skipped", {
+                description: result.skipped.join("; "),
+              });
+            }
+          } catch (e) {
+            toast.error("Could not import files", {
+              description: e instanceof Error ? e.message : String(e),
+            });
+          }
+        })();
+      })
+      .then((fn) => {
+        if (cancelled) fn();
+        else unlisten = fn;
+      });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [packId, queryClient]);
+
   return (
-    <div ref={containerRef} className="flex h-full flex-col">
+    <div
+      ref={containerRef}
+      className="flex h-full flex-col"
+      data-markdown-editor
+    >
       <PanelHeader
         size="compact"
         actions={

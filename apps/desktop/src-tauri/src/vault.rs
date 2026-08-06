@@ -78,12 +78,7 @@ fn build_tree(root: &Path, dir: &Path) -> AppResult<Vec<TreeNode>> {
                 kind: TreeNodeKind::Folder,
                 children: Some(children),
             });
-        } else if path
-            .extension()
-            .and_then(|e| e.to_str())
-            .map(|e| e.eq_ignore_ascii_case("md"))
-            .unwrap_or(false)
-        {
+        } else if is_markdown_path(&path) || is_image_path(&path) {
             nodes.push(TreeNode {
                 name,
                 path: rel,
@@ -105,7 +100,7 @@ pub fn read_file(root: &Path, rel_path: &str) -> AppResult<String> {
     Ok(fs::read_to_string(path)?)
 }
 
-fn image_mime_type(path: &Path) -> Option<&'static str> {
+pub fn image_mime_type(path: &Path) -> Option<&'static str> {
     let ext = path.extension()?.to_str()?.to_ascii_lowercase();
     Some(match ext.as_str() {
         "png" => "image/png",
@@ -116,6 +111,10 @@ fn image_mime_type(path: &Path) -> Option<&'static str> {
         "bmp" => "image/bmp",
         _ => return None,
     })
+}
+
+pub fn is_image_path(path: impl AsRef<Path>) -> bool {
+    image_mime_type(path.as_ref()).is_some()
 }
 
 /// Directories skipped while importing a pack (hidden names plus common junk trees).
@@ -399,8 +398,150 @@ pub fn rename_entry(root: &Path, from_rel: &str, to_rel: &str) -> AppResult<()> 
     if let Some(parent) = to.parent() {
         ensure_dir(parent)?;
     }
-    fs::rename(from, to)?;
+    rename_or_copy_remove(&from, &to)?;
     Ok(())
+}
+
+fn rename_or_copy_remove(from: &Path, to: &Path) -> AppResult<()> {
+    match fs::rename(from, to) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::CrossesDevices => {
+            if from.is_dir() {
+                copy_dir_all(from, to)?;
+                fs::remove_dir_all(from)?;
+            } else {
+                fs::copy(from, to)?;
+                fs::remove_file(from)?;
+            }
+            Ok(())
+        }
+        Err(err) => Err(err.into()),
+    }
+}
+
+fn copy_dir_all(src: &Path, dst: &Path) -> AppResult<()> {
+    ensure_dir(dst)?;
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let ty = entry.file_type()?;
+        let target = dst.join(entry.file_name());
+        if ty.is_dir() {
+            copy_dir_all(&entry.path(), &target)?;
+        } else {
+            fs::copy(entry.path(), &target)?;
+        }
+    }
+    Ok(())
+}
+
+/// Absolute filesystem path for a vault-relative entry (for Reveal in Folder).
+pub fn absolute_path(root: &Path, rel_path: &str) -> AppResult<PathBuf> {
+    let path = resolve_vault_path(root, rel_path)?;
+    if !path.exists() {
+        return Err(AppError::msg(format!(
+            "This file is no longer in your library (removed or missing): {rel_path}"
+        )));
+    }
+    Ok(path)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImportFilesResult {
+    pub imported: Vec<String>,
+    pub skipped: Vec<String>,
+}
+
+/// Copy external markdown/image files into a vault folder.
+pub fn import_files(
+    root: &Path,
+    dest_dir_rel: &str,
+    source_paths: &[PathBuf],
+) -> AppResult<ImportFilesResult> {
+    let dest_rel = dest_dir_rel.trim_start_matches('/').trim_end_matches('/');
+    if dest_rel.is_empty() {
+        return Err(AppError::msg(
+            "Drop files into a knowledge pack folder, not the vault root",
+        ));
+    }
+    let dest = resolve_vault_path(root, dest_rel)?;
+    if dest.exists() && !dest.is_dir() {
+        return Err(AppError::msg(format!(
+            "{dest_rel} is a file, not a folder"
+        )));
+    }
+    ensure_dir(&dest)?;
+
+    let mut imported = Vec::new();
+    let mut skipped = Vec::new();
+
+    for source in source_paths {
+        if !source.is_file() {
+            let name = source
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("item");
+            skipped.push(format!("{name}: not a file"));
+            continue;
+        }
+        if !is_pack_content_file(source)
+            || source
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| n.eq_ignore_ascii_case("pack.json"))
+                .unwrap_or(false)
+        {
+            let name = source
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("file");
+            skipped.push(format!("{name}: only markdown and images can be imported"));
+            continue;
+        }
+
+        let Some(file_name) = source.file_name().and_then(|n| n.to_str()) else {
+            skipped.push("invalid file name".into());
+            continue;
+        };
+
+        let unique_name = unique_file_name(&dest, file_name);
+        let target = dest.join(&unique_name);
+        match fs::copy(source, &target) {
+            Ok(_) => {
+                let rel = format!("{dest_rel}/{unique_name}").replace('\\', "/");
+                imported.push(rel);
+            }
+            Err(e) => skipped.push(format!("{file_name}: {e}")),
+        }
+    }
+
+    if imported.is_empty() && !skipped.is_empty() {
+        return Err(AppError::msg(skipped.join("; ")));
+    }
+    Ok(ImportFilesResult { imported, skipped })
+}
+
+fn unique_file_name(dir: &Path, file_name: &str) -> String {
+    let candidate = dir.join(file_name);
+    if !candidate.exists() {
+        return file_name.to_string();
+    }
+    let path = Path::new(file_name);
+    let stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("file");
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| format!(".{e}"))
+        .unwrap_or_default();
+    for i in 1..10_000 {
+        let name = format!("{stem}-{i}{ext}");
+        if !dir.join(&name).exists() {
+            return name;
+        }
+    }
+    format!("{stem}-copy{ext}")
 }
 
 /// Delete an entire top-level knowledge pack from the vault.
@@ -503,6 +644,62 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         ensure_dir(&dir).unwrap();
         assert!(read_image_data_url(&dir, "../etc/passwd.png").is_err());
+    }
+
+    #[test]
+    fn list_tree_includes_markdown_and_images_skips_junk() {
+        let dir = env::temp_dir().join("nest-vault-list-images");
+        let _ = fs::remove_dir_all(&dir);
+        let pack = dir.join("demo-pack");
+        ensure_dir(&pack.join("assets")).unwrap();
+        fs::write(pack.join("readme.md"), b"# hi").unwrap();
+        fs::write(pack.join("assets/pic.png"), [1, 2, 3]).unwrap();
+        fs::write(pack.join("pack.json"), b"{}").unwrap();
+        fs::write(pack.join("notes.txt"), b"nope").unwrap();
+        fs::write(pack.join("assets/data.csv"), b"a,b").unwrap();
+
+        let tree = list_tree(&dir).unwrap();
+        assert_eq!(tree.len(), 1);
+        assert_eq!(tree[0].name, "demo-pack");
+        let children = tree[0].children.as_ref().unwrap();
+        let names: Vec<_> = children.iter().map(|n| n.name.as_str()).collect();
+        assert!(names.contains(&"readme.md"));
+        assert!(names.contains(&"assets"));
+        assert!(!names.contains(&"pack.json"));
+        assert!(!names.contains(&"notes.txt"));
+
+        let assets = children.iter().find(|n| n.name == "assets").unwrap();
+        let asset_names: Vec<_> = assets
+            .children
+            .as_ref()
+            .unwrap()
+            .iter()
+            .map(|n| n.name.as_str())
+            .collect();
+        assert_eq!(asset_names, vec!["pic.png"]);
+    }
+
+    #[test]
+    fn import_files_copies_images_with_unique_names() {
+        let dir = env::temp_dir().join("nest-vault-import-files");
+        let _ = fs::remove_dir_all(&dir);
+        let pack = dir.join("pack");
+        ensure_dir(&pack).unwrap();
+
+        let src_dir = env::temp_dir().join("nest-vault-import-src");
+        let _ = fs::remove_dir_all(&src_dir);
+        ensure_dir(&src_dir).unwrap();
+        let src = src_dir.join("photo.png");
+        fs::write(&src, [9, 9, 9]).unwrap();
+
+        let first = import_files(&dir, "pack", &[src.clone()]).unwrap();
+        assert_eq!(first.imported, vec!["pack/photo.png"]);
+        assert!(first.skipped.is_empty());
+
+        let second = import_files(&dir, "pack", &[src]).unwrap();
+        assert_eq!(second.imported, vec!["pack/photo-1.png"]);
+        assert!(dir.join("pack/photo.png").is_file());
+        assert!(dir.join("pack/photo-1.png").is_file());
     }
 
     #[test]

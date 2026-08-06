@@ -90,6 +90,35 @@ pub fn vault_rename_entry(
     Ok(())
 }
 
+#[tauri::command]
+pub fn vault_reveal_in_folder(
+    app: AppHandle,
+    state: State<'_, SharedState>,
+    path: String,
+) -> AppResult<()> {
+    use tauri_plugin_opener::OpenerExt;
+    let vault = state.vault_path();
+    let absolute = vault::absolute_path(&vault, &path)?;
+    app.opener()
+        .reveal_item_in_dir(absolute)
+        .map_err(|e| AppError::msg(format!("Could not reveal in folder: {e}")))
+}
+
+#[tauri::command]
+pub fn vault_import_files(
+    state: State<'_, SharedState>,
+    dest_dir: String,
+    source_paths: Vec<String>,
+) -> AppResult<vault::ImportFilesResult> {
+    let vault = state.vault_path();
+    let paths: Vec<PathBuf> = source_paths.into_iter().map(PathBuf::from).collect();
+    let result = vault::import_files(&vault, &dest_dir, &paths)?;
+    if result.imported.iter().any(|p| vault::is_markdown_path(p)) {
+        indexing::schedule(state.inner())?;
+    }
+    Ok(result)
+}
+
 /// Look up an installed pack by id, or fail with a consistent error message.
 /// Shared by every command that needs "the pack, or a clear error" before
 /// doing anything else.
