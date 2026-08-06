@@ -47,7 +47,6 @@ describe('PacksService administrative ZIP retrieval', () => {
       const artifact = await service.createPackZip('example', '2.0.0', admin, {
         allowYanked: true,
       });
-      expect(artifact.filename).toBe('example-2.0.0.zip');
       expect(artifact.byteLength).toBeGreaterThan(0);
       expect(existsSync(artifact.filePath)).toBe(true);
 

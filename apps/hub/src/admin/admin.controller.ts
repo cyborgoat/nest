@@ -139,7 +139,7 @@ export class AdminController {
     @Param('id') id: string,
     @Res() res: Response,
   ) {
-    const { buffer } = await this.publishing.getStagingZip(id);
+    const buffer = await this.publishing.getStagingZip(id);
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', `attachment; filename="${id}.zip"`);
     res.send(buffer);
@@ -215,7 +215,7 @@ export class AdminController {
     stream.on('close', cleanup);
     stream.on('error', (error) => {
       this.logger.error(
-        `Admin ZIP stream error for ${artifact.filename}: ${error.message}`,
+        `Admin ZIP stream error for ${id}@${version}: ${error.message}`,
       );
       cleanup();
     });

@@ -22,7 +22,6 @@ import { isValidSemVer, sortSemVerDesc } from './semver';
 
 type PackZipArtifact = {
   filePath: string;
-  filename: string;
   sha256: string;
   byteLength: number;
   patchRevision: number;
@@ -671,7 +670,6 @@ export class PacksService implements OnModuleInit {
       );
     }
 
-    const filename = `${release.id}-${release.version}.zip`;
     const filePath = path.join(
       os.tmpdir(),
       `nest-hub-${release.id}-${release.version}-${randomUUID()}.zip`,
@@ -697,7 +695,6 @@ export class PacksService implements OnModuleInit {
 
       return {
         filePath,
-        filename,
         sha256,
         byteLength,
         patchRevision: release.patch_revision,

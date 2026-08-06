@@ -89,7 +89,7 @@ export class PacksController {
     stream.on('close', cleanup);
     stream.on('error', (err) => {
       this.logger.error(
-        `ZIP stream error for ${artifact.filename}: ${err.message}`,
+        `ZIP stream error for ${packId}@${version ?? 'latest'}: ${err.message}`,
       );
       cleanup();
     });

@@ -858,14 +858,11 @@ export class PublishingService {
     }
   }
 
-  async getStagingZip(
-    requestId: string,
-  ): Promise<{ buffer: Buffer; filename: string }> {
+  async getStagingZip(requestId: string): Promise<Buffer> {
     const request = this.requestRow(requestId);
     if (request.status !== 'pending')
       throw new NotFoundException('Publish request not found');
-    const buffer = await fs.readFile(request.staging_path);
-    return { buffer, filename: `${request.pack_id}-${request.version}.zip` };
+    return fs.readFile(request.staging_path);
   }
 
   async getAdminReviewDetail(

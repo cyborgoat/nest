@@ -59,7 +59,6 @@ type BuiltArtifact = {
 type ArtifactImage = {
   buffer: Buffer;
   contentType: string;
-  filename: string;
 };
 
 type ReviewArtifactView = {
@@ -241,7 +240,6 @@ export class PublishReviewService {
     return {
       buffer,
       contentType: IMAGE_CONTENT_TYPES[extension] ?? 'application/octet-stream',
-      filename: path.basename(file.path),
     };
   }
 

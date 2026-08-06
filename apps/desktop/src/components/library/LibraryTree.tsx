@@ -365,9 +365,9 @@ function TreeItem({
     onSuccess: (_void, vars) => {
       invalidateAfterEdit();
       if (vars.kind === "file") {
-        openFileTab(joinPath(node.path, ensureMdExtension(vars.name)), {
-          preview: false,
-        });
+        const path = joinPath(node.path, ensureMdExtension(vars.name));
+        setEditing(path, true);
+        openFileTab(path, { preview: false });
       } else {
         toast.success("Folder created");
       }

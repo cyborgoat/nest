@@ -1535,7 +1535,7 @@ fn update_local_pack_identity(
     new_id: &str,
     new_name: &str,
 ) -> AppResult<PackMeta> {
-    validate_pack_folder_name(&new_id)?;
+    validate_pack_folder_name(new_id)?;
 
     let old_dir = vault_root.join(old_local_path);
     let new_dir = vault_root.join(new_id);
