@@ -990,6 +990,9 @@ fn finish_pack_install(
 }
 
 #[tauri::command]
+// Tauri exposes command parameters as individually named invoke arguments.
+// Keeping them explicit preserves the existing frontend command contract.
+#[allow(clippy::too_many_arguments)]
 pub async fn hub_download_pack(
     state: State<'_, SharedState>,
     pack_id: String,
