@@ -16,6 +16,7 @@ import { DatabaseService } from '../database/database.service';
 import { AuditService } from '../database/audit.service';
 import { HubRuntimeConfig } from '../hub.config';
 import { MessagesService } from '../messages/messages.service';
+import { isValidPackId, slugifyPackId } from '../packs/pack-id';
 import { isValidSemVer } from '../packs/semver';
 import type {
   AdminPublishReviewDetail,
@@ -30,17 +31,7 @@ import type {
 } from '@nest/shared';
 import { PublishReviewService } from './publish-review.service';
 
-const PACK_ID_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const now = () => new Date().toISOString();
-
-function slugifyPackId(value: string): string {
-  const slug = value
-    .trim()
-    .toLowerCase()
-    .replaceAll(/[^a-z0-9]+/g, '-')
-    .replaceAll(/^-+|-+$/g, '');
-  return slug || 'knowledge-pack';
-}
 
 type ValidatedPack = {
   id: string;
@@ -1088,7 +1079,7 @@ export class PublishingService {
         const name = stringField(raw.name);
         const description = stringField(raw.description);
         const version = stringField(raw.version);
-        if (!PACK_ID_RE.test(id) || id !== root)
+        if (!isValidPackId(id) || id !== root)
           throw new BadRequestException(
             'pack.json id must match the top-level folder and use a valid pack ID',
           );
@@ -1116,9 +1107,9 @@ export class PublishingService {
     const name = stringField(metadata.name);
     const description = stringField(metadata.description);
     const version = stringField(metadata.version);
-    if (!PACK_ID_RE.test(id))
+    if (!isValidPackId(id))
       throw new BadRequestException(
-        'Pack ID must be lowercase letters, numbers, and hyphens',
+        'Pack ID must use lowercase or Unicode letters, numbers, and hyphens',
       );
     if (!name) throw new BadRequestException('Pack name is required');
     if (!isValidSemVer(version))

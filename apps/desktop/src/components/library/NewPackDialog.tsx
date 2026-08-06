@@ -52,8 +52,8 @@ export function NewPackDialog({
         <DialogHeader>
           <DialogTitle>New knowledge pack</DialogTitle>
           <DialogDescription>
-            Creates an empty pack in your library, ready to edit. Its folder
-            in your library will be named exactly this.
+            Creates an empty pack in your library, ready to edit. Nest derives
+            a registry-safe ID and folder from its name.
           </DialogDescription>
         </DialogHeader>
         <div className="min-w-0 space-y-3">

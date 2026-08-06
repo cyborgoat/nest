@@ -17,9 +17,8 @@ import { isRegistryAdmin } from '../auth/access-policy';
 import type { AuthUser } from '../auth/auth.types';
 import type { RegistryResyncIssue, RegistryResyncResult } from '@nest/shared';
 import type { PackProject, PackRelease } from './pack.types';
+import { isValidPackId } from './pack-id';
 import { isValidSemVer, sortSemVerDesc } from './semver';
-
-const PACK_ID_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 type PackZipArtifact = {
   filePath: string;
@@ -148,7 +147,7 @@ export class PacksService implements OnModuleInit {
       if (!project.isDirectory() || project.name.startsWith('.')) {
         continue;
       }
-      if (!PACK_ID_RE.test(project.name)) {
+      if (!isValidPackId(project.name)) {
         this.logger.warn(`Skipping invalid project id folder: ${project.name}`);
         continue;
       }
@@ -255,10 +254,11 @@ export class PacksService implements OnModuleInit {
       a.name.localeCompare(b.name),
     )) {
       if (!project.isDirectory() || project.name.startsWith('.')) continue;
-      if (!PACK_ID_RE.test(project.name)) {
+      if (!isValidPackId(project.name)) {
         scan.issues.push({
           path: project.name,
-          message: 'Pack folder name must be a lowercase, hyphenated pack ID.',
+          message:
+            'Pack folder name must contain lowercase letters or Unicode letters, numbers, and hyphens.',
         });
         continue;
       }

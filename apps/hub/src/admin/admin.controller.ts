@@ -127,8 +127,7 @@ export class AdminController {
     );
     res.setHeader('Content-Type', image.contentType);
     res.setHeader('Content-Length', String(image.buffer.length));
-    const filename = image.filename.replaceAll(/["\r\n]/g, '_');
-    res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+    res.setHeader('Content-Disposition', 'inline');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader(
       'Content-Security-Policy',
@@ -140,9 +139,9 @@ export class AdminController {
     @Param('id') id: string,
     @Res() res: Response,
   ) {
-    const { buffer, filename } = await this.publishing.getStagingZip(id);
+    const { buffer } = await this.publishing.getStagingZip(id);
     res.setHeader('Content-Type', 'application/zip');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${id}.zip"`);
     res.send(buffer);
   }
   @Get('packs') packs() {
@@ -204,7 +203,7 @@ export class AdminController {
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader(
       'Content-Disposition',
-      `attachment; filename="${artifact.filename}"`,
+      `attachment; filename="${artifact.sha256}.zip"`,
     );
     res.setHeader('Content-Length', String(artifact.byteLength));
     res.setHeader('X-Content-SHA256', artifact.sha256);

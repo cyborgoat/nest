@@ -39,9 +39,8 @@ export function RenamePackDialog({
         <DialogHeader>
           <DialogTitle>Rename pack</DialogTitle>
           <DialogDescription>
-            Renames the pack's folder in your library to match — a pack's
-            name and its folder are always the same. Only available for
-            packs you created or imported locally.
+            Renames the pack and updates its registry-safe folder ID. Only
+            available for packs you created or imported locally.
           </DialogDescription>
         </DialogHeader>
         <Field label="Name">

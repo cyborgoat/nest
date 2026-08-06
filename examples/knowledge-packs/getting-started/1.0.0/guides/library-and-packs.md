@@ -9,6 +9,10 @@
 
 Nest keeps one installed version per pack ID.
 
+When you create a pack with the Explorer **+** button, Nest keeps the display
+name you enter and derives a publishable ID and folder. Chinese characters are
+retained, cased letters become lowercase, and punctuation becomes hyphens.
+
 ## Browse and read
 
 Explorer shows installed packs and their files. Open a Markdown file to read

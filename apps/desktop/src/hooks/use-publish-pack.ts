@@ -3,7 +3,7 @@ import { useRef } from "react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { appErrorMessage } from "@/lib/errors";
-import { queryKeys } from "@/lib/query-keys";
+import { packMutationInvalidations, queryKeys } from "@/lib/query-keys";
 
 export type PublishPackInput =
   | {
@@ -43,7 +43,7 @@ export function usePublishPack() {
     onMutate: () => {
       toastIdRef.current = toast.loading("Uploading knowledge pack to Hub…");
     },
-    onSuccess: (_data, variables) => {
+    onSuccess: (data, variables) => {
       toast.success(
         variables.kind === "live_patch"
           ? "Live patch submitted for review"
@@ -57,6 +57,9 @@ export function usePublishPack() {
       });
       void queryClient.invalidateQueries({
         queryKey: queryKeys.packStatus(variables.packId),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.packStatus(data.pack_id),
       });
       void queryClient.invalidateQueries({ queryKey: queryKeys.messages });
       void queryClient.invalidateQueries({ queryKey: queryKeys.messageCount });
@@ -78,6 +81,12 @@ export function usePublishPack() {
       );
     },
     onSettled: () => {
+      // Publishing can migrate a legacy sidebar-created local pack from a
+      // display-name identity to a registry-safe slug before upload. Refresh
+      // filesystem-backed views even when the network request then fails.
+      for (const key of packMutationInvalidations) {
+        void queryClient.invalidateQueries({ queryKey: key });
+      }
       toastIdRef.current = undefined;
     },
   });

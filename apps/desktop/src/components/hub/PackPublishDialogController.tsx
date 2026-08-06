@@ -5,6 +5,9 @@ import { usePublishPack } from "@/hooks/use-publish-pack";
 import { api } from "@/lib/api";
 import { publishDescriptionDefault } from "@/lib/publish-defaults";
 import { queryKeys } from "@/lib/query-keys";
+import { useUiStore } from "@/stores/ui";
+
+const REGISTRY_PACK_ID = /^[\p{L}\p{N}]+(?:-[\p{L}\p{N}]+)*$/u;
 
 export function PackPublishDialogController({
   pack,
@@ -39,6 +42,11 @@ export function PackPublishDialogController({
     retry: 1,
   });
   const publish = usePublishPack();
+  const clearPathsUnder = useUiStore((state) => state.clearPathsUnder);
+  const migratesLegacyIdentity =
+    pack.origin === "local" &&
+    (!REGISTRY_PACK_ID.test(pack.pack_id) ||
+      pack.pack_id !== pack.pack_id.toLowerCase());
 
   return (
     <PublishPackDialog
@@ -68,7 +76,12 @@ export function PackPublishDialogController({
       onPublish={(intent) => {
         publish.mutate(
           { ...intent, packId: pack.pack_id },
-          { onSuccess: () => onOpenChange(false) },
+          {
+            onSuccess: () => onOpenChange(false),
+            onSettled: () => {
+              if (migratesLegacyIdentity) clearPathsUnder(pack.local_path);
+            },
+          },
         );
       }}
     />

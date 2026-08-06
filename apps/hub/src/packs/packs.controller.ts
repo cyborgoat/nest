@@ -76,7 +76,7 @@ export class PacksController {
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader(
       'Content-Disposition',
-      `attachment; filename="${artifact.filename}"`,
+      `attachment; filename="${artifact.sha256}.zip"`,
     );
     res.setHeader('Content-Length', String(artifact.byteLength));
     res.setHeader('X-Content-SHA256', artifact.sha256);

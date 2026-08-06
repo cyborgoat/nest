@@ -1246,10 +1246,8 @@ pub fn purge_path_data(conn: &Connection, path: &str) -> AppResult<()> {
     Ok(())
 }
 
-/// Renames a pack's identity in `sync_state` — `pack_id` and `local_path`
-/// always move together (the vault-wide invariant is that a pack's folder
-/// name *is* its id), leaving version/active/origin/owner_id/description
-/// untouched.
+/// Renames a pack's identity in `sync_state`. `pack_id` and `local_path`
+/// always move together; the display name may retain spaces and capitalization.
 pub fn rename_sync_state_pack(
     conn: &Connection,
     old_pack_id: &str,

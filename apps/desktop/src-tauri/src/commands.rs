@@ -1650,7 +1650,7 @@ async fn publish_pack(
     let token = ensure_hub_access(state, &settings, false)
         .await?
         .ok_or_else(|| AppError::msg("Sign in to publish a knowledge pack"))?;
-    let installed = {
+    let mut installed = {
         let conn = state.db.lock();
         require_installed_pack(&conn, &pack_id)?
     };
@@ -1669,6 +1669,10 @@ async fn publish_pack(
             "{} already has a submission awaiting review (v{pending_version}). Wait for it to be approved or rejected before submitting again.",
             installed.name,
         )));
+    }
+    if installed.origin == "local" && hub::slugify_pack_id(&installed.pack_id) != installed.pack_id
+    {
+        installed = migrate_legacy_local_pack_for_publish(state, &installed)?;
     }
     let vault = state.vault_path();
     let source_local_path = installed.local_path.clone();
@@ -2117,11 +2121,41 @@ pub fn hub_update_pack_metadata(
         .ok_or_else(|| AppError::msg(format!("Pack not installed: {}", installed.pack_id)))
 }
 
-/// Renames a local pack: its display name, id, and vault folder all change
-/// together (the vault's invariant is folder name == id == display name for
-/// local packs — see `hub::create_empty_pack`/`hub::rename_pack_folder`).
+fn finish_local_pack_identity_change(
+    state: &SharedState,
+    installed: &InstalledPack,
+    updated: PackMeta,
+) -> AppResult<InstalledPack> {
+    crate::snapshot::rename_snapshot_root(&state.app_data_dir, &installed.pack_id, &updated.id)?;
+
+    {
+        let conn = state.db.lock();
+        db::purge_chunks_for_path(&conn, &installed.local_path)?;
+        db::rename_sync_state_pack(&conn, &installed.pack_id, &updated.id, &updated.name)?;
+    }
+    indexing::schedule(state)?;
+
+    let conn = state.db.lock();
+    db::get_sync_state(&conn, &updated.id)?
+        .ok_or_else(|| AppError::msg("Renamed pack record was not saved"))
+}
+
+fn migrate_legacy_local_pack_for_publish(
+    state: &SharedState,
+    installed: &InstalledPack,
+) -> AppResult<InstalledPack> {
+    let updated = hub::migrate_local_pack_id_for_publish(
+        &state.vault_path(),
+        &installed.local_path,
+        &installed.pack_id,
+        &installed.name,
+    )?;
+    finish_local_pack_identity_change(state, installed, updated)
+}
+
+/// Renames a local pack's display name and registry-safe identity together.
 /// Downloaded (`registry`) packs, and bundled/unknown-origin ones, keep the
-/// identity the hub already tracks — renaming those isn't offered at all.
+/// identity the Hub already tracks.
 #[tauri::command]
 pub fn hub_rename_pack(
     state: State<'_, SharedState>,
@@ -2141,22 +2175,7 @@ pub fn hub_rename_pack(
 
     let vault = state.vault_path();
     let updated = hub::rename_pack_folder(&vault, &installed.local_path, &name)?;
-    crate::snapshot::rename_snapshot_root(&state.app_data_dir, &installed.pack_id, &updated.id)?;
-
-    {
-        let conn = state.db.lock();
-        // The old path's indexed content is stale the instant the folder
-        // moves; a fresh index run (below) repopulates it under the new
-        // path. This must NOT be `purge_path_data` — that also deletes the
-        // sync_state row we're about to update in place.
-        db::purge_chunks_for_path(&conn, &installed.local_path)?;
-        db::rename_sync_state_pack(&conn, &installed.pack_id, &updated.id, &updated.name)?;
-    }
-    indexing::schedule(state.inner())?;
-
-    let conn = state.db.lock();
-    db::get_sync_state(&conn, &updated.id)?
-        .ok_or_else(|| AppError::msg("Renamed pack record was not saved"))
+    finish_local_pack_identity_change(state.inner(), &installed, updated)
 }
 
 async fn hub_message_context(state: &SharedState) -> AppResult<(AppSettings, String)> {

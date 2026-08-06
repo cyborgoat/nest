@@ -28,6 +28,21 @@ describe('Hub (e2e)', () => {
       path.join(registryPath, 'getting-started', '1.0.0'),
       { recursive: true },
     );
+    const unicodeReleasePath = path.join(registryPath, '测试pack1', '0.1.0');
+    await fs.mkdir(unicodeReleasePath, { recursive: true });
+    await fs.writeFile(
+      path.join(unicodeReleasePath, 'pack.json'),
+      JSON.stringify({
+        id: '测试pack1',
+        name: '测试知识包',
+        description: 'Unicode download fixture',
+        version: '0.1.0',
+      }),
+    );
+    await fs.writeFile(
+      path.join(unicodeReleasePath, 'README.md'),
+      '# 测试知识包',
+    );
     process.env.REGISTRY_PATH = registryPath;
     process.env.DEBUG_MODE = process.env.DEBUG_MODE || 'false';
     process.env.CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
@@ -94,7 +109,7 @@ describe('Hub (e2e)', () => {
     const res = await request(app.getHttpServer()).get('/packs').expect(200);
     const packs = res.body as PackProject[];
     expect(Array.isArray(packs)).toBe(true);
-    expect(packs).toHaveLength(1);
+    expect(packs).toHaveLength(2);
     const gettingStarted = packs.find((p) => p.id === 'getting-started');
     expect(gettingStarted).toBeDefined();
     expect(gettingStarted!.latest_version).toBe('1.0.0');
@@ -147,11 +162,23 @@ describe('Hub (e2e)', () => {
         });
       })
       .expect(200);
-    expect(res.headers['content-disposition']).toContain(
-      'getting-started-1.0.0.zip',
+    expect(res.headers['content-disposition']).toBe(
+      `attachment; filename="${res.headers['x-content-sha256']}.zip"`,
     );
     expect(res.headers['content-length']).toMatch(/^\d+$/);
     expect(res.headers['x-content-sha256']).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it('downloads a pack with a Chinese ID using an ASCII content ID filename', async () => {
+    const res = await request(app.getHttpServer())
+      .get(`/packs/${encodeURIComponent('测试pack1')}/0.1.0/download`)
+      .expect(200);
+
+    expect(res.headers['content-disposition']).toBe(
+      `attachment; filename="${res.headers['x-content-sha256']}.zip"`,
+    );
+    expect(res.headers['content-disposition']).not.toContain('测试');
+    expect(res.headers['content-type']).toMatch(/zip/);
   });
 
   it('registers a regular user and returns authenticated identity', async () => {

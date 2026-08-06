@@ -9,7 +9,11 @@ import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const SEMVER_RE = /^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/;
-const PACK_ID_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const PACK_ID_RE = /^[\p{L}\p{N}]+(?:-[\p{L}\p{N}]+)*$/u;
+
+function isValidPackId(value) {
+  return PACK_ID_RE.test(value) && value === value.toLowerCase();
+}
 
 const rootArg = process.argv[2];
 const registryRoot = rootArg
@@ -57,7 +61,7 @@ for (const projectName of readdirSync(registryRoot).sort()) {
   const projectDir = join(registryRoot, projectName);
   if (!statSync(projectDir).isDirectory()) continue;
 
-  if (!PACK_ID_RE.test(projectName)) {
+  if (!isValidPackId(projectName)) {
     fail(`Invalid project id folder: ${projectName}`);
     continue;
   }
