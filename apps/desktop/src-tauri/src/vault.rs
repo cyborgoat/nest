@@ -391,6 +391,11 @@ pub fn rename_entry(root: &Path, from_rel: &str, to_rel: &str) -> AppResult<()> 
     if !from.exists() {
         return Err(AppError::msg(format!("{from_rel} does not exist")));
     }
+    let from_rel_path = Path::new(from_rel.trim_matches('/'));
+    let to_rel_path = Path::new(to_rel.trim_matches('/'));
+    if from.is_dir() && to_rel_path.starts_with(from_rel_path) {
+        return Err(AppError::msg("A folder cannot be moved inside itself"));
+    }
     let to = resolve_vault_path(root, to_rel)?;
     if to.exists() {
         return Err(AppError::msg(format!("{to_rel} already exists")));
@@ -794,6 +799,42 @@ mod tests {
         rename_entry(&dir, "pack/a.md", "pack/c.md").unwrap();
         assert!(!dir.join("pack/a.md").exists());
         assert_eq!(fs::read_to_string(dir.join("pack/c.md")).unwrap(), "# A");
+    }
+
+    #[test]
+    fn rename_entry_moves_files_and_folders_between_packs() {
+        let dir = env::temp_dir().join("nest-vault-move-between-packs");
+        let _ = fs::remove_dir_all(&dir);
+        ensure_dir(&dir.join("source/docs/nested")).unwrap();
+        ensure_dir(&dir.join("destination")).unwrap();
+        fs::write(dir.join("source/note.md"), "# Note").unwrap();
+        fs::write(dir.join("source/docs/nested/guide.md"), "# Guide").unwrap();
+
+        rename_entry(&dir, "source/note.md", "destination/note.md").unwrap();
+        rename_entry(&dir, "source/docs", "destination/docs").unwrap();
+
+        assert!(!dir.join("source/note.md").exists());
+        assert!(!dir.join("source/docs").exists());
+        assert_eq!(
+            fs::read_to_string(dir.join("destination/note.md")).unwrap(),
+            "# Note"
+        );
+        assert_eq!(
+            fs::read_to_string(dir.join("destination/docs/nested/guide.md")).unwrap(),
+            "# Guide"
+        );
+    }
+
+    #[test]
+    fn rename_entry_rejects_folder_descendant_without_creating_directories() {
+        let dir = env::temp_dir().join("nest-vault-move-folder-descendant");
+        let _ = fs::remove_dir_all(&dir);
+        ensure_dir(&dir.join("pack/docs")).unwrap();
+        fs::write(dir.join("pack/docs/note.md"), "# Note").unwrap();
+
+        assert!(rename_entry(&dir, "pack/docs", "pack/docs/nested/docs").is_err());
+        assert!(dir.join("pack/docs/note.md").is_file());
+        assert!(!dir.join("pack/docs/nested").exists());
     }
 
     #[test]

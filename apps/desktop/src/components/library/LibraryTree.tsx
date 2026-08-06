@@ -25,12 +25,15 @@ import {
   Trash2,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
+import { createPortal } from "react-dom";
 import {
   createContext,
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -90,6 +93,11 @@ import {
 } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
 import {
+  destinationFolderForNode,
+  validateVaultDrop,
+  type VaultDragEntry,
+} from "@/lib/tree-drag-drop";
+import {
   ensureImageExtension,
   ensureMdExtension,
   isImagePath,
@@ -100,8 +108,23 @@ import { useEditorStore } from "@/stores/editor";
 import { useUiStore } from "@/stores/ui";
 
 const DropTargetContext = createContext<{
-  dropTargetPath: string | null;
-}>({ dropTargetPath: null });
+  externalDropTargetPath: string | null;
+  internalDropTargetNodePath: string | null;
+  draggingPath: string | null;
+  beginPointerDrag: (
+    entry: VaultDragEntry,
+    event: ReactPointerEvent<HTMLElement>,
+  ) => void;
+  suppressTreeClick: () => boolean;
+  pathExists: (path: string) => boolean;
+}>({
+  externalDropTargetPath: null,
+  internalDropTargetNodePath: null,
+  draggingPath: null,
+  beginPointerDrag: () => {},
+  suppressTreeClick: () => false,
+  pathExists: () => false,
+});
 
 function filterTree(nodes: TreeNode[], query: string): TreeNode[] {
   const q = query.trim().toLowerCase();
@@ -259,9 +282,16 @@ function TreeItem({
   const [renamePackDialogOpen, setRenamePackDialogOpen] = useState(false);
   const [publishDialogOpen, setPublishDialogOpen] = useState(false);
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
+  const expandOnDragTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (forceOpen) setOpen(true);
   }, [forceOpen]);
+  useEffect(
+    () => () => {
+      if (expandOnDragTimer.current) clearTimeout(expandOnDragTimer.current);
+    },
+    [],
+  );
 
   const { t } = useI18n();
   const activeMainTabId = useUiStore((s) => s.activeMainTabId);
@@ -277,8 +307,39 @@ function TreeItem({
   const status = statusMap.get(node.path);
   const isDeleted = status === "deleted";
   const editableHere = canEdit && !isDeleted;
-  const { dropTargetPath } = useContext(DropTargetContext);
-  const isDropTarget = isFolder && dropTargetPath === node.path;
+  const {
+    externalDropTargetPath,
+    internalDropTargetNodePath,
+    draggingPath,
+    beginPointerDrag,
+    suppressTreeClick,
+    pathExists,
+  } = useContext(DropTargetContext);
+  const isDropTarget =
+    (isFolder && externalDropTargetPath === node.path) ||
+    internalDropTargetNodePath === node.path;
+  const isDragging = draggingPath === node.path;
+  const draggableHere = editableHere && !isRoot && pathExists(node.path);
+  useEffect(() => {
+    if (
+      internalDropTargetNodePath !== node.path ||
+      !isFolder ||
+      open ||
+      expandOnDragTimer.current
+    ) {
+      return;
+    }
+    expandOnDragTimer.current = setTimeout(() => {
+      setOpen(true);
+      expandOnDragTimer.current = null;
+    }, 500);
+    return () => {
+      if (expandOnDragTimer.current) {
+        clearTimeout(expandOnDragTimer.current);
+        expandOnDragTimer.current = null;
+      }
+    };
+  }, [internalDropTargetNodePath, isFolder, node.path, open]);
   const editReason = isDeleted
     ? "This file has already been deleted."
     : !canEdit
@@ -381,6 +442,9 @@ function TreeItem({
   const nameButton = (
     <button
       type="button"
+      onPointerDown={(event) => {
+        if (draggableHere) beginPointerDrag(node, event);
+      }}
       className="flex min-w-0 flex-1 select-none items-center gap-1.5 py-1.5 text-left"
       onClick={() => {
         if (isFolder) setOpen((v) => !v);
@@ -453,10 +517,18 @@ function TreeItem({
     <div
       data-vault-path={node.path}
       data-vault-kind={isFolder ? "folder" : "file"}
+      onClickCapture={(event) => {
+        if (suppressTreeClick()) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+      }}
       className={cn(
-        "group flex select-none items-center gap-1 rounded-md pr-1 text-sm transition-colors",
+        "group flex select-none items-center gap-1 rounded-md pr-1 text-sm transition-all duration-150",
         isSelected ? "bg-primary/10 text-foreground" : "hover:bg-muted/80",
-        isDropTarget && "bg-accent/20 ring-1 ring-accent/50",
+        isDropTarget && "relative z-10 bg-primary/15 ring-2 ring-primary/60",
+        isDragging && "scale-[0.98] opacity-45",
+        draggableHere && "cursor-grab active:cursor-grabbing",
         !packActive && "text-muted-foreground",
       )}
       style={{ paddingLeft: 8 + depth * 12 }}
@@ -1026,9 +1098,23 @@ export function LibraryTree({
   const [search, setSearch] = useState("");
   const [inactiveOpen, setInactiveOpen] = useState("");
   const [inactiveResetKey, setInactiveResetKey] = useState(0);
+  const [internalDropTargetNodePath, setInternalDropTargetNodePath] = useState<
+    string | null
+  >(null);
+  const [dragVisual, setDragVisual] = useState<{
+    entry: VaultDragEntry;
+    x: number;
+    y: number;
+  } | null>(null);
+  const dragSourceRef = useRef<VaultDragEntry | null>(null);
+  const pointerStartRef = useRef<{ x: number; y: number } | null>(null);
+  const pointerDraggingRef = useRef(false);
+  const suppressClickRef = useRef(false);
   const queryClient = useQueryClient();
   const clearPathsUnder = useUiStore((s) => s.clearPathsUnder);
   const openAccountSettingsTab = useUiStore((s) => s.openAccountSettingsTab);
+  const setEditing = useEditorStore((s) => s.setEditing);
+  const setDirty = useEditorStore((s) => s.setDirty);
 
   const hubAuthQuery = useQuery({
     queryKey: queryKeys.hubAuth,
@@ -1045,6 +1131,199 @@ export function LibraryTree({
     }
     return map;
   }, [installed]);
+
+  const existingPaths = useMemo(() => {
+    const paths = new Set<string>();
+    const visit = (node: TreeNode) => {
+      paths.add(node.path);
+      for (const child of node.children ?? []) visit(child);
+    };
+    for (const node of tree) visit(node);
+    return paths;
+  }, [tree]);
+
+  const nodeByPath = useMemo(() => {
+    const nodes = new Map<string, TreeNode>();
+    const visit = (node: TreeNode) => {
+      nodes.set(node.path, node);
+      for (const child of node.children ?? []) visit(child);
+    };
+    for (const node of tree) visit(node);
+    return nodes;
+  }, [tree]);
+
+  const findPackForPath = (path: string) => {
+    let match: InstalledPack | undefined;
+    for (const pack of installed) {
+      if (
+        (path === pack.local_path || path.startsWith(`${pack.local_path}/`)) &&
+        (!match || pack.local_path.length > match.local_path.length)
+      ) {
+        match = pack;
+      }
+    }
+    return match;
+  };
+
+  const validateDrop = (source: VaultDragEntry, target: TreeNode) => {
+    const sourcePack = findPackForPath(source.path);
+    const destinationFolder = destinationFolderForNode(target);
+    const destinationPack = findPackForPath(destinationFolder);
+    return {
+      sourcePack,
+      destinationPack,
+      validation: validateVaultDrop({
+        source,
+        target,
+        sourceEditable: Boolean(
+          sourcePack && canEditPack(sourcePack, hubUser),
+        ),
+        destinationEditable: Boolean(
+          destinationPack && canEditPack(destinationPack, hubUser),
+        ),
+        targetExists: existingPaths.has(target.path),
+        existingPaths,
+      }),
+    };
+  };
+
+  const moveEntry = useMutation({
+    mutationFn: ({ from, to }: { from: string; to: string }) =>
+      api.vaultRenameEntry(from, to),
+    onSuccess: (_void, vars) => {
+      clearPathsUnder(vars.from);
+      setEditing(vars.from, false);
+      setDirty(vars.from, false);
+
+      const sourcePack = findPackForPath(vars.from);
+      const destinationPack = findPackForPath(vars.to);
+      const packIds = new Set(
+        [sourcePack?.pack_id, destinationPack?.pack_id].filter(
+          (id): id is string => Boolean(id),
+        ),
+      );
+      for (const packId of packIds) {
+        for (const key of fileMutationInvalidations(packId)) {
+          void queryClient.invalidateQueries({ queryKey: key });
+        }
+      }
+      toast.success("Item moved");
+    },
+    onError: (e: Error) =>
+      toast.error("Could not move item", { description: e.message }),
+    onSettled: () => {
+      dragSourceRef.current = null;
+      setInternalDropTargetNodePath(null);
+    },
+  });
+
+  const endInternalDrag = () => {
+    dragSourceRef.current = null;
+    pointerStartRef.current = null;
+    pointerDraggingRef.current = false;
+    setInternalDropTargetNodePath(null);
+    setDragVisual(null);
+    document.body.style.cursor = "";
+  };
+
+  useEffect(() => {
+    const targetAtPoint = (x: number, y: number) => {
+      const element = document.elementFromPoint(x, y);
+      const row = element?.closest<HTMLElement>("[data-vault-path]");
+      const path = row?.dataset.vaultPath;
+      return path ? nodeByPath.get(path) : undefined;
+    };
+
+    const onPointerMove = (event: PointerEvent) => {
+      const source = dragSourceRef.current;
+      const start = pointerStartRef.current;
+      if (!source || !start) return;
+
+      if (!pointerDraggingRef.current) {
+        const distance = Math.hypot(
+          event.clientX - start.x,
+          event.clientY - start.y,
+        );
+        if (distance < 5) return;
+        pointerDraggingRef.current = true;
+        suppressClickRef.current = true;
+        document.body.style.cursor = "grabbing";
+      }
+
+      event.preventDefault();
+      setDragVisual({ entry: source, x: event.clientX, y: event.clientY });
+      const target = targetAtPoint(event.clientX, event.clientY);
+      if (!target) {
+        setInternalDropTargetNodePath(null);
+        return;
+      }
+      const { validation } = validateDrop(source, target);
+      setInternalDropTargetNodePath(
+        validation.valid ? validation.destinationFolder : null,
+      );
+    };
+
+    const onPointerUp = (event: PointerEvent) => {
+      const source = dragSourceRef.current;
+      if (!source) return;
+      if (!pointerDraggingRef.current) {
+        endInternalDrag();
+        return;
+      }
+
+      event.preventDefault();
+      const target = targetAtPoint(event.clientX, event.clientY);
+      if (target) {
+        const { validation } = validateDrop(source, target);
+        if (validation.valid) {
+          moveEntry.mutate({
+            from: source.path,
+            to: validation.destinationPath,
+          });
+        } else {
+          toast.error("Cannot move item", { description: validation.reason });
+        }
+      }
+      endInternalDrag();
+      window.setTimeout(() => {
+        suppressClickRef.current = false;
+      }, 0);
+    };
+
+    const onPointerCancel = () => {
+      endInternalDrag();
+      suppressClickRef.current = false;
+    };
+
+    window.addEventListener("pointermove", onPointerMove, { passive: false });
+    window.addEventListener("pointerup", onPointerUp, { passive: false });
+    window.addEventListener("pointercancel", onPointerCancel);
+    window.addEventListener("blur", onPointerCancel);
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerCancel);
+      window.removeEventListener("blur", onPointerCancel);
+    };
+  });
+
+  const dropContext = {
+    externalDropTargetPath: dropTargetPath,
+    internalDropTargetNodePath,
+    draggingPath: dragVisual?.entry.path ?? null,
+    beginPointerDrag: (
+      entry: VaultDragEntry,
+      event: ReactPointerEvent<HTMLElement>,
+    ) => {
+      if (event.button !== 0 || moveEntry.isPending) return;
+      dragSourceRef.current = entry;
+      pointerStartRef.current = { x: event.clientX, y: event.clientY };
+      pointerDraggingRef.current = false;
+      suppressClickRef.current = false;
+    },
+    suppressTreeClick: () => suppressClickRef.current,
+    pathExists: (path: string) => existingPaths.has(path),
+  };
 
   const { activeRoots, inactiveRoots } = useMemo(() => {
     const active: TreeNode[] = [];
@@ -1157,7 +1436,33 @@ export function LibraryTree({
   }
 
   return (
-    <DropTargetContext.Provider value={{ dropTargetPath }}>
+    <DropTargetContext.Provider value={dropContext}>
+    {dragVisual &&
+      createPortal(
+        <motion.div
+          initial={{ opacity: 0, scale: 0.92, y: -3 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          exit={{ opacity: 0, scale: 0.96 }}
+          transition={{ duration: 0.12 }}
+          className="pointer-events-none fixed z-[100] flex max-w-64 items-center gap-2 rounded-md border border-primary/30 bg-popover/95 px-2.5 py-1.5 text-xs text-popover-foreground shadow-lg backdrop-blur-sm"
+          style={{ left: dragVisual.x + 14, top: dragVisual.y + 14 }}
+        >
+          {dragVisual.entry.kind === "folder" ? (
+            <Folder className="size-3.5 shrink-0 text-primary" />
+          ) : isImagePath(dragVisual.entry.path) ? (
+            <ImageIcon className="size-3.5 shrink-0 text-primary" />
+          ) : (
+            <FileText className="size-3.5 shrink-0 text-primary" />
+          )}
+          <span className="truncate font-medium">{dragVisual.entry.name}</span>
+          {internalDropTargetNodePath && (
+            <span className="shrink-0 text-muted-foreground">
+              → {internalDropTargetNodePath.split("/").pop()}
+            </span>
+          )}
+        </motion.div>,
+        document.body,
+      )}
     <div className="flex h-full min-h-0 flex-col">
       <div className="px-2 py-2">
         <div className="relative">
