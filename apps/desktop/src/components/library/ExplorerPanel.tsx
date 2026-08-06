@@ -6,6 +6,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { LibraryTree } from "@/components/library/LibraryTree";
 import { NewPackDialog } from "@/components/library/NewPackDialog";
+import {
+  LocalPackImportController,
+  type LocalPackImportMode,
+} from "@/components/hub/LocalPackImportController";
 import { Button } from "@/components/ui/button";
 import { SidebarPaneHeader } from "@/components/ui/sidebar-pane-header";
 import { Spinner } from "@/components/ui/spinner";
@@ -41,6 +45,7 @@ export function ExplorerPanel({
   error: Error | null;
 }) {
   const [newPackOpen, setNewPackOpen] = useState(false);
+  const [importMode, setImportMode] = useState<LocalPackImportMode | null>(null);
   const [dropTargetPath, setDropTargetPath] = useState<string | null>(null);
   const dropTargetRef = useRef<string | null>(null);
   const queryClient = useQueryClient();
@@ -195,6 +200,9 @@ export function ExplorerPanel({
             tree={tree}
             installed={installed}
             dropTargetPath={dropTargetPath}
+            onCreatePack={() => setNewPackOpen(true)}
+            onImportFolder={() => setImportMode("folder")}
+            onImportZip={() => setImportMode("zip")}
           />
         )}
       </div>
@@ -204,6 +212,11 @@ export function ExplorerPanel({
         onCreate={(metadata) => createPack.mutate(metadata)}
         creating={createPack.isPending}
         error={createPack.error?.message}
+      />
+      <LocalPackImportController
+        mode={importMode}
+        onModeChange={setImportMode}
+        installed={installed}
       />
     </div>
   );

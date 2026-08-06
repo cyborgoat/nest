@@ -5,7 +5,7 @@ import type {
   LocalPackInspection,
 } from "@nest/shared";
 import { FileArchive, FolderInput, Loader2 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -23,6 +23,7 @@ import { cn } from "@/lib/utils";
 
 type Props = {
   open: boolean;
+  initialMode?: "choose" | "folder" | "zip";
   onOpenChange: (open: boolean) => void;
   onImportZip: (
     sourcePath: string,
@@ -45,6 +46,7 @@ function isZipPath(path: string) {
 
 export function ImportPackDialog({
   open,
+  initialMode = "choose",
   onOpenChange,
   onImportZip,
   onCreateFromFolder,
@@ -60,9 +62,11 @@ export function ImportPackDialog({
   const [zipInspection, setZipInspection] =
     useState<LocalPackInspection | null>(null);
   const [inspectingZip, setInspectingZip] = useState(false);
+  const directPickerOpened = useRef(false);
 
   useEffect(() => {
     if (!open) {
+      directPickerOpened.current = false;
       setMode("choose");
       setSelectedPath(null);
       setMetadata(EMPTY);
@@ -125,35 +129,62 @@ export function ImportPackDialog({
     };
   }, [inspectZipPath, open, mode, t]);
 
-  const selectZip = async () => {
-    const result = await openDialog({
-      multiple: false,
-      title: t("hub.selectZipTitle"),
-      filters: [{ name: "Knowledge pack", extensions: ["zip"] }],
-    });
-    if (typeof result === "string" && result) {
-      await inspectZipPath(result);
-    }
-  };
+  const selectZip = useCallback(
+    async (): Promise<"selected" | "cancelled" | "error"> => {
+      setMode("zip");
+      try {
+        const result = await openDialog({
+          multiple: false,
+          title: t("hub.selectZipTitle"),
+          filters: [{ name: "Knowledge pack", extensions: ["zip"] }],
+        });
+        if (typeof result === "string" && result) {
+          await inspectZipPath(result);
+          return "selected";
+        }
+        return "cancelled";
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+        return "error";
+      }
+    },
+    [inspectZipPath, t],
+  );
 
-  const selectFolder = async () => {
-    try {
-      const path = await openDialog({
-        directory: true,
-        multiple: false,
-        title: t("hub.selectFolderTitle"),
-      });
-      if (typeof path !== "string" || !path) return;
-      const defaults = await api.hubReadFolderPackDefaults(path);
-      setSelectedPath(path);
-      setMetadata(defaults.metadata);
-      setWarning(defaults.warning ?? null);
-      setError(null);
-      setMode("folder");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+  const selectFolder = useCallback(
+    async (): Promise<"selected" | "cancelled" | "error"> => {
+      try {
+        const path = await openDialog({
+          directory: true,
+          multiple: false,
+          title: t("hub.selectFolderTitle"),
+        });
+        if (typeof path !== "string" || !path) return "cancelled";
+        const defaults = await api.hubReadFolderPackDefaults(path);
+        setSelectedPath(path);
+        setMetadata(defaults.metadata);
+        setWarning(defaults.warning ?? null);
+        setError(null);
+        setMode("folder");
+        return "selected";
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+        return "error";
+      }
+    },
+    [t],
+  );
+
+  useEffect(() => {
+    if (!open || initialMode === "choose" || directPickerOpened.current) {
+      return;
     }
-  };
+    directPickerOpened.current = true;
+    const pick = initialMode === "folder" ? selectFolder : selectZip;
+    void pick().then((result) => {
+      if (result === "cancelled") onOpenChange(false);
+    });
+  }, [initialMode, onOpenChange, open, selectFolder, selectZip]);
 
   const update = <K extends keyof KnowledgePackMeta>(
     key: K,

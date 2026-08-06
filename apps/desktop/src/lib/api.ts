@@ -47,6 +47,7 @@ export const api = {
     invoke<void>("vault_rename_entry", { from, to }),
   vaultRevealInFolder: (path: string) =>
     invoke<void>("vault_reveal_in_folder", { path }),
+  vaultOpenFolder: () => invoke<void>("vault_open_folder"),
   vaultImportFiles: (destDir: string, sourcePaths: string[]) =>
     invoke<{ imported: string[]; skipped: string[] }>("vault_import_files", {
       destDir,

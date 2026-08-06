@@ -112,6 +112,15 @@ pub fn vault_reveal_in_folder(
 }
 
 #[tauri::command]
+pub fn vault_open_folder(app: AppHandle, state: State<'_, SharedState>) -> AppResult<()> {
+    use tauri_plugin_opener::OpenerExt;
+    let vault = state.vault_path();
+    app.opener()
+        .open_path(vault.to_string_lossy().into_owned(), None::<&str>)
+        .map_err(|e| AppError::msg(format!("Could not open vault folder: {e}")))
+}
+
+#[tauri::command]
 pub fn vault_import_files(
     state: State<'_, SharedState>,
     dest_dir: String,

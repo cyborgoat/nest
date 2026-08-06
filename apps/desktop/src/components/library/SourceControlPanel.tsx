@@ -49,6 +49,7 @@ import {
   hasPackEditPermission,
   shouldTrackPackChanges,
 } from "@/lib/pack-permissions";
+import { afterMenuClose } from "@/lib/menu-actions";
 import { pendingPublishVersionLabel } from "@/lib/publish-request-labels";
 import { fileMutationInvalidations, queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
@@ -60,20 +61,20 @@ function PackChanges({
   statuses,
   authenticated,
   recentlyRejected,
+  onPublish,
 }: {
   pack: InstalledPack;
   statuses: FileStatus[];
   authenticated: boolean;
   recentlyRejected: boolean;
+  onPublish: (pack: InstalledPack) => void;
 }) {
   const queryClient = useQueryClient();
-  const [publishDialogOpen, setPublishDialogOpen] = useState(false);
   const openDiffTab = useUiStore((s) => s.openDiffTab);
   const openFileTab = useUiStore((s) => s.openFileTab);
   const closeMainTab = useUiStore((s) => s.closeMainTab);
   const clearPathsUnder = useUiStore((s) => s.clearPathsUnder);
   const activeMainTabId = useUiStore((s) => s.activeMainTabId);
-  const openAccountSettingsTab = useUiStore((s) => s.openAccountSettingsTab);
   const openMessagesTab = useUiStore((s) => s.openMessagesTab);
   const setActivityView = useUiStore((s) => s.setActivitySidebarView);
   const setSidebarOpen = useUiStore((s) => s.setSidebarOpen);
@@ -82,6 +83,19 @@ function PackChanges({
 
   const mergeApproved = useMergeApprovedPack();
   const reviewLocked = pack.publish_review_status === "pending";
+
+  const openPublish = () => {
+    onPublish(pack);
+  };
+  const renderPublishMenuItem = () => (
+    <ContextMenuItem
+      disabled={Boolean(pack.pending_version)}
+      onSelect={() => afterMenuClose(openPublish)}
+    >
+      <CloudUpload className="size-3.5" />
+      {authenticated ? "Publish" : "Sign in to publish"}
+    </ContextMenuItem>
+  );
 
   const discard = useMutation({
     mutationFn: (change: FileStatus) =>
@@ -115,67 +129,73 @@ function PackChanges({
 
   return (
     <section className="space-y-1">
-      <SectionLabel className="flex min-w-0 items-center gap-1.5 px-3 pt-2">
-        <Package className="size-3.5 shrink-0 text-primary" />
-        <span className="truncate">{pack.name}</span>
-        <span className="shrink-0 font-normal normal-case tracking-normal opacity-70">
-          ({statuses.length})
-        </span>
-        {pack.publish_review_status === "approved_awaiting_merge" &&
-          pack.pending_version && (
-            <Badge
-              variant="update"
-              className="shrink-0 normal-case tracking-normal"
-            >
-              {pendingPublishVersionLabel(pack)} approved
-            </Badge>
-          )}
-        {recentlyRejected && !pack.pending_version && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button type="button" onClick={openMessagesTab}>
-                <Badge
-                  variant="destructive"
-                  className="shrink-0 normal-case tracking-normal"
-                >
-                  <CircleAlert className="size-3" />
-                  Rejected
-                </Badge>
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="right">
-              Recent publish rejected. Open Messages for details.
-            </TooltipContent>
-          </Tooltip>
-        )}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              type="button"
-              size="icon-xs"
-              variant="ghost"
-              aria-label={authenticated ? "Publish pack" : "Sign in to publish"}
-              disabled={Boolean(pack.pending_version)}
-              className="ml-auto -mr-1 shrink-0"
-              onClick={() => {
-                if (authenticated) setPublishDialogOpen(true);
-                else openAccountSettingsTab();
-              }}
-            >
-              <CloudUpload className="size-3.5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="right">
-            {pack.pending_version
-              ? pack.publish_review_status === "approved_awaiting_merge"
-                ? `${pendingPublishVersionLabel(pack)} is approved and ready to merge`
-                : `${pendingPublishVersionLabel(pack)} is awaiting review`
-              : authenticated
-                ? "Publish pack"
-                : "Sign in to publish"}
-          </TooltipContent>
-        </Tooltip>
-      </SectionLabel>
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <div onContextMenu={(event) => event.stopPropagation()}>
+            <SectionLabel className="flex min-w-0 items-center gap-1.5 px-3 pt-2">
+              <Package className="size-3.5 shrink-0 text-primary" />
+              <span className="truncate">{pack.name}</span>
+              <span className="shrink-0 font-normal normal-case tracking-normal opacity-70">
+                ({statuses.length})
+              </span>
+              {pack.publish_review_status === "approved_awaiting_merge" &&
+                pack.pending_version && (
+                  <Badge
+                    variant="update"
+                    className="shrink-0 normal-case tracking-normal"
+                  >
+                    {pendingPublishVersionLabel(pack)} approved
+                  </Badge>
+                )}
+              {recentlyRejected && !pack.pending_version && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button type="button" onClick={openMessagesTab}>
+                      <Badge
+                        variant="destructive"
+                        className="shrink-0 normal-case tracking-normal"
+                      >
+                        <CircleAlert className="size-3" />
+                        Rejected
+                      </Badge>
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right">
+                    Recent publish rejected. Open Messages for details.
+                  </TooltipContent>
+                </Tooltip>
+              )}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    size="icon-xs"
+                    variant="ghost"
+                    aria-label={
+                      authenticated ? "Publish pack" : "Sign in to publish"
+                    }
+                    disabled={Boolean(pack.pending_version)}
+                    className="ml-auto -mr-1 shrink-0"
+                    onClick={openPublish}
+                  >
+                    <CloudUpload className="size-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="right">
+                  {pack.pending_version
+                    ? pack.publish_review_status === "approved_awaiting_merge"
+                      ? `${pendingPublishVersionLabel(pack)} is approved and ready to merge`
+                      : `${pendingPublishVersionLabel(pack)} is awaiting review`
+                    : authenticated
+                      ? "Publish pack"
+                      : "Sign in to publish"}
+                </TooltipContent>
+              </Tooltip>
+            </SectionLabel>
+          </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent>{renderPublishMenuItem()}</ContextMenuContent>
+      </ContextMenu>
       {reviewLocked && (
         <div className="mx-3 mb-2 mt-1 border-t border-border/70 pt-2">
           {pack.pending_version && (
@@ -252,6 +272,7 @@ function PackChanges({
               <ContextMenu key={s.path}>
                 <ContextMenuTrigger asChild>
                   <div
+                    onContextMenu={(event) => event.stopPropagation()}
                     className={cn(
                       "group flex w-full items-center rounded-md pr-2 text-sm transition-colors hover:bg-muted/80",
                       selected && "bg-muted/80",
@@ -334,6 +355,8 @@ function PackChanges({
                     Open File
                   </ContextMenuItem>
                   <ContextMenuSeparator />
+                  {renderPublishMenuItem()}
+                  <ContextMenuSeparator />
                   <ContextMenuItem
                     disabled={reviewLocked || discard.isPending}
                     className="text-destructive focus:text-destructive"
@@ -348,11 +371,6 @@ function PackChanges({
           })}
         </div>
       )}
-      <PackPublishDialogController
-        pack={pack}
-        open={publishDialogOpen}
-        onOpenChange={setPublishDialogOpen}
-      />
     </section>
   );
 }
@@ -363,12 +381,19 @@ export function SourceControlPanel({
   installed: InstalledPack[];
 }) {
   const queryClient = useQueryClient();
+  const [publishPack, setPublishPack] = useState<InstalledPack | null>(null);
   const hubAuthQuery = useQuery({
     queryKey: queryKeys.hubAuth,
     queryFn: api.hubAuthState,
   });
   const hubUser = hubAuthQuery.data?.user ?? null;
   const authenticated = hubAuthQuery.data?.authenticated === true;
+  const openAccountSettingsTab = useUiStore((s) => s.openAccountSettingsTab);
+
+  const openPublish = (pack: InstalledPack) => {
+    if (authenticated) setPublishPack(pack);
+    else openAccountSettingsTab();
+  };
 
   // Get fresh "under review" state as soon as this view is opened, rather
   // than waiting for the background poll.
@@ -450,27 +475,57 @@ export function SourceControlPanel({
           />
         }
       />
-      {sections.length === 0 ? (
-        <div className="p-3">
-          <EmptyState
-            variant="dashed"
-            icon={<GitBranch className="size-6" />}
-            title="No changes to review"
-            description="Source control shows changes for editable packs installed from the registry."
-          />
-        </div>
-      ) : (
-        <div className="min-h-0 flex-1 overflow-y-auto py-1">
-          {sections.map(({ pack, statuses }) => (
-            <PackChanges
-              key={pack.pack_id}
-              pack={pack}
-              statuses={statuses}
-              authenticated={authenticated}
-              recentlyRejected={recentlyRejectedPackIds.has(pack.pack_id)}
-            />
-          ))}
-        </div>
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <div className="min-h-0 flex-1 overflow-y-auto py-1">
+            {sections.length === 0 ? (
+              <div className="p-3">
+                <EmptyState
+                  variant="dashed"
+                  icon={<GitBranch className="size-6" />}
+                  title="No changes to review"
+                  description="Source control shows changes for editable packs installed from the registry."
+                />
+              </div>
+            ) : (
+              sections.map(({ pack, statuses }) => (
+                <PackChanges
+                  key={pack.pack_id}
+                  pack={pack}
+                  statuses={statuses}
+                  authenticated={authenticated}
+                  recentlyRejected={recentlyRejectedPackIds.has(pack.pack_id)}
+                  onPublish={openPublish}
+                />
+              ))
+            )}
+          </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent>
+          {sections.length === 0 ? (
+            <ContextMenuItem disabled>No packs to publish</ContextMenuItem>
+          ) : (
+            sections.map(({ pack }) => (
+              <ContextMenuItem
+                key={pack.pack_id}
+                disabled={Boolean(pack.pending_version)}
+                onSelect={() => afterMenuClose(() => openPublish(pack))}
+              >
+                <CloudUpload className="size-3.5" />
+                {authenticated ? "Publish" : "Sign in to publish"} “{pack.name}”
+              </ContextMenuItem>
+            ))
+          )}
+        </ContextMenuContent>
+      </ContextMenu>
+      {publishPack && (
+        <PackPublishDialogController
+          pack={publishPack}
+          open
+          onOpenChange={(open) => {
+            if (!open) setPublishPack(null);
+          }}
+        />
       )}
     </div>
   );

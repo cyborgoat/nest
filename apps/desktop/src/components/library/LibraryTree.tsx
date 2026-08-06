@@ -4,16 +4,19 @@ import {
   ChevronDown,
   ChevronRight,
   Download,
+  FileArchive,
   FilePlus2,
   FileText,
   FileUp,
   Folder,
+  FolderInput,
   FolderPlus,
   FolderOpen,
   Image as ImageIcon,
   Info,
   Minus,
   Package,
+  PackagePlus,
   Pencil,
   Plus,
   Search,
@@ -69,6 +72,7 @@ import {
 import { PackPublishDialogController } from "@/components/hub/PackPublishDialogController";
 import { PackDetailsDialog } from "@/components/hub/PackDetailsDialog";
 import { RenamePackDialog } from "@/components/hub/RenamePackDialog";
+import { NewVaultEntryDialog } from "@/components/library/NewVaultEntryDialog";
 import { api } from "@/lib/api";
 import { appErrorMessage } from "@/lib/errors";
 import { useI18n } from "@/lib/i18n";
@@ -85,6 +89,10 @@ import {
   queryKeys,
 } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
+import {
+  collectEditableVaultDestinations,
+  type VaultDestination,
+} from "@/lib/vault-destinations";
 import {
   destinationFolderForNode,
   validateVaultDrop,
@@ -118,6 +126,86 @@ const DropTargetContext = createContext<{
   suppressTreeClick: () => false,
   pathExists: () => false,
 });
+
+type NewEntryKind = "file" | "folder";
+
+const ExplorerActionsContext = createContext<{
+  canCreateEntry: boolean;
+  onCreatePack: () => void;
+  onImportFolder: () => void;
+  onImportZip: () => void;
+  onCreateEntry: (kind: NewEntryKind, preferredDestination?: string) => void;
+  onOpenVaultFolder: () => void;
+}>({
+  canCreateEntry: false,
+  onCreatePack: () => {},
+  onImportFolder: () => {},
+  onImportZip: () => {},
+  onCreateEntry: () => {},
+  onOpenVaultFolder: () => {},
+});
+
+function GeneralExplorerMenuItems({
+  preferredDestination,
+  includePackImports = false,
+}: {
+  preferredDestination?: string;
+  includePackImports?: boolean;
+}) {
+  const {
+    canCreateEntry,
+    onCreatePack,
+    onImportFolder,
+    onImportZip,
+    onCreateEntry,
+    onOpenVaultFolder,
+  } = useContext(ExplorerActionsContext);
+
+  return (
+    <>
+      <ContextMenuItem onSelect={() => afterMenuClose(onCreatePack)}>
+        <PackagePlus className="size-3.5" />
+        New Knowledge Pack
+      </ContextMenuItem>
+      {includePackImports && (
+        <>
+          <ContextMenuItem onSelect={() => afterMenuClose(onImportFolder)}>
+            <FolderInput className="size-3.5" />
+            Import Local Pack from Folder…
+          </ContextMenuItem>
+          <ContextMenuItem onSelect={() => afterMenuClose(onImportZip)}>
+            <FileArchive className="size-3.5" />
+            Import Local Pack from ZIP…
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+        </>
+      )}
+      <ContextMenuItem
+        disabled={!canCreateEntry}
+        onSelect={() =>
+          afterMenuClose(() => onCreateEntry("file", preferredDestination))
+        }
+      >
+        <FilePlus2 className="size-3.5" />
+        New File
+      </ContextMenuItem>
+      <ContextMenuItem
+        disabled={!canCreateEntry}
+        onSelect={() =>
+          afterMenuClose(() => onCreateEntry("folder", preferredDestination))
+        }
+      >
+        <FolderPlus className="size-3.5" />
+        New Folder
+      </ContextMenuItem>
+      <ContextMenuSeparator />
+      <ContextMenuItem onSelect={() => afterMenuClose(onOpenVaultFolder)}>
+        <FolderOpen className="size-3.5" />
+        Open Vault Folder
+      </ContextMenuItem>
+    </>
+  );
+}
 
 function filterTree(nodes: TreeNode[], query: string): TreeNode[] {
   const q = query.trim().toLowerCase();
@@ -545,6 +633,7 @@ function TreeItem({
     <div
       data-vault-path={node.path}
       data-vault-kind={isFolder ? "folder" : "file"}
+      onContextMenu={(event) => event.stopPropagation()}
       onClickCapture={(event) => {
         if (suppressTreeClick()) {
           event.preventDefault();
@@ -648,6 +737,14 @@ function TreeItem({
       <ContextMenu>
         <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
         <ContextMenuContent>
+          {!isFolder && (
+            <>
+              <GeneralExplorerMenuItems
+                preferredDestination={parentDir(node.path)}
+              />
+              <ContextMenuSeparator />
+            </>
+          )}
           {isFolder && (
             <>
               <PermissionMenuItem
@@ -1100,10 +1197,16 @@ export function LibraryTree({
   tree,
   installed,
   dropTargetPath = null,
+  onCreatePack,
+  onImportFolder,
+  onImportZip,
 }: {
   tree: TreeNode[];
   installed: InstalledPack[];
   dropTargetPath?: string | null;
+  onCreatePack: () => void;
+  onImportFolder: () => void;
+  onImportZip: () => void;
 }) {
   const { t } = useI18n();
   const [search, setSearch] = useState("");
@@ -1117,12 +1220,17 @@ export function LibraryTree({
     x: number;
     y: number;
   } | null>(null);
+  const [newEntryRequest, setNewEntryRequest] = useState<{
+    kind: NewEntryKind;
+    preferredDestination?: string;
+  } | null>(null);
   const dragSourceRef = useRef<VaultDragEntry | null>(null);
   const pointerStartRef = useRef<{ x: number; y: number } | null>(null);
   const pointerDraggingRef = useRef(false);
   const suppressClickRef = useRef(false);
   const queryClient = useQueryClient();
   const clearPathsUnder = useUiStore((s) => s.clearPathsUnder);
+  const openFileTab = useUiStore((s) => s.openFileTab);
   const openAccountSettingsTab = useUiStore((s) => s.openAccountSettingsTab);
   const setEditing = useEditorStore((s) => s.setEditing);
   const setDirty = useEditorStore((s) => s.setDirty);
@@ -1142,6 +1250,65 @@ export function LibraryTree({
     }
     return map;
   }, [installed]);
+
+  const editableDestinations = useMemo(
+    () => collectEditableVaultDestinations(tree, installed, hubUser),
+    [tree, installed, hubUser],
+  );
+
+  const createEntry = useMutation({
+    mutationFn: ({
+      kind,
+      destination,
+      name,
+    }: {
+      kind: NewEntryKind;
+      destination: VaultDestination;
+      name: string;
+    }) => {
+      const path = joinPath(
+        destination.path,
+        kind === "file" ? ensureMdExtension(name) : name,
+      );
+      return kind === "file"
+        ? api.vaultCreateFile(path)
+        : api.vaultCreateFolder(path);
+    },
+    onSuccess: (_void, vars) => {
+      setNewEntryRequest(null);
+      for (const key of fileMutationInvalidations(vars.destination.packId)) {
+        void queryClient.invalidateQueries({ queryKey: key });
+      }
+      if (vars.kind === "file") {
+        const path = joinPath(
+          vars.destination.path,
+          ensureMdExtension(vars.name),
+        );
+        setEditing(path, true);
+        openFileTab(path, { preview: false });
+      } else {
+        toast.success("Folder created");
+      }
+    },
+    onError: (error: Error) =>
+      toast.error("Could not create item", { description: error.message }),
+  });
+
+  const openNewEntryDialog = (
+    kind: NewEntryKind,
+    preferredDestination?: string,
+  ) => {
+    createEntry.reset();
+    setNewEntryRequest({ kind, preferredDestination });
+  };
+
+  const openVaultFolder = () => {
+    void api.vaultOpenFolder().catch((error: Error) =>
+      toast.error("Could not open vault folder", {
+        description: error.message,
+      }),
+    );
+  };
 
   const existingPaths = useMemo(() => {
     const paths = new Set<string>();
@@ -1449,119 +1616,173 @@ export function LibraryTree({
     }
   }, [forceOpen, inactiveMatches.length]);
 
-  if (tree.length === 0) {
-    return (
-      <div className="flex flex-col gap-2 p-4">
-        <p className="text-sm font-medium text-foreground">No packs yet</p>
-        <p className="text-sm text-muted-foreground">
-          Download from Hub to add knowledge packs.
-        </p>
-      </div>
-    );
-  }
-
   return (
-    <DropTargetContext.Provider value={dropContext}>
-    {dragVisual &&
-      createPortal(
-        <motion.div
-          initial={{ opacity: 0, scale: 0.92, y: -3 }}
-          animate={{ opacity: 1, scale: 1, y: 0 }}
-          exit={{ opacity: 0, scale: 0.96 }}
-          transition={{ duration: 0.12 }}
-          className="pointer-events-none fixed z-[100] flex max-w-64 items-center gap-2 rounded-md border border-primary/30 bg-popover/95 px-2.5 py-1.5 text-xs text-popover-foreground shadow-lg backdrop-blur-sm"
-          style={{ left: dragVisual.x + 14, top: dragVisual.y + 14 }}
-        >
-          {dragVisual.entry.kind === "folder" ? (
-            <Folder className="size-3.5 shrink-0 text-primary" />
-          ) : isImagePath(dragVisual.entry.path) ? (
-            <ImageIcon className="size-3.5 shrink-0 text-primary" />
-          ) : (
-            <FileText className="size-3.5 shrink-0 text-primary" />
+    <ExplorerActionsContext.Provider
+      value={{
+        canCreateEntry: editableDestinations.length > 0,
+        onCreatePack,
+        onImportFolder,
+        onImportZip,
+        onCreateEntry: openNewEntryDialog,
+        onOpenVaultFolder: openVaultFolder,
+      }}
+    >
+      <DropTargetContext.Provider value={dropContext}>
+        {dragVisual &&
+          createPortal(
+            <motion.div
+              initial={{ opacity: 0, scale: 0.92, y: -3 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96 }}
+              transition={{ duration: 0.12 }}
+              className="pointer-events-none fixed z-[100] flex max-w-64 items-center gap-2 rounded-md border border-primary/30 bg-popover/95 px-2.5 py-1.5 text-xs text-popover-foreground shadow-lg backdrop-blur-sm"
+              style={{ left: dragVisual.x + 14, top: dragVisual.y + 14 }}
+            >
+              {dragVisual.entry.kind === "folder" ? (
+                <Folder className="size-3.5 shrink-0 text-primary" />
+              ) : isImagePath(dragVisual.entry.path) ? (
+                <ImageIcon className="size-3.5 shrink-0 text-primary" />
+              ) : (
+                <FileText className="size-3.5 shrink-0 text-primary" />
+              )}
+              <span className="truncate font-medium">
+                {dragVisual.entry.name}
+              </span>
+              {internalDropTargetNodePath && (
+                <span className="shrink-0 text-muted-foreground">
+                  → {internalDropTargetNodePath.split("/").pop()}
+                </span>
+              )}
+            </motion.div>,
+            document.body,
           )}
-          <span className="truncate font-medium">{dragVisual.entry.name}</span>
-          {internalDropTargetNodePath && (
-            <span className="shrink-0 text-muted-foreground">
-              → {internalDropTargetNodePath.split("/").pop()}
-            </span>
-          )}
-        </motion.div>,
-        document.body,
-      )}
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="px-2 py-2">
-        <div className="relative">
-          <Search className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search knowledge…"
-            className="h-8 pl-8 text-sm"
-          />
+        <div className="flex h-full min-h-0 flex-col">
+          <div className="px-2 py-2">
+            <div className="relative">
+              <Search className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search knowledge…"
+                className="h-8 pl-8 text-sm"
+              />
+            </div>
+          </div>
+          <ContextMenu>
+            <ContextMenuTrigger asChild>
+              <div
+                className="min-h-0 flex-1 overflow-y-auto py-1"
+                data-explorer-tree
+              >
+                {tree.length === 0 ? (
+                  <div className="flex flex-col gap-2 p-4">
+                    <p className="text-sm font-medium text-foreground">
+                      No packs yet
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      Download from Hub or create a knowledge pack to get started.
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    <PackSection
+                      title="Active"
+                      nodes={activeRoots}
+                      packActive
+                      search={search}
+                      forceOpen={forceOpen}
+                      byPath={byPath}
+                      hubUser={hubUser}
+                      setActivePending={setActive.isPending}
+                      onSetActive={(packPath, active) => {
+                        const packId =
+                          byPath.get(packPath)?.pack_id ?? packPath;
+                        setActive.mutate({ packId, active });
+                      }}
+                      authenticated={authenticated}
+                      onSignIn={openAccountSettingsTab}
+                      onExport={handleExport}
+                      exportPending={exportPack.isPending}
+                      onUninstallPack={(packId) =>
+                        uninstallPack.mutate(packId)
+                      }
+                      uninstallPending={uninstallPack.isPending}
+                      onRenamePack={(packId, name) =>
+                        renamePack.mutate({ packId, name })
+                      }
+                      renamePackPending={renamePack.isPending}
+                    />
+                    <PackSection
+                      title="Inactive"
+                      nodes={inactiveRoots}
+                      packActive={false}
+                      search={search}
+                      forceOpen={forceOpen}
+                      byPath={byPath}
+                      hubUser={hubUser}
+                      collapsible
+                      accordionValue={inactiveOpen}
+                      onAccordionChange={(value) => {
+                        setInactiveOpen(value);
+                        setInactiveResetKey((k) => k + 1);
+                      }}
+                      resetKey={inactiveResetKey}
+                      setActivePending={setActive.isPending}
+                      onSetActive={(packPath, active) => {
+                        const packId =
+                          byPath.get(packPath)?.pack_id ?? packPath;
+                        setActive.mutate({ packId, active });
+                      }}
+                      authenticated={authenticated}
+                      onSignIn={openAccountSettingsTab}
+                      onExport={handleExport}
+                      exportPending={exportPack.isPending}
+                      onUninstallPack={(packId) =>
+                        uninstallPack.mutate(packId)
+                      }
+                      uninstallPending={uninstallPack.isPending}
+                      onRenamePack={(packId, name) =>
+                        renamePack.mutate({ packId, name })
+                      }
+                      renamePackPending={renamePack.isPending}
+                    />
+                    {search.trim() &&
+                      filterTree(activeRoots, search).length === 0 &&
+                      inactiveMatches.length === 0 && (
+                        <p className="px-3 py-2 text-sm text-muted-foreground">
+                          No matches.
+                        </p>
+                      )}
+                  </>
+                )}
+              </div>
+            </ContextMenuTrigger>
+            <ContextMenuContent>
+              <GeneralExplorerMenuItems includePackImports />
+            </ContextMenuContent>
+          </ContextMenu>
         </div>
-      </div>
-      <div className="min-h-0 flex-1 overflow-y-auto py-1" data-explorer-tree>
-        <PackSection
-          title="Active"
-          nodes={activeRoots}
-          packActive
-          search={search}
-          forceOpen={forceOpen}
-          byPath={byPath}
-          hubUser={hubUser}
-          setActivePending={setActive.isPending}
-          onSetActive={(packPath, active) => {
-            const packId = byPath.get(packPath)?.pack_id ?? packPath;
-            setActive.mutate({ packId, active });
+        <NewVaultEntryDialog
+          open={newEntryRequest != null}
+          onOpenChange={(open) => {
+            if (!open && !createEntry.isPending) setNewEntryRequest(null);
           }}
-          authenticated={authenticated}
-          onSignIn={openAccountSettingsTab}
-          onExport={handleExport}
-          exportPending={exportPack.isPending}
-          onUninstallPack={(packId) => uninstallPack.mutate(packId)}
-          uninstallPending={uninstallPack.isPending}
-          onRenamePack={(packId, name) => renamePack.mutate({ packId, name })}
-          renamePackPending={renamePack.isPending}
+          kind={newEntryRequest?.kind ?? "file"}
+          destinations={editableDestinations}
+          preferredDestination={newEntryRequest?.preferredDestination}
+          creating={createEntry.isPending}
+          error={createEntry.error?.message}
+          onCreate={(destination, name) => {
+            if (!newEntryRequest) return;
+            createEntry.mutate({
+              kind: newEntryRequest.kind,
+              destination,
+              name,
+            });
+          }}
         />
-        <PackSection
-          title="Inactive"
-          nodes={inactiveRoots}
-          packActive={false}
-          search={search}
-          forceOpen={forceOpen}
-          byPath={byPath}
-          hubUser={hubUser}
-          collapsible
-          accordionValue={inactiveOpen}
-          onAccordionChange={(value) => {
-            setInactiveOpen(value);
-            setInactiveResetKey((k) => k + 1);
-          }}
-          resetKey={inactiveResetKey}
-          setActivePending={setActive.isPending}
-          onSetActive={(packPath, active) => {
-            const packId = byPath.get(packPath)?.pack_id ?? packPath;
-            setActive.mutate({ packId, active });
-          }}
-          authenticated={authenticated}
-          onSignIn={openAccountSettingsTab}
-          onExport={handleExport}
-          exportPending={exportPack.isPending}
-          onUninstallPack={(packId) => uninstallPack.mutate(packId)}
-          uninstallPending={uninstallPack.isPending}
-          onRenamePack={(packId, name) => renamePack.mutate({ packId, name })}
-          renamePackPending={renamePack.isPending}
-        />
-        {search.trim() &&
-          filterTree(activeRoots, search).length === 0 &&
-          inactiveMatches.length === 0 && (
-            <p className="px-3 py-2 text-sm text-muted-foreground">
-              No matches.
-            </p>
-          )}
-      </div>
-    </div>
-    </DropTargetContext.Provider>
+      </DropTargetContext.Provider>
+    </ExplorerActionsContext.Provider>
   );
 }
 

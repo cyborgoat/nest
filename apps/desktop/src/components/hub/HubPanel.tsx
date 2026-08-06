@@ -1,8 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   InstalledPack,
-  KnowledgePackMeta,
-  LocalPackInspection,
   PackInstallConflict,
   PackProject,
 } from "@nest/shared";
@@ -10,8 +8,11 @@ import { CloudOff, FolderInput, Info } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { BrowseTab } from "@/components/hub/BrowseTab";
-import { ImportPackDialog } from "@/components/hub/ImportPackDialog";
 import { InstalledTab } from "@/components/hub/InstalledTab";
+import {
+  LocalPackImportController,
+  type LocalPackImportMode,
+} from "@/components/hub/LocalPackImportController";
 import { Badge } from "@/components/ui/badge";
 import {
   AlertDialog,
@@ -40,7 +41,7 @@ export function HubPanel() {
   const clearPathsUnder = useUiStore((s) => s.clearPathsUnder);
   const openAccountSettingsTab = useUiStore((s) => s.openAccountSettingsTab);
   const queryClient = useQueryClient();
-  const [importOpen, setImportOpen] = useState(false);
+  const [importMode, setImportMode] = useState<LocalPackImportMode | null>(null);
   const [catalogSearch, setCatalogSearch] = useState("");
   const [tab, setTab] = useState<"browse" | "installed">("browse");
   const [pendingPackUpdate, setPendingPackUpdate] = useState<{
@@ -57,12 +58,6 @@ export function HubPanel() {
     previousVersion?: string;
     ownerId?: string | null;
     conflict: PackInstallConflict;
-  } | null>(null);
-  const [pendingOverwrite, setPendingOverwrite] = useState<{
-    kind: "zip" | "zip-create" | "folder";
-    sourcePath: string;
-    metadata: KnowledgePackMeta;
-    installed: InstalledPack;
   } | null>(null);
 
   const hubStatusQuery = useQuery({
@@ -268,70 +263,6 @@ export function HubPanel() {
     });
   };
 
-  const importLocal = useMutation({
-    mutationFn: ({
-      sourcePath,
-      overwrite,
-    }: {
-      sourcePath: string;
-      overwrite: boolean;
-    }) => api.hubImportLocalPack(sourcePath, overwrite),
-    onSuccess: () => {
-      setPendingOverwrite(null);
-      setImportOpen(false);
-      invalidateAfterPackChange();
-      toast.success(t("hub.packImported"));
-    },
-    onError: (e: Error) =>
-      toast.error(t("hub.importFailed"), {
-        description: e.message || String(e),
-      }),
-  });
-
-  const createFromFolder = useMutation({
-    mutationFn: ({
-      sourcePath,
-      metadata,
-      overwrite,
-    }: {
-      sourcePath: string;
-      metadata: KnowledgePackMeta;
-      overwrite: boolean;
-    }) => api.hubCreatePackFromFolder(sourcePath, metadata, overwrite),
-    onSuccess: () => {
-      setPendingOverwrite(null);
-      setImportOpen(false);
-      invalidateAfterPackChange();
-      toast.success(t("hub.packCreated"));
-    },
-    onError: (e: Error) =>
-      toast.error(t("hub.createFailed"), {
-        description: e.message || String(e),
-      }),
-  });
-
-  const createFromZip = useMutation({
-    mutationFn: ({
-      sourcePath,
-      metadata,
-      overwrite,
-    }: {
-      sourcePath: string;
-      metadata: KnowledgePackMeta;
-      overwrite: boolean;
-    }) => api.hubCreatePackFromZip(sourcePath, metadata, overwrite),
-    onSuccess: () => {
-      setPendingOverwrite(null);
-      setImportOpen(false);
-      invalidateAfterPackChange();
-      toast.success(t("hub.packCreated"));
-    },
-    onError: (e: Error) =>
-      toast.error(t("hub.createFailed"), {
-        description: e.message || String(e),
-      }),
-  });
-
   const exportPack = useMutation({
     mutationFn: ({
       packId,
@@ -383,16 +314,9 @@ export function HubPanel() {
   const busy =
     download.isPending ||
     remove.isPending ||
-    createFromFolder.isPending ||
-    createFromZip.isPending ||
-    importLocal.isPending ||
     exportPack.isPending ||
     syncPatch.isPending ||
     rename.isPending;
-  const importing =
-    importLocal.isPending ||
-    createFromFolder.isPending ||
-    createFromZip.isPending;
   const downloadPendingId = download.isPending
     ? download.variables?.packId
     : undefined;
@@ -428,7 +352,7 @@ export function HubPanel() {
             <Button
               size="sm"
               variant="outline"
-              onClick={() => setImportOpen(true)}
+              onClick={() => setImportMode("choose")}
             >
               <FolderInput className="size-4" />
               {t("hub.import")}
@@ -497,7 +421,7 @@ export function HubPanel() {
                 onExport={(packId, destinationPath) =>
                   exportPack.mutate({ packId, destinationPath })
                 }
-                onOpenImport={() => setImportOpen(true)}
+                onOpenImport={() => setImportMode("choose")}
               />
             </div>
           </ScrollArea>
@@ -549,7 +473,7 @@ export function HubPanel() {
                   }
                 }}
                 onRemove={(packId) => remove.mutate(packId)}
-                onOpenImport={() => setImportOpen(true)}
+                onOpenImport={() => setImportMode("choose")}
                 onBrowse={() => setTab("browse")}
                 onExport={(packId, destinationPath) =>
                   exportPack.mutate({ packId, destinationPath })
@@ -565,47 +489,10 @@ export function HubPanel() {
         </TabsContent>
       </Tabs>
 
-      <ImportPackDialog
-        open={importOpen}
-        onOpenChange={setImportOpen}
-        importing={importing}
-        onImportZip={(sourcePath: string, inspection: LocalPackInspection) => {
-          const installed = installedById.get(inspection.metadata.id.trim());
-          const kind = inspection.needs_metadata ? "zip-create" : "zip";
-          if (installed) {
-            setPendingOverwrite({
-              kind,
-              sourcePath,
-              metadata: inspection.metadata,
-              installed,
-            });
-          } else if (inspection.needs_metadata) {
-            createFromZip.mutate({
-              sourcePath,
-              metadata: inspection.metadata,
-              overwrite: false,
-            });
-          } else {
-            importLocal.mutate({ sourcePath, overwrite: false });
-          }
-        }}
-        onCreateFromFolder={(sourcePath, metadata) => {
-          const installed = installedById.get(metadata.id.trim());
-          if (installed) {
-            setPendingOverwrite({
-              kind: "folder",
-              sourcePath,
-              metadata,
-              installed,
-            });
-          } else {
-            createFromFolder.mutate({
-              sourcePath,
-              metadata,
-              overwrite: false,
-            });
-          }
-        }}
+      <LocalPackImportController
+        mode={importMode}
+        onModeChange={setImportMode}
+        installed={installedQuery.data ?? []}
       />
       <AlertDialog
         open={Boolean(pendingHubOverwrite)}
@@ -663,53 +550,6 @@ export function HubPanel() {
               }}
             >
               {t("hub.upgrade")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-      <AlertDialog
-        open={Boolean(pendingOverwrite)}
-        onOpenChange={(open) => !open && setPendingOverwrite(null)}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              Replace installed knowledge pack?
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {pendingOverwrite
-                ? `“${pendingOverwrite.installed.name}” ${pendingOverwrite.installed.version} is already installed. Importing “${pendingOverwrite.metadata.name}” ${pendingOverwrite.metadata.version} will replace it because Nest keeps one installed version per pack.`
-                : "The installed knowledge pack will be replaced."}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={importing}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              disabled={!pendingOverwrite || importing}
-              onClick={(event) => {
-                event.preventDefault();
-                if (!pendingOverwrite) return;
-                if (pendingOverwrite.kind === "zip") {
-                  importLocal.mutate({
-                    sourcePath: pendingOverwrite.sourcePath,
-                    overwrite: true,
-                  });
-                } else if (pendingOverwrite.kind === "zip-create") {
-                  createFromZip.mutate({
-                    sourcePath: pendingOverwrite.sourcePath,
-                    metadata: pendingOverwrite.metadata,
-                    overwrite: true,
-                  });
-                } else {
-                  createFromFolder.mutate({
-                    sourcePath: pendingOverwrite.sourcePath,
-                    metadata: pendingOverwrite.metadata,
-                    overwrite: true,
-                  });
-                }
-              }}
-            >
-              {importing ? "Replacing…" : "Replace pack"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
