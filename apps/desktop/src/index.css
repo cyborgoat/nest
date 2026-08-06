@@ -418,6 +418,10 @@
   @apply my-3 rounded-lg border border-border/60 bg-foreground/5 p-3 text-xs text-muted-foreground;
 }
 
+.markdown-body .katex-display {
+  @apply my-4 overflow-x-auto overflow-y-hidden py-1;
+}
+
 .markdown-body blockquote {
   @apply border-l-2 border-primary/40 pl-3 italic text-muted-foreground mb-3;
 }

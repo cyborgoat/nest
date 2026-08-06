@@ -4,7 +4,9 @@
 
 Open a file, switch between rendered and source mode, and save normally. Nest
 supports GitHub Flavored Markdown: tables, task lists, fenced code, links,
-local images, and Mermaid diagrams.
+local images, Mermaid diagrams, and KaTeX math equations. Use `$E = mc^2$`
+for inline math. For display math, put `$$` on separate lines around the
+equation.
 
 ```mermaid
 flowchart LR

@@ -124,6 +124,7 @@ Chat passes a bounded multi-turn history, direct `@` focus content, and eagerly 
 The desktop viewer renders Markdown with:
 
 - `remark-gfm` (tables, task lists, strikethrough, autolinks)
+- `remark-math` with KaTeX rendering for inline and display equations
 - `rehype-highlight` syntax highlighting for common fenced-code languages
 - Mermaid rendering for fenced `mermaid` blocks
 - Local vault image resolution (`png`, `jpg`, `jpeg`, `gif`, `webp`, `svg`, `bmp`) via a safe Tauri command

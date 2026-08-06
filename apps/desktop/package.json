@@ -1,7 +1,7 @@
 {
   "name": "nest",
   "private": true,
-  "version": "0.0.2",
+  "version": "0.0.3",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -35,6 +35,7 @@
     "clsx": "^2.1.1",
     "diff": "^9.0.0",
     "js-yaml": "^4.3.0",
+    "katex": "^0.18.1",
     "lucide-react": "^0.525.0",
     "mermaid": "^11.16.0",
     "motion": "^12.23.0",
@@ -43,7 +44,9 @@
     "react-markdown": "^10.1.0",
     "react-resizable-panels": "^4.12.2",
     "rehype-highlight": "^7.0.2",
+    "rehype-katex": "^7.0.1",
     "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0",
     "remark-parse": "^11.0.0",
     "remark-stringify": "^11.0.0",
     "sonner": "^2.0.7",

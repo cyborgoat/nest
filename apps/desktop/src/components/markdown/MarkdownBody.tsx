@@ -1,7 +1,10 @@
 import { isValidElement, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
+import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import "katex/dist/katex.min.css";
 import { MermaidDiagram } from "@/components/markdown/MermaidDiagram";
 import { VaultImage } from "@/components/markdown/VaultImage";
 import { cn } from "@/lib/utils";
@@ -104,8 +107,11 @@ export function MarkdownBody({ children, className, basePath }: MarkdownBodyProp
   return (
     <div className={cn("markdown-body", className)}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        rehypePlugins={[[rehypeHighlight, { ignoreMissing: true }]]}
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[
+          rehypeKatex,
+          [rehypeHighlight, { ignoreMissing: true }],
+        ]}
         components={components}
       >
         {children}
