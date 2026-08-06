@@ -92,7 +92,7 @@ Bundled default pack notes:
 
 ## Publishing and access lifecycle
 
-1. A user creates an account from **Settings → Account**. The account ID is immutable; name and password can be maintained there.
+1. A user creates an account from **Settings → Account**, confirming the password before submission. The account ID is immutable; name and password can be maintained there.
 2. Local packs and editable registry packs expose **Publish**. Bundled and legacy unknown-origin packs cannot be published.
 3. Desktop requires a publish commit message, exports the installed tree as a ZIP, and submits both to Hub. Hub validates the archive size, safe paths, `pack.json`, SemVer, Markdown content, and commit-message length before storing a pending artifact.
 4. An admin or the superuser approves the exact staged artifact with an optional comment or rejects it with a required comment. Hub creates a durable submitted/approved/rejected message for the author and retains review metadata for administrator history.

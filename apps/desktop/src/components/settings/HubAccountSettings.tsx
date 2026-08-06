@@ -17,6 +17,10 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
 import { appErrorMessage } from "@/lib/errors";
+import {
+  passwordsConfirmed,
+  passwordsMismatch,
+} from "@/lib/password-confirmation";
 import { queryKeys } from "@/lib/query-keys";
 import { useUiStore } from "@/stores/ui";
 
@@ -212,7 +216,8 @@ function PasswordDialog({
       toast.success("Password changed");
     },
   });
-  const mismatch = Boolean(confirmPassword) && newPassword !== confirmPassword;
+  const mismatch = passwordsMismatch(newPassword, confirmPassword);
+  const confirmed = passwordsConfirmed(newPassword, confirmPassword);
   const close = (nextOpen: boolean) => {
     if (!nextOpen) {
       change.reset();
@@ -236,7 +241,7 @@ function PasswordDialog({
           className="space-y-4"
           onSubmit={(event) => {
             event.preventDefault();
-            if (!mismatch) change.mutate();
+            if (currentPassword && confirmed) change.mutate();
           }}
         >
           <div className="space-y-1.5">
@@ -290,11 +295,7 @@ function PasswordDialog({
             type="submit"
             className="w-full"
             disabled={
-              change.isPending ||
-              mismatch ||
-              !currentPassword ||
-              !newPassword ||
-              !confirmPassword
+              change.isPending || !currentPassword || !confirmed
             }
           >
             {change.isPending ? "Changing password…" : "Change password"}
@@ -318,6 +319,7 @@ function HubAuthDialog({
   const [id, setId] = useState("");
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [forgotOpen, setForgotOpen] = useState(false);
   const login = useMutation({
     mutationFn: () => api.hubLogin(id, password),
@@ -332,6 +334,7 @@ function HubAuthDialog({
     mutationFn: () => api.hubRegister(id, password, name),
     onSuccess: async () => {
       setPassword("");
+      setConfirmPassword("");
       await onAuthenticated();
       onOpenChange(false);
       toast.success("Nest Hub account created");
@@ -339,16 +342,23 @@ function HubAuthDialog({
   });
   const busy = login.isPending || register.isPending;
   const error = login.error || register.error;
+  const confirmationMismatch = passwordsMismatch(password, confirmPassword);
+  const registrationPasswordConfirmed = passwordsConfirmed(
+    password,
+    confirmPassword,
+  );
   const changeMode = (value: string) => {
     setMode(value as "login" | "register");
     login.reset();
     register.reset();
+    setConfirmPassword("");
   };
   const changeOpen = (nextOpen: boolean) => {
     if (!nextOpen) {
       login.reset();
       register.reset();
       setPassword("");
+      setConfirmPassword("");
     }
     onOpenChange(nextOpen);
   };
@@ -384,7 +394,7 @@ function HubAuthDialog({
             onSubmit={(event) => {
               event.preventDefault();
               if (mode === "login") login.mutate();
-              else register.mutate();
+              else if (registrationPasswordConfirmed) register.mutate();
             }}
           >
             {mode === "register" && (
@@ -435,6 +445,27 @@ function HubAuthDialog({
                 </button>
               )}
             </div>
+            {mode === "register" && (
+              <div className="space-y-1.5">
+                <Label htmlFor="hub-confirm-password">Confirm password</Label>
+                <Input
+                  id="hub-confirm-password"
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(event) =>
+                    setConfirmPassword(event.target.value)
+                  }
+                  autoComplete="new-password"
+                  aria-invalid={confirmationMismatch}
+                  required
+                />
+                {confirmationMismatch && (
+                  <p className="text-xs text-destructive">
+                    The passwords do not match.
+                  </p>
+                )}
+              </div>
+            )}
             {Boolean(error) && (
               <div
                 role="alert"
@@ -443,7 +474,14 @@ function HubAuthDialog({
                 {appErrorMessage(error)}
               </div>
             )}
-            <Button type="submit" className="w-full" disabled={busy}>
+            <Button
+              type="submit"
+              className="w-full"
+              disabled={
+                busy ||
+                (mode === "register" && !registrationPasswordConfirmed)
+              }
+            >
               {busy
                 ? "Please wait…"
                 : mode === "login"

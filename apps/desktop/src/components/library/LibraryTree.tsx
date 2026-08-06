@@ -498,7 +498,7 @@ function TreeItem({
           <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
         )
       ) : (
-        <span className="inline-block w-3.5" />
+        <span className="inline-block size-3.5 shrink-0" />
       )}
       {isRoot ? (
         <Package
@@ -532,7 +532,7 @@ function TreeItem({
       )}
       <span
         className={cn(
-          "truncate",
+          "min-w-0 flex-1 truncate",
           !packActive && "opacity-80",
         )}
       >
@@ -552,7 +552,7 @@ function TreeItem({
         }
       }}
       className={cn(
-        "group flex select-none items-center gap-1 rounded-md pr-1 text-sm transition-all duration-150",
+        "group flex min-w-0 select-none items-center gap-1 rounded-md pr-1 text-sm transition-all duration-150",
         isSelected ? "bg-primary/10 text-foreground" : "hover:bg-muted/80",
         isDropTarget && "relative z-10 bg-primary/15 ring-2 ring-primary/60",
         isDragging && "scale-[0.98] opacity-45",
@@ -563,7 +563,7 @@ function TreeItem({
     >
       {renaming ? (
         <div className="flex min-w-0 flex-1 items-center gap-1.5 py-1">
-          <span className="inline-block w-3.5" />
+          <span className="inline-block size-3.5 shrink-0" />
           {isRoot ? (
             <Package
               className={cn(
@@ -581,7 +581,7 @@ function TreeItem({
           <Input
             autoFocus
             defaultValue={node.name}
-            className="h-6 flex-1 px-1.5 text-xs"
+            className="h-6 min-w-0 flex-1 px-1.5 text-xs"
             onFocus={(e) => {
               const dot = node.name.lastIndexOf(".");
               e.currentTarget.setSelectionRange(
