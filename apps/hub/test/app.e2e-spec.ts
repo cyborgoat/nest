@@ -944,7 +944,12 @@ describe('Hub (e2e)', () => {
       .set('Authorization', `Bearer ${authorLogin.body.access_token}`)
       .expect(200);
     expect(pendingStatus.body.pending).toEqual(
-      expect.objectContaining({ id: second.body.id, version: '0.2.0' }),
+      expect.objectContaining({
+        id: second.body.id,
+        version: '0.2.0',
+        submitter_id: 'pack-author',
+        submitter_name: 'Pack Author',
+      }),
     );
     expect(pendingStatus.body.can_cancel).toBe(true);
     const adminPendingStatus = await request(app.getHttpServer())
@@ -952,6 +957,12 @@ describe('Hub (e2e)', () => {
       .set('Authorization', `Bearer ${adminLogin.body.access_token}`)
       .expect(200);
     expect(adminPendingStatus.body.can_cancel).toBe(false);
+    expect(adminPendingStatus.body.pending).toEqual(
+      expect.objectContaining({
+        submitter_id: 'pack-author',
+        submitter_name: 'Pack Author',
+      }),
+    );
     const strangerLogin = await request(app.getHttpServer())
       .post('/api/auth/register')
       .send({

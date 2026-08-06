@@ -186,6 +186,10 @@ pub struct InstalledPack {
     pub publish_review_created_at: Option<String>,
     #[serde(default)]
     pub pending_can_cancel: bool,
+    #[serde(default)]
+    pub pending_submitter_id: Option<String>,
+    #[serde(default)]
+    pub pending_submitter_name: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -334,6 +338,18 @@ fn ensure_sync_state_pending_columns(conn: &Connection) -> AppResult<()> {
     if !table_has_column(conn, "sync_state", "pending_can_cancel")? {
         conn.execute(
             "ALTER TABLE sync_state ADD COLUMN pending_can_cancel INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+    }
+    if !table_has_column(conn, "sync_state", "pending_submitter_id")? {
+        conn.execute(
+            "ALTER TABLE sync_state ADD COLUMN pending_submitter_id TEXT",
+            [],
+        )?;
+    }
+    if !table_has_column(conn, "sync_state", "pending_submitter_name")? {
+        conn.execute(
+            "ALTER TABLE sync_state ADD COLUMN pending_submitter_name TEXT",
             [],
         )?;
     }
@@ -1049,7 +1065,7 @@ pub fn list_active_pack_roots(conn: &Connection) -> AppResult<Vec<String>> {
 
 pub fn list_sync_state(conn: &Connection) -> AppResult<Vec<InstalledPack>> {
     let mut stmt = conn.prepare(
-        "SELECT pack_id, name, local_path, version, last_synced, COALESCE(active, 1), COALESCE(origin, 'unknown'), owner_id, COALESCE(description, ''), pending_version, pending_request_id, publish_review_status, publish_review_created_at, COALESCE(patch_revision, 0), pending_request_type, pending_patch_revision, COALESCE(pending_can_cancel, 0)
+        "SELECT pack_id, name, local_path, version, last_synced, COALESCE(active, 1), COALESCE(origin, 'unknown'), owner_id, COALESCE(description, ''), pending_version, pending_request_id, publish_review_status, publish_review_created_at, COALESCE(patch_revision, 0), pending_request_type, pending_patch_revision, COALESCE(pending_can_cancel, 0), pending_submitter_id, pending_submitter_name
          FROM sync_state ORDER BY name",
     )?;
     let rows = stmt.query_map([], |row| {
@@ -1071,6 +1087,8 @@ pub fn list_sync_state(conn: &Connection) -> AppResult<Vec<InstalledPack>> {
             publish_review_status: row.get(11)?,
             publish_review_created_at: row.get(12)?,
             pending_can_cancel: row.get::<_, i64>(16)? != 0,
+            pending_submitter_id: row.get(17)?,
+            pending_submitter_name: row.get(18)?,
         })
     })?;
     Ok(rows.filter_map(|r| r.ok()).collect())
@@ -1078,7 +1096,7 @@ pub fn list_sync_state(conn: &Connection) -> AppResult<Vec<InstalledPack>> {
 
 pub fn get_sync_state(conn: &Connection, pack_id: &str) -> AppResult<Option<InstalledPack>> {
     conn.query_row(
-        "SELECT pack_id, name, local_path, version, last_synced, COALESCE(active, 1), COALESCE(origin, 'unknown'), owner_id, COALESCE(description, ''), pending_version, pending_request_id, publish_review_status, publish_review_created_at, COALESCE(patch_revision, 0), pending_request_type, pending_patch_revision, COALESCE(pending_can_cancel, 0)
+        "SELECT pack_id, name, local_path, version, last_synced, COALESCE(active, 1), COALESCE(origin, 'unknown'), owner_id, COALESCE(description, ''), pending_version, pending_request_id, publish_review_status, publish_review_created_at, COALESCE(patch_revision, 0), pending_request_type, pending_patch_revision, COALESCE(pending_can_cancel, 0), pending_submitter_id, pending_submitter_name
          FROM sync_state WHERE pack_id = ?1",
         params![pack_id],
         |row| {
@@ -1100,6 +1118,8 @@ pub fn get_sync_state(conn: &Connection, pack_id: &str) -> AppResult<Option<Inst
                 publish_review_status: row.get(11)?,
                 publish_review_created_at: row.get(12)?,
                 pending_can_cancel: row.get::<_, i64>(16)? != 0,
+                pending_submitter_id: row.get(17)?,
+                pending_submitter_name: row.get(18)?,
             })
         },
     )
@@ -1117,6 +1137,8 @@ pub struct PendingPublishUpdate<'a> {
     pub request_type: &'a str,
     pub patch_revision: Option<i64>,
     pub can_cancel: bool,
+    pub submitter_id: Option<&'a str>,
+    pub submitter_name: Option<&'a str>,
 }
 
 pub fn set_pending_publish(
@@ -1130,6 +1152,7 @@ pub fn set_pending_publish(
              publish_review_status = 'pending',
              pending_request_type = ?4, pending_patch_revision = ?5,
              pending_can_cancel = ?7,
+             pending_submitter_id = ?8, pending_submitter_name = ?9,
              publish_review_created_at = COALESCE(?3, publish_review_created_at)
          WHERE pack_id = ?6",
         params![
@@ -1139,7 +1162,9 @@ pub fn set_pending_publish(
             pending.request_type,
             pending.patch_revision,
             pack_id,
-            if pending.can_cancel { 1 } else { 0 }
+            if pending.can_cancel { 1 } else { 0 },
+            pending.submitter_id,
+            pending.submitter_name
         ],
     )?;
     Ok(())
@@ -1171,6 +1196,7 @@ pub fn clear_pending_publish(conn: &Connection, pack_id: &str) -> AppResult<()> 
          SET pending_request_id = NULL, pending_version = NULL,
              pending_request_type = NULL, pending_patch_revision = NULL,
              pending_can_cancel = 0,
+             pending_submitter_id = NULL, pending_submitter_name = NULL,
              publish_review_status = NULL, publish_review_created_at = NULL
          WHERE pack_id = ?1",
         params![pack_id],
@@ -1422,6 +1448,8 @@ mod sync_state_tests {
                 request_type: "release",
                 patch_revision: None,
                 can_cancel: true,
+                submitter_id: Some("alice"),
+                submitter_name: Some("Alice"),
             },
         )
         .unwrap();
@@ -1430,6 +1458,8 @@ mod sync_state_tests {
         assert_eq!(pending.pending_version.as_deref(), Some("1.1.0"));
         assert_eq!(pending.pending_request_type.as_deref(), Some("release"));
         assert_eq!(pending.pending_patch_revision, None);
+        assert_eq!(pending.pending_submitter_id.as_deref(), Some("alice"));
+        assert_eq!(pending.pending_submitter_name.as_deref(), Some("Alice"));
         assert_eq!(pending.publish_review_status.as_deref(), Some("pending"));
         assert_eq!(pending.publish_review_created_at.as_deref(), Some("now"));
         assert!(pending.pending_can_cancel);

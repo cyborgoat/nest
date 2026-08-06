@@ -104,6 +104,8 @@ pub fn run() {
             commands::hub_reconcile_publish_requests,
             commands::hub_cancel_publish_request,
             commands::hub_merge_approved_pack,
+            commands::hub_preview_approved_merge,
+            commands::hub_preview_pack_patch,
             commands::hub_list_messages,
             commands::hub_unread_message_count,
             commands::hub_mark_message_read,

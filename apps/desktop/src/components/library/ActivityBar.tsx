@@ -21,9 +21,11 @@ const ITEMS: {
 export function ActivityBar({
   hasSourceControlChanges,
   hasPacksUnderReview,
+  hasPackUpdates,
 }: {
   hasSourceControlChanges: boolean;
   hasPacksUnderReview: boolean;
+  hasPackUpdates: boolean;
 }) {
   const activeView = useUiStore((s) => s.activitySidebarView);
   const setActiveView = useUiStore((s) => s.setActivitySidebarView);
@@ -35,7 +37,8 @@ export function ActivityBar({
       {ITEMS.map(({ view, icon: Icon, label }) => {
         const isOpenAndActive = sidebarOpen && activeView === view;
         const showDot =
-          (view === "source-control" && hasSourceControlChanges) ||
+          (view === "source-control" &&
+            (hasSourceControlChanges || hasPackUpdates)) ||
           (view === "reviews" && hasPacksUnderReview);
         return (
           <Tooltip key={view}>

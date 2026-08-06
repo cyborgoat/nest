@@ -7,7 +7,8 @@
 
 use crate::error::{AppError, AppResult};
 use base64::{engine::general_purpose, Engine as _};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
@@ -140,6 +141,158 @@ pub enum DiffPair {
 pub struct BinarySide {
     pub size: u64,
     pub checksum: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MergeConflict {
+    pub path: String,
+    pub kind: FileKind,
+    pub local_exists: bool,
+    pub approved_exists: bool,
+    pub local_preview: Option<String>,
+    pub approved_preview: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MergeAnalysis {
+    pub conflicts: Vec<MergeConflict>,
+    pub merged_file_count: usize,
+    pub preview_token: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct MergeResolution {
+    pub path: String,
+    pub choice: String,
+}
+
+fn file_bytes(root: &Path, rel: &str) -> AppResult<Option<Vec<u8>>> {
+    let path = root.join(rel);
+    if path.is_file() {
+        Ok(Some(fs::read(path)?))
+    } else {
+        Ok(None)
+    }
+}
+
+fn merge_paths(base: &Path, local: &Path, approved: &Path) -> AppResult<Vec<String>> {
+    let mut paths = BTreeSet::new();
+    for root in [base, local, approved] {
+        let mut found = Vec::new();
+        list_file_rel_paths(root, root, &mut found)?;
+        paths.extend(found);
+    }
+    Ok(paths.into_iter().collect())
+}
+
+fn conflict_preview(kind: FileKind, path: &Path, bytes: Option<&[u8]>) -> Option<String> {
+    let bytes = bytes?;
+    match kind {
+        FileKind::Text => Some(String::from_utf8_lossy(bytes).into_owned()),
+        FileKind::Image => Some(format!(
+            "data:{};base64,{}",
+            image_mime(path),
+            general_purpose::STANDARD.encode(bytes)
+        )),
+        FileKind::Binary => None,
+    }
+}
+
+pub fn analyze_three_way(base: &Path, local: &Path, approved: &Path) -> AppResult<MergeAnalysis> {
+    let mut conflicts = Vec::new();
+    let mut merged_file_count = 0;
+    let paths = merge_paths(base, local, approved)?;
+    let mut fingerprint = std::collections::hash_map::DefaultHasher::new();
+    for rel in paths {
+        if is_internal_pack_metadata(&rel) {
+            continue;
+        }
+        let base_bytes = file_bytes(base, &rel)?;
+        let local_bytes = file_bytes(local, &rel)?;
+        let approved_bytes = file_bytes(approved, &rel)?;
+        rel.hash(&mut fingerprint);
+        base_bytes.hash(&mut fingerprint);
+        local_bytes.hash(&mut fingerprint);
+        approved_bytes.hash(&mut fingerprint);
+        if local_bytes == approved_bytes
+            || local_bytes == base_bytes
+            || approved_bytes == base_bytes
+        {
+            merged_file_count += usize::from(local_bytes.is_some() || approved_bytes.is_some());
+            continue;
+        }
+        let kind_path = if local.join(&rel).is_file() {
+            local.join(&rel)
+        } else {
+            approved.join(&rel)
+        };
+        let kind = file_kind(&kind_path);
+        conflicts.push(MergeConflict {
+            path: rel,
+            kind,
+            local_exists: local_bytes.is_some(),
+            approved_exists: approved_bytes.is_some(),
+            local_preview: conflict_preview(kind, &kind_path, local_bytes.as_deref()),
+            approved_preview: conflict_preview(kind, &kind_path, approved_bytes.as_deref()),
+        });
+    }
+    Ok(MergeAnalysis {
+        conflicts,
+        merged_file_count,
+        preview_token: format!("{:016x}", fingerprint.finish()),
+    })
+}
+
+/// Materialize a three-way result without mutating any source directory.
+pub fn build_three_way_merge(
+    base: &Path,
+    local: &Path,
+    approved: &Path,
+    destination: &Path,
+    resolutions: &[MergeResolution],
+    expected_preview_token: Option<&str>,
+) -> AppResult<()> {
+    if let Some(expected) = expected_preview_token {
+        let current = analyze_three_way(base, local, approved)?.preview_token;
+        if current != expected {
+            return Err(AppError::msg(
+                "The local files or Hub update changed after the preview. Refresh the merge and try again.",
+            ));
+        }
+    }
+    let choices: HashMap<&str, &str> = resolutions
+        .iter()
+        .map(|resolution| (resolution.path.as_str(), resolution.choice.as_str()))
+        .collect();
+    crate::vault::ensure_dir(destination)?;
+    for rel in merge_paths(base, local, approved)? {
+        let base_bytes = file_bytes(base, &rel)?;
+        let local_bytes = file_bytes(local, &rel)?;
+        let approved_bytes = file_bytes(approved, &rel)?;
+        let selected = if is_internal_pack_metadata(&rel) {
+            approved_bytes
+        } else if local_bytes == approved_bytes {
+            local_bytes
+        } else if local_bytes == base_bytes {
+            approved_bytes
+        } else if approved_bytes == base_bytes {
+            local_bytes
+        } else {
+            match choices.get(rel.as_str()).copied() {
+                Some("local") => local_bytes,
+                Some("approved") => approved_bytes,
+                _ => return Err(AppError::msg(format!("Choose a resolution for {rel}"))),
+            }
+        };
+        if let Some(bytes) = selected {
+            let target = destination.join(&rel);
+            if let Some(parent) = target.parent() {
+                crate::vault::ensure_dir(parent)?;
+            }
+            fs::write(target, bytes)?;
+        }
+    }
+    Ok(())
 }
 
 fn list_file_rel_paths(root: &Path, dir: &Path, out: &mut Vec<String>) -> AppResult<()> {
@@ -542,6 +695,78 @@ mod tests {
 
         discard_file(&pack_dir, &snap_dir, "b.md").unwrap();
         assert!(!pack_dir.join("b.md").exists());
+    }
+
+    #[test]
+    fn three_way_merge_preserves_independent_changes_and_resolves_conflicts() {
+        let base = scratch("merge-base");
+        let local = scratch("merge-local");
+        let approved = scratch("merge-approved");
+        let result = scratch("merge-result");
+        for dir in [&base, &local, &approved] {
+            crate::vault::ensure_dir(dir).unwrap();
+            fs::write(
+                dir.join("pack.json"),
+                format!(r#"{{"dir":"{}"}}"#, dir.display()),
+            )
+            .unwrap();
+            fs::write(dir.join("conflict.md"), "base").unwrap();
+        }
+        fs::write(local.join("conflict.md"), "local").unwrap();
+        fs::write(approved.join("conflict.md"), "approved").unwrap();
+        fs::write(local.join("local-only.md"), "local only").unwrap();
+        fs::write(approved.join("remote-only.md"), "remote only").unwrap();
+
+        let analysis = analyze_three_way(&base, &local, &approved).unwrap();
+        assert_eq!(analysis.conflicts.len(), 1);
+        assert_eq!(analysis.conflicts[0].path, "conflict.md");
+        build_three_way_merge(
+            &base,
+            &local,
+            &approved,
+            &result,
+            &[MergeResolution {
+                path: "conflict.md".into(),
+                choice: "local".into(),
+            }],
+            Some(&analysis.preview_token),
+        )
+        .unwrap();
+
+        assert_eq!(
+            fs::read_to_string(result.join("conflict.md")).unwrap(),
+            "local"
+        );
+        assert!(result.join("local-only.md").is_file());
+        assert!(result.join("remote-only.md").is_file());
+        assert_eq!(
+            fs::read_to_string(result.join("pack.json")).unwrap(),
+            fs::read_to_string(approved.join("pack.json")).unwrap()
+        );
+    }
+
+    #[test]
+    fn three_way_merge_rejects_a_stale_preview() {
+        let base = scratch("merge-stale-base");
+        let local = scratch("merge-stale-local");
+        let approved = scratch("merge-stale-approved");
+        let result = scratch("merge-stale-result");
+        for dir in [&base, &local, &approved] {
+            crate::vault::ensure_dir(dir).unwrap();
+            fs::write(dir.join("a.md"), "base").unwrap();
+        }
+        let preview = analyze_three_way(&base, &local, &approved).unwrap();
+        fs::write(local.join("a.md"), "changed after preview").unwrap();
+        let error = build_three_way_merge(
+            &base,
+            &local,
+            &approved,
+            &result,
+            &[],
+            Some(&preview.preview_token),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("changed after the preview"));
     }
 
     #[test]

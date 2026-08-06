@@ -273,6 +273,9 @@ function InstalledPackRow({
           {pack.publish_review_status === "pending" && pack.pending_version && (
             <Badge variant="accent">
               {pendingPublishVersionLabel(pack)} under review
+              {pack.pending_submitter_name
+                ? ` by ${pack.pending_submitter_name}`
+                : ""}
             </Badge>
           )}
           {pack.publish_review_status === "approved_awaiting_merge" &&

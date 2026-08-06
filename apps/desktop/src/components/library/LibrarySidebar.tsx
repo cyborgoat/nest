@@ -29,7 +29,7 @@ export function LibrarySidebar({
       ) : view === "source-control" ? (
         <SourceControlPanel installed={installed} />
       ) : (
-        <UnderReviewPanel installed={installed} tree={tree} />
+        <UnderReviewPanel installed={installed} />
       )}
     </aside>
   );

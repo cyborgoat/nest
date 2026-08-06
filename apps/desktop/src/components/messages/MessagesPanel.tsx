@@ -4,7 +4,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import type { HubMessage, HubMessageKind } from "@nest/shared";
+import type { HubMessage, HubMessageKind, PackMergePreview } from "@nest/shared";
 import {
   Bell,
   Check,
@@ -45,6 +45,7 @@ import { queryKeys } from "@/lib/query-keys";
 import { useUiStore } from "@/stores/ui";
 import { useEffect, useState } from "react";
 import { useMergeApprovedPack } from "@/hooks/use-merge-approved-pack";
+import { PackMergeDialog } from "@/components/hub/PackMergeDialog";
 
 const MESSAGE_KIND_STYLES: Partial<
   Record<HubMessageKind, { Icon: LucideIcon; iconClass: string }>
@@ -105,6 +106,18 @@ export function MessagesPanel() {
     queryFn: api.hubListInstalled,
   });
   const mergeApproved = useMergeApprovedPack();
+  const [mergePreview, setMergePreview] = useState<PackMergePreview | null>(null);
+  const previewMerge = async (message: HubMessage) => {
+    const input = mergeInputFor(message);
+    if (!input) return;
+    try {
+      setMergePreview(await api.hubPreviewApprovedMerge(input.packId, input.requestId));
+    } catch (error) {
+      toast.error("Could not prepare merge", {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
   const refresh = async () => {
     const reconciled = await api.hubReconcilePublishRequests();
     queryClient.setQueryData(queryKeys.installedPacks, reconciled);
@@ -179,6 +192,25 @@ export function MessagesPanel() {
 
   return (
     <div className="flex h-full flex-col">
+      <PackMergeDialog
+        open={Boolean(mergePreview)}
+        preview={mergePreview}
+        busy={mergeApproved.isPending}
+        title="Merge approved knowledge pack"
+        onOpenChange={(open) => !open && setMergePreview(null)}
+        onApply={(resolutions) => {
+          if (!mergePreview?.request_id) return;
+          mergeApproved.mutate(
+            {
+              packId: mergePreview.pack_id,
+              requestId: mergePreview.request_id,
+              resolutions,
+              previewToken: mergePreview.preview_token,
+            },
+            { onSuccess: () => setMergePreview(null) },
+          );
+        }}
+      />
       <PanelHeader
         title="Messages"
         description="Publishing updates and notices from Nest Hub."
@@ -272,7 +304,7 @@ export function MessagesPanel() {
                       onView={() => setSelectedMessage(message)}
                       onMerge={
                         mergeInputFor(message)
-                          ? () => mergeApproved.mutate(mergeInputFor(message)!)
+                          ? () => void previewMerge(message)
                           : undefined
                       }
                       merging={mergeApproved.isPending}
@@ -299,7 +331,7 @@ export function MessagesPanel() {
         message={selectedMessage}
         onMerge={
           selectedMessage && mergeInputFor(selectedMessage)
-            ? () => mergeApproved.mutate(mergeInputFor(selectedMessage)!)
+            ? () => void previewMerge(selectedMessage)
             : undefined
         }
         merging={mergeApproved.isPending}

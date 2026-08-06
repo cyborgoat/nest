@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   canEditPack,
   canRenamePack,
+  packEditBlockReason,
   shouldTrackPackChanges,
 } from "./pack-permissions";
 
@@ -124,6 +125,34 @@ describe("canEditPack", () => {
         ),
       ).toBe(false);
     }
+  });
+});
+
+describe("packEditBlockReason", () => {
+  it("identifies another maintainer whose publish request locked the pack", () => {
+    expect(
+      packEditBlockReason(
+        pack({
+          publish_review_status: "pending",
+          pending_submitter_id: "bob",
+          pending_submitter_name: "Bob",
+        }),
+        user(),
+      ),
+    ).toBe("Bob (@bob) has a pending publish request.");
+  });
+
+  it("identifies the signed-in user's own pending request", () => {
+    expect(
+      packEditBlockReason(
+        pack({
+          publish_review_status: "pending",
+          pending_submitter_id: "alice",
+          pending_submitter_name: "Alice",
+        }),
+        user(),
+      ),
+    ).toBe("Your publish request is under review.");
   });
 });
 

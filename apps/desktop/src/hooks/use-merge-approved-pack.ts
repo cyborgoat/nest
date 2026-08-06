@@ -1,3 +1,4 @@
+import type { PackMergeResolution } from "@nest/shared";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
@@ -9,10 +10,14 @@ export function useMergeApprovedPack() {
     mutationFn: ({
       packId,
       requestId,
+      resolutions,
+      previewToken,
     }: {
       packId: string;
       requestId: string;
-    }) => api.hubMergeApprovedPack(packId, requestId),
+      resolutions?: PackMergeResolution[];
+      previewToken?: string;
+    }) => api.hubMergeApprovedPack(packId, requestId, resolutions, previewToken),
     onSuccess: async (pack) => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.installedPacks }),

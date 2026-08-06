@@ -81,7 +81,10 @@ type PublishRequestView = Omit<
   | 'reviewer_name_snapshot'
   | 'base_version'
   | 'review_artifact_path'
->;
+> & {
+  submitter_id: string | null;
+  submitter_name: string | null;
+};
 type PendingRequestView = PendingPublishRequest;
 
 @Injectable()
@@ -357,6 +360,16 @@ export class PublishingService {
           .rm(reviewArtifact.artifactPath, { recursive: true, force: true })
           .catch(() => undefined),
       ]);
+      if (
+        error instanceof Error &&
+        error.message.includes(
+          'UNIQUE constraint failed: publish_requests.pack_id',
+        )
+      ) {
+        throw new ConflictException(
+          `${pack.id} already has a publish request under review`,
+        );
+      }
       throw error;
     }
     this.logger.log(
@@ -834,6 +847,8 @@ export class PublishingService {
       reviewer_uuid: row.reviewer_uuid,
       created_at: row.created_at,
       reviewed_at: row.reviewed_at,
+      submitter_id: row.submitter_id_snapshot,
+      submitter_name: row.submitter_name_snapshot,
     };
   }
 

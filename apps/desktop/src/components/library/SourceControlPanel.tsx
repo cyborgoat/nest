@@ -1,4 +1,4 @@
-import type { FileStatus, InstalledPack } from "@nest/shared";
+import type { FileStatus, InstalledPack, PackMergePreview } from "@nest/shared";
 import {
   CircleAlert,
   CloudUpload,
@@ -9,6 +9,7 @@ import {
   LockKeyhole,
   Merge,
   Package,
+  RefreshCw,
   Undo2,
 } from "lucide-react";
 import {
@@ -20,6 +21,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { PackPublishDialogController } from "@/components/hub/PackPublishDialogController";
+import { PackMergeDialog } from "@/components/hub/PackMergeDialog";
 import { useMergeApprovedPack } from "@/hooks/use-merge-approved-pack";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -82,7 +84,30 @@ function PackChanges({
   const setDirty = useEditorStore((s) => s.setDirty);
 
   const mergeApproved = useMergeApprovedPack();
+  const [mergePreview, setMergePreview] = useState<PackMergePreview | null>(null);
+  const [previewingMerge, setPreviewingMerge] = useState(false);
+
+  const previewApprovedMerge = async () => {
+    if (!pack.pending_request_id) return;
+    setPreviewingMerge(true);
+    try {
+      setMergePreview(
+        await api.hubPreviewApprovedMerge(pack.pack_id, pack.pending_request_id),
+      );
+    } catch (error) {
+      toast.error("Could not prepare merge", {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setPreviewingMerge(false);
+    }
+  };
   const reviewLocked = pack.publish_review_status === "pending";
+  const pendingSubmitter = pack.pending_submitter_name
+    ? `${pack.pending_submitter_name}${pack.pending_submitter_id ? ` (@${pack.pending_submitter_id})` : ""}`
+    : pack.pending_submitter_id
+      ? `@${pack.pending_submitter_id}`
+      : null;
 
   const openPublish = () => {
     onPublish(pack);
@@ -129,6 +154,25 @@ function PackChanges({
 
   return (
     <section className="space-y-1">
+      <PackMergeDialog
+        open={Boolean(mergePreview)}
+        preview={mergePreview}
+        busy={mergeApproved.isPending}
+        title={`Merge approved changes into ${pack.name}`}
+        onOpenChange={(open) => !open && setMergePreview(null)}
+        onApply={(resolutions) => {
+          if (!pack.pending_request_id) return;
+          mergeApproved.mutate(
+            {
+              packId: pack.pack_id,
+              requestId: pack.pending_request_id,
+              resolutions,
+              previewToken: mergePreview?.preview_token,
+            },
+            { onSuccess: () => setMergePreview(null) },
+          );
+        }}
+      />
       <ContextMenu>
         <ContextMenuTrigger asChild>
           <div onContextMenu={(event) => event.stopPropagation()}>
@@ -211,17 +255,23 @@ function PackChanges({
             <p className="text-xs leading-5 text-muted-foreground">
               This pack is locked for review. Its submitted changes remain
               visible here, but they cannot be edited or discarded until the
-              request is resolved or{" "}
-              <button
-                type="button"
-                className="font-medium text-primary underline underline-offset-2 hover:text-primary/80"
-                onClick={() => {
-                  setActivityView("reviews");
-                  setSidebarOpen(true);
-                }}
-              >
-                cancelled from Under Review
-              </button>
+              request{pendingSubmitter ? ` from ${pendingSubmitter}` : ""} is
+              resolved
+              {pack.pending_can_cancel && (
+                <>
+                  {" or "}
+                  <button
+                    type="button"
+                    className="font-medium text-primary underline underline-offset-2 hover:text-primary/80"
+                    onClick={() => {
+                      setActivityView("reviews");
+                      setSidebarOpen(true);
+                    }}
+                  >
+                    cancelled from Under Review
+                  </button>
+                </>
+              )}
               .
             </p>
           </div>
@@ -237,15 +287,10 @@ function PackChanges({
             <Button
               size="sm"
               className="mt-2 w-full"
-              disabled={mergeApproved.isPending}
-              onClick={() =>
-                mergeApproved.mutate({
-                  packId: pack.pack_id,
-                  requestId: pack.pending_request_id!,
-                })
-              }
+              disabled={mergeApproved.isPending || previewingMerge}
+              onClick={() => void previewApprovedMerge()}
             >
-              {mergeApproved.isPending ? (
+              {mergeApproved.isPending || previewingMerge ? (
                 <Loader2 className="size-4 animate-spin" />
               ) : (
                 <Merge className="size-4" />
@@ -389,6 +434,22 @@ export function SourceControlPanel({
   const hubUser = hubAuthQuery.data?.user ?? null;
   const authenticated = hubAuthQuery.data?.authenticated === true;
   const openAccountSettingsTab = useUiStore((s) => s.openAccountSettingsTab);
+  const openHubInstalledTab = useUiStore((s) => s.openHubInstalledTab);
+  const catalogQuery = useQuery({
+    queryKey: queryKeys.catalog,
+    queryFn: api.hubListPacks,
+  });
+  const patchUpdates = useMemo(() => {
+    const projects = new Map((catalogQuery.data ?? []).map((pack) => [pack.id, pack]));
+    return installed.flatMap((pack) => {
+      const release = projects
+        .get(pack.pack_id)
+        ?.releases.find((candidate) => candidate.version === pack.version);
+      return release && !release.yanked && release.patch_revision > pack.patch_revision
+        ? [{ pack, patchRevision: release.patch_revision }]
+        : [];
+    });
+  }, [catalogQuery.data, installed]);
 
   const openPublish = (pack: InstalledPack) => {
     if (authenticated) setPublishPack(pack);
@@ -478,7 +539,19 @@ export function SourceControlPanel({
       <ContextMenu>
         <ContextMenuTrigger asChild>
           <div className="min-h-0 flex-1 overflow-y-auto py-1">
-            {sections.length === 0 ? (
+            {patchUpdates.map(({ pack, patchRevision }) => (
+              <div
+                key={`patch-${pack.pack_id}`}
+                className="mx-2 mb-2 rounded-md border border-success/30 bg-success/5 p-2.5"
+              >
+                <p className="text-xs font-medium">Patch {patchRevision} available for {pack.name}</p>
+                <Button size="sm" variant="outline" className="mt-2 w-full" onClick={openHubInstalledTab}>
+                  <RefreshCw className="size-3.5" />
+                  Review patch
+                </Button>
+              </div>
+            ))}
+            {sections.length === 0 && patchUpdates.length === 0 ? (
               <div className="p-3">
                 <EmptyState
                   variant="dashed"

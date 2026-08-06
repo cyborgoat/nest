@@ -998,6 +998,8 @@ pub async fn hub_download_pack(
     owner_id: Option<String>,
     replace_local_pack_id: Option<String>,
     sync_patch: Option<bool>,
+    merge_resolutions: Option<Vec<crate::snapshot::MergeResolution>>,
+    merge_preview_token: Option<String>,
 ) -> AppResult<InstalledPack> {
     let settings = {
         let conn = state.db.lock();
@@ -1020,17 +1022,6 @@ pub async fn hub_download_pack(
         if version.as_deref() != Some(installed.version.as_str()) {
             return Err(AppError::msg(
                 "A live patch must sync the currently installed release",
-            ));
-        }
-        let pack_dir = vault.join(&installed.local_path);
-        let snapshot_dir = crate::snapshot::snapshot_root(
-            &state.app_data_dir,
-            &installed.pack_id,
-            &installed.version,
-        );
-        if !crate::snapshot::compute_status(&pack_dir, &snapshot_dir)?.is_empty() {
-            return Err(AppError::msg(
-                "Commit or discard local Source Control changes before syncing a live patch",
             ));
         }
     }
@@ -1105,13 +1096,43 @@ pub async fn hub_download_pack(
         ));
     }
 
-    let staged_pack = staging.join(&pack.path);
+    let mut staged_pack = staging.join(&pack.path);
     if !staged_pack.is_dir() {
         let _ = fs::remove_dir_all(&staging);
         return Err(AppError::msg(
             "The downloaded archive did not contain the expected pack folder",
         ));
     }
+    let approved_snapshot_source = if sync_patch.unwrap_or(false) {
+        let installed = {
+            let conn = state.db.lock();
+            require_installed_pack(&conn, &pack_id)?
+        };
+        let local_dir = vault.join(&installed.local_path);
+        let base_dir = crate::snapshot::snapshot_root(
+            &state.app_data_dir,
+            &installed.pack_id,
+            &installed.version,
+        );
+        let approved_dir = staging.join(".approved-patch");
+        fs::rename(&staged_pack, &approved_dir)?;
+        let merged_dir = staging.join(&pack.path);
+        if let Err(error) = crate::snapshot::build_three_way_merge(
+            &base_dir,
+            &local_dir,
+            &approved_dir,
+            &merged_dir,
+            merge_resolutions.as_deref().unwrap_or_default(),
+            merge_preview_token.as_deref(),
+        ) {
+            let _ = fs::remove_dir_all(&staging);
+            return Err(error);
+        }
+        staged_pack = merged_dir;
+        Some(approved_dir)
+    } else {
+        None
+    };
     let target = vault.join(&pack.path);
     let backup_root = vault.join(format!(".nest-download-backup-{}", uuid::Uuid::new_v4()));
     fs::create_dir_all(&backup_root)?;
@@ -1148,12 +1169,33 @@ pub async fn hub_download_pack(
 
     // Baseline for local version control: "modified" is computed against
     // this snapshot until the next re-sync to a newer version.
-    if let Err(error) =
-        crate::snapshot::write_snapshot(&state.app_data_dir, &pack.id, &pack.version, &target)
-    {
+    let snapshot_dir = crate::snapshot::snapshot_root(&state.app_data_dir, &pack.id, &pack.version);
+    let snapshot_backup = staging.join(".previous-snapshot");
+    let had_snapshot = snapshot_dir.is_dir();
+    if had_snapshot {
+        if let Err(error) = copy_directory_exact(&snapshot_dir, &snapshot_backup) {
+            let _ = fs::remove_dir_all(&target);
+            for (original, saved) in backups.iter().rev() {
+                let _ = fs::rename(saved, original);
+            }
+            let _ = fs::remove_dir_all(&staging);
+            let _ = fs::remove_dir_all(&backup_root);
+            return Err(error);
+        }
+    }
+    if let Err(error) = crate::snapshot::write_snapshot(
+        &state.app_data_dir,
+        &pack.id,
+        &pack.version,
+        approved_snapshot_source.as_deref().unwrap_or(&target),
+    ) {
         let _ = fs::remove_dir_all(&target);
         for (original, saved) in backups.iter().rev() {
             let _ = fs::rename(saved, original);
+        }
+        let _ = fs::remove_dir_all(&snapshot_dir);
+        if had_snapshot {
+            let _ = fs::rename(&snapshot_backup, &snapshot_dir);
         }
         let _ = fs::remove_dir_all(&staging);
         let _ = fs::remove_dir_all(&backup_root);
@@ -1187,6 +1229,10 @@ pub async fn hub_download_pack(
             let _ = fs::remove_dir_all(&target);
             for (original, saved) in backups.iter().rev() {
                 let _ = fs::rename(saved, original);
+            }
+            let _ = fs::remove_dir_all(&snapshot_dir);
+            if had_snapshot {
+                let _ = fs::rename(&snapshot_backup, &snapshot_dir);
             }
             let _ = fs::remove_dir_all(&staging);
             let _ = fs::remove_dir_all(&backup_root);
@@ -1776,6 +1822,8 @@ async fn publish_pack(
                 request_type: &request.request_type,
                 patch_revision: request.patch_revision,
                 can_cancel: true,
+                submitter_id: request.submitter_id.as_deref(),
+                submitter_name: request.submitter_name.as_deref(),
             },
         )?;
     }
@@ -1902,6 +1950,8 @@ async fn reconcile_one_pack(
                 request_type: &remote.request_type,
                 patch_revision: remote.patch_revision,
                 can_cancel: remote.can_cancel,
+                submitter_id: remote.submitter_id.as_deref(),
+                submitter_name: remote.submitter_name.as_deref(),
             },
         );
         return;
@@ -1954,13 +2004,125 @@ async fn reconcile_one_pack(
 }
 
 /// Promote an approved publish request to the local remote-synced baseline.
-/// The working directory is deliberately untouched: any edits made after
-/// submission become ordinary Source Control differences.
+#[derive(Debug, Clone, Serialize)]
+pub struct PackMergePreview {
+    pub pack_id: String,
+    pub version: String,
+    pub patch_revision: i64,
+    pub request_id: Option<String>,
+    pub conflicts: Vec<crate::snapshot::MergeConflict>,
+    pub merged_file_count: usize,
+    pub preview_token: String,
+}
+
+async fn preview_remote_merge(
+    state: &SharedState,
+    pack_id: &str,
+    version: &str,
+    request_id: Option<String>,
+) -> AppResult<PackMergePreview> {
+    let (settings, installed) = {
+        let conn = state.db.lock();
+        (
+            db::get_settings(&conn)?,
+            require_installed_pack(&conn, pack_id)?,
+        )
+    };
+    let token = ensure_hub_access(state, &settings, false).await?;
+    let staging = std::env::temp_dir().join(format!(
+        "nest-merge-preview-{}-{}",
+        pack_id,
+        uuid::Uuid::new_v4()
+    ));
+    fs::create_dir_all(&staging)?;
+    let downloaded = hub::download_pack_remote(
+        &settings.hub_base_url,
+        settings.effective_proxy_url(),
+        pack_id,
+        Some(version),
+        &staging,
+        token.as_deref(),
+    )
+    .await;
+    let downloaded = match downloaded {
+        Ok(value) => value,
+        Err(error) => {
+            let _ = fs::remove_dir_all(&staging);
+            return Err(error);
+        }
+    };
+    let approved_dir = staging.join(&downloaded.pack.path);
+    let local_dir = state.vault_path().join(&installed.local_path);
+    let base_dir =
+        crate::snapshot::snapshot_root(&state.app_data_dir, &installed.pack_id, &installed.version);
+    let analysis = crate::snapshot::analyze_three_way(&base_dir, &local_dir, &approved_dir);
+    let _ = fs::remove_dir_all(&staging);
+    let analysis = analysis?;
+    Ok(PackMergePreview {
+        pack_id: pack_id.to_string(),
+        version: downloaded.pack.version,
+        patch_revision: downloaded.patch_revision,
+        request_id,
+        conflicts: analysis.conflicts,
+        merged_file_count: analysis.merged_file_count,
+        preview_token: analysis.preview_token,
+    })
+}
+
+#[tauri::command]
+pub async fn hub_preview_approved_merge(
+    state: State<'_, SharedState>,
+    pack_id: String,
+    request_id: String,
+) -> AppResult<PackMergePreview> {
+    let settings = {
+        let conn = state.db.lock();
+        db::get_settings(&conn)?
+    };
+    let token = ensure_hub_access(state.inner(), &settings, false)
+        .await?
+        .ok_or_else(|| AppError::msg("Sign in to merge an approved knowledge pack"))?;
+    let request = hub::get_publish_request_remote(
+        &settings.hub_base_url,
+        settings.effective_proxy_url(),
+        &token,
+        &request_id,
+    )
+    .await?;
+    if request.pack_id != pack_id || request.status != "approved" {
+        return Err(AppError::msg(
+            "This publish request is not an approved update for the pack",
+        ));
+    }
+    preview_remote_merge(state.inner(), &pack_id, &request.version, Some(request_id)).await
+}
+
+#[tauri::command]
+pub async fn hub_preview_pack_patch(
+    state: State<'_, SharedState>,
+    pack_id: String,
+) -> AppResult<PackMergePreview> {
+    let installed = {
+        let conn = state.db.lock();
+        require_installed_pack(&conn, &pack_id)?
+    };
+    let preview = preview_remote_merge(state.inner(), &pack_id, &installed.version, None).await?;
+    if preview.patch_revision <= installed.patch_revision {
+        return Err(AppError::msg("No newer live patch is available"));
+    }
+    Ok(preview)
+}
+
+/// Promote an approved publish request to the local remote-synced baseline,
+/// preserving non-conflicting local work and requiring explicit choices for
+/// every true three-way conflict.
 #[tauri::command]
 pub async fn hub_merge_approved_pack(
     state: State<'_, SharedState>,
     pack_id: String,
     request_id: String,
+    resolutions: Option<Vec<crate::snapshot::MergeResolution>>,
+    preview_token: Option<String>,
 ) -> AppResult<InstalledPack> {
     let settings = {
         let conn = state.db.lock();
@@ -2034,6 +2196,32 @@ pub async fn hub_merge_approved_pack(
         ));
     }
     let approved_dir = staging.join(&approved.path);
+    let local_dir = state.vault_path().join(&installed.local_path);
+    let base_dir =
+        crate::snapshot::snapshot_root(&state.app_data_dir, &installed.pack_id, &installed.version);
+    let merged_dir = staging.join(".merged");
+    crate::snapshot::build_three_way_merge(
+        &base_dir,
+        &local_dir,
+        &approved_dir,
+        &merged_dir,
+        resolutions.as_deref().unwrap_or_default(),
+        preview_token.as_deref(),
+    )?;
+    let snapshot_dir =
+        crate::snapshot::snapshot_root(&state.app_data_dir, &approved.id, &approved.version);
+    let snapshot_backup = staging.join(".snapshot-backup");
+    let had_snapshot = snapshot_dir.is_dir();
+    if had_snapshot {
+        copy_directory_exact(&snapshot_dir, &snapshot_backup)?;
+    }
+    let backup_dir = staging.join(".local-backup");
+    fs::rename(&local_dir, &backup_dir)?;
+    if let Err(error) = fs::rename(&merged_dir, &local_dir) {
+        let _ = fs::rename(&backup_dir, &local_dir);
+        let _ = fs::remove_dir_all(&staging);
+        return Err(error.into());
+    }
     let snapshot_result = crate::snapshot::write_snapshot(
         &state.app_data_dir,
         &approved.id,
@@ -2041,6 +2229,12 @@ pub async fn hub_merge_approved_pack(
         &approved_dir,
     );
     if let Err(error) = snapshot_result {
+        let _ = fs::remove_dir_all(&local_dir);
+        let _ = fs::rename(&backup_dir, &local_dir);
+        let _ = fs::remove_dir_all(&snapshot_dir);
+        if had_snapshot {
+            let _ = fs::rename(&snapshot_backup, &snapshot_dir);
+        }
         let _ = fs::remove_dir_all(&staging);
         return Err(error);
     }
@@ -2075,6 +2269,17 @@ pub async fn hub_merge_approved_pack(
         transaction.commit()?;
         Ok(merged)
     })();
+    if result.is_err() {
+        let _ = fs::remove_dir_all(&local_dir);
+        let _ = fs::rename(&backup_dir, &local_dir);
+        let _ = fs::remove_dir_all(&snapshot_dir);
+        if had_snapshot {
+            let _ = fs::rename(&snapshot_backup, &snapshot_dir);
+        }
+    }
+    if result.is_ok() {
+        let _ = indexing::schedule(state.inner());
+    }
     let _ = fs::remove_dir_all(&staging);
     result
 }
@@ -2393,6 +2598,8 @@ mod publishing_origin_tests {
             publish_review_status: None,
             publish_review_created_at: None,
             pending_can_cancel: false,
+            pending_submitter_id: None,
+            pending_submitter_name: None,
         }
     }
 

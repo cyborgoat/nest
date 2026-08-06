@@ -70,6 +70,9 @@ export type PublishRequest = {
   review_note?: string | null;
   created_at: string;
   reviewed_at?: string | null;
+  /** Present when the viewer is allowed to inspect this pack's review. */
+  submitter_id?: string | null;
+  submitter_name?: string | null;
 };
 
 export type PendingPublishRequest = PublishRequest & {
@@ -258,6 +261,34 @@ export type InstalledPack = {
   publish_review_created_at: string | null;
   /** Whether the signed-in user submitted and may cancel the pending request. */
   pending_can_cancel: boolean;
+  pending_submitter_id?: string | null;
+  pending_submitter_name?: string | null;
+};
+
+export type PackMergeChoice = "local" | "approved";
+
+export type PackMergeConflict = {
+  path: string;
+  kind: "text" | "image" | "binary";
+  local_exists: boolean;
+  approved_exists: boolean;
+  local_preview?: string | null;
+  approved_preview?: string | null;
+};
+
+export type PackMergePreview = {
+  pack_id: string;
+  version: string;
+  patch_revision: number;
+  request_id: string | null;
+  conflicts: PackMergeConflict[];
+  merged_file_count: number;
+  preview_token: string;
+};
+
+export type PackMergeResolution = {
+  path: string;
+  choice: PackMergeChoice;
 };
 
 export type PackInstallConflict = {

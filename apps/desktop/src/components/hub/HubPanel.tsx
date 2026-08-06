@@ -2,6 +2,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   InstalledPack,
   PackInstallConflict,
+  PackMergePreview,
+  PackMergeResolution,
   PackProject,
 } from "@nest/shared";
 import { CloudOff, FolderInput, Info } from "lucide-react";
@@ -9,6 +11,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { BrowseTab } from "@/components/hub/BrowseTab";
 import { InstalledTab } from "@/components/hub/InstalledTab";
+import { PackMergeDialog } from "@/components/hub/PackMergeDialog";
 import {
   LocalPackImportController,
   type LocalPackImportMode,
@@ -43,7 +46,9 @@ export function HubPanel() {
   const queryClient = useQueryClient();
   const [importMode, setImportMode] = useState<LocalPackImportMode | null>(null);
   const [catalogSearch, setCatalogSearch] = useState("");
-  const [tab, setTab] = useState<"browse" | "installed">("browse");
+  const requestedHubSection = useUiStore((s) => s.hubSection);
+  const [tab, setTab] = useState<"browse" | "installed">(requestedHubSection);
+  useEffect(() => setTab(requestedHubSection), [requestedHubSection]);
   const [pendingPackUpdate, setPendingPackUpdate] = useState<{
     packId: string;
     packName: string;
@@ -58,6 +63,11 @@ export function HubPanel() {
     previousVersion?: string;
     ownerId?: string | null;
     conflict: PackInstallConflict;
+  } | null>(null);
+  const [patchMerge, setPatchMerge] = useState<{
+    preview: PackMergePreview;
+    packName: string;
+    ownerId?: string | null;
   } | null>(null);
 
   const hubStatusQuery = useQuery({
@@ -193,12 +203,24 @@ export function HubPanel() {
       packName,
       version,
       ownerId,
+      resolutions,
+      previewToken,
     }: {
       packId: string;
       packName: string;
       version: string;
       ownerId?: string | null;
-    }) => api.hubSyncPackPatch(packId, packName, version, ownerId),
+      resolutions?: PackMergeResolution[];
+      previewToken?: string;
+    }) =>
+      api.hubSyncPackPatch(
+        packId,
+        packName,
+        version,
+        ownerId,
+        resolutions,
+        previewToken,
+      ),
     onSuccess: () => {
       invalidateAfterPackChange();
       toast.success("Live patch synced");
@@ -445,31 +467,17 @@ export function HubPanel() {
                     ownerId,
                   })
                 }
-                onSyncPatch={async (packId, packName, version, ownerId) => {
+                onSyncPatch={async (packId, packName, _version, ownerId) => {
                   try {
-                    const changes = await api.hubPackChangeStatus(packId);
-                    if (changes.length > 0) {
-                      toast.warning("Live patch cannot be synced yet", {
-                        description:
-                          "Commit or discard local Source Control changes first.",
-                      });
-                      return;
-                    }
+                    const preview = await api.hubPreviewPackPatch(packId);
+                    setPatchMerge({ preview, packName, ownerId });
                   } catch (error) {
-                    toast.error("Could not check local changes", {
+                    toast.error("Could not prepare live patch", {
                       description: appErrorMessage(
                         error,
-                        "Source Control status is unavailable",
+                        "Live patch preview is unavailable",
                       ),
                     });
-                    return;
-                  }
-                  if (
-                    window.confirm(
-                      `Replace ${packName} v${version} with the latest reviewed live patch?`,
-                    )
-                  ) {
-                    syncPatch.mutate({ packId, packName, version, ownerId });
                   }
                 }}
                 onRemove={(packId) => remove.mutate(packId)}
@@ -493,6 +501,27 @@ export function HubPanel() {
         mode={importMode}
         onModeChange={setImportMode}
         installed={installedQuery.data ?? []}
+      />
+      <PackMergeDialog
+        open={Boolean(patchMerge)}
+        preview={patchMerge?.preview ?? null}
+        busy={syncPatch.isPending}
+        title={`Sync live patch${patchMerge ? ` for ${patchMerge.packName}` : ""}`}
+        onOpenChange={(open) => !open && setPatchMerge(null)}
+        onApply={(resolutions) => {
+          if (!patchMerge) return;
+          syncPatch.mutate(
+            {
+              packId: patchMerge.preview.pack_id,
+              packName: patchMerge.packName,
+              version: patchMerge.preview.version,
+              ownerId: patchMerge.ownerId,
+              resolutions,
+              previewToken: patchMerge.preview.preview_token,
+            },
+            { onSuccess: () => setPatchMerge(null) },
+          );
+        }}
       />
       <AlertDialog
         open={Boolean(pendingHubOverwrite)}

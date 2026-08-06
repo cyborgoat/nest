@@ -17,6 +17,8 @@ import type {
   KnowledgePackMeta,
   LocalPackInspection,
   PackInstallConflict,
+  PackMergePreview,
+  PackMergeResolution,
   PackProject,
   PublishRequest,
   TreeNode,
@@ -136,12 +138,16 @@ export const api = {
       ownerId: ownerId ?? null,
       replaceLocalPackId: replaceLocalPackId ?? null,
       syncPatch,
+      mergeResolutions: null,
+      mergePreviewToken: null,
     }),
   hubSyncPackPatch: (
     packId: string,
     packName: string,
     version: string,
     ownerId?: string | null,
+    mergeResolutions: PackMergeResolution[] = [],
+    mergePreviewToken?: string,
   ) =>
     invoke<InstalledPack>("hub_download_pack", {
       packId,
@@ -150,6 +156,8 @@ export const api = {
       ownerId: ownerId ?? null,
       replaceLocalPackId: null,
       syncPatch: true,
+      mergeResolutions,
+      mergePreviewToken: mergePreviewToken ?? null,
     }),
   hubInspectLocalPack: (sourcePath: string) =>
     invoke<LocalPackInspection>("hub_inspect_local_pack", { sourcePath }),
@@ -230,8 +238,22 @@ export const api = {
       packId,
       requestId,
     }),
-  hubMergeApprovedPack: (packId: string, requestId: string) =>
-    invoke<InstalledPack>("hub_merge_approved_pack", { packId, requestId }),
+  hubPreviewApprovedMerge: (packId: string, requestId: string) =>
+    invoke<PackMergePreview>("hub_preview_approved_merge", { packId, requestId }),
+  hubPreviewPackPatch: (packId: string) =>
+    invoke<PackMergePreview>("hub_preview_pack_patch", { packId }),
+  hubMergeApprovedPack: (
+    packId: string,
+    requestId: string,
+    resolutions: PackMergeResolution[] = [],
+    previewToken?: string,
+  ) =>
+    invoke<InstalledPack>("hub_merge_approved_pack", {
+      packId,
+      requestId,
+      resolutions,
+      previewToken: previewToken ?? null,
+    }),
   hubListMessages: (filter: "all" | "unread", cursor?: string) =>
     invoke<HubMessagePage>("hub_list_messages", {
       filter,

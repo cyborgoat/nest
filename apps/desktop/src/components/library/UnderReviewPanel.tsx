@@ -1,10 +1,8 @@
-import type { InstalledPack, TreeNode } from "@nest/shared";
+import type { InstalledPack } from "@nest/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Clock3,
-  FileSearch,
   Loader2,
-  MessageSquare,
   PackageSearch,
   XCircle,
 } from "lucide-react";
@@ -29,25 +27,11 @@ import { api } from "@/lib/api";
 import { pendingPublishVersionLabel } from "@/lib/publish-request-labels";
 import { queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
-import { useUiStore } from "@/stores/ui";
-
-function firstFileUnder(nodes: TreeNode[], prefix: string): string | null {
-  for (const node of nodes) {
-    if (node.kind === "file" && node.path.startsWith(`${prefix}/`)) {
-      return node.path;
-    }
-    const child = firstFileUnder(node.children ?? [], prefix);
-    if (child) return child;
-  }
-  return null;
-}
 
 export function UnderReviewPanel({
   installed,
-  tree,
 }: {
   installed: InstalledPack[];
-  tree: TreeNode[];
 }) {
   const queryClient = useQueryClient();
   const authQuery = useQuery({
@@ -55,9 +39,6 @@ export function UnderReviewPanel({
     queryFn: api.hubAuthState,
   });
   const [cancelTarget, setCancelTarget] = useState<InstalledPack | null>(null);
-  const setActivityView = useUiStore((state) => state.setActivitySidebarView);
-  const openFileTab = useUiStore((state) => state.openFileTab);
-  const openPublishMessage = useUiStore((state) => state.openPublishMessage);
   const pending = installed.filter(
     (pack) => pack.publish_review_status === "pending",
   );
@@ -130,7 +111,6 @@ export function UnderReviewPanel({
       ) : (
         <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-2">
           {pending.map((pack) => {
-            const firstFile = firstFileUnder(tree, pack.local_path);
             return (
               <article
                 key={pack.pack_id}
@@ -154,40 +134,25 @@ export function UnderReviewPanel({
                     {new Date(pack.publish_review_created_at).toLocaleString()}
                   </p>
                 )}
+                {(pack.pending_submitter_name || pack.pending_submitter_id) && (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Submitted by {pack.pending_submitter_name ?? pack.pending_submitter_id}
+                    {pack.pending_submitter_name && pack.pending_submitter_id
+                      ? ` (@${pack.pending_submitter_id})`
+                      : ""}
+                  </p>
+                )}
                 <p className="mt-2 text-xs leading-5 text-muted-foreground">
                   Editing is locked until this request is resolved or
                   cancelled.
                 </p>
-                <div className="mt-3 grid grid-cols-2 gap-1.5">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      if (firstFile) openFileTab(firstFile, { preview: false });
-                      setActivityView("explorer");
-                    }}
-                  >
-                    <FileSearch className="size-4" />
-                    Inspect
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={!pack.pending_request_id}
-                    onClick={() =>
-                      pack.pending_request_id &&
-                      openPublishMessage(pack.pending_request_id)
-                    }
-                  >
-                    <MessageSquare className="size-4" />
-                    Message
-                  </Button>
-                  {pack.pending_can_cancel &&
-                    authQuery.data?.authenticated === true && (
+                {pack.pending_can_cancel &&
+                  authQuery.data?.authenticated === true && (
+                  <div className="mt-3">
                     <Button
                       size="sm"
                       variant="ghost"
-                      className="col-span-2 text-destructive hover:text-destructive"
+                      className="w-full text-destructive hover:text-destructive"
                       disabled={cancelPublish.isPending}
                       onClick={() => setCancelTarget(pack)}
                     >
@@ -199,8 +164,8 @@ export function UnderReviewPanel({
                       )}
                       Cancel publish request
                     </Button>
-                    )}
-                </div>
+                  </div>
+                  )}
               </article>
             );
           })}

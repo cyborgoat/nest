@@ -37,6 +37,7 @@ type UiState = {
   openMainTabs: string[];
   activeMainTabId: string | null;
   settingsSection: SettingsSection;
+  hubSection: "browse" | "installed";
   requestedPublishMessageId: string | null;
   /** VS Code-style "preview" tab: at most one, replaced (not appended) by the
    * next single-clicked file until it's promoted to a permanent tab. */
@@ -52,6 +53,7 @@ type UiState = {
   openFileTab: (path: string, opts?: { preview?: boolean }) => void;
   openDiffTab: (packId: string, path: string) => void;
   openHubTab: () => void;
+  openHubInstalledTab: () => void;
   openSettingsTab: () => void;
   openAccountSettingsTab: () => void;
   setSettingsSection: (section: SettingsSection) => void;
@@ -132,6 +134,7 @@ export const useUiStore = create<UiState>()(
       openMainTabs: [],
       activeMainTabId: null,
       settingsSection: "general",
+      hubSection: "browse",
       requestedPublishMessageId: null,
       previewMainTabId: null,
       setActiveMainTab: (id) => {
@@ -236,6 +239,18 @@ export const useUiStore = create<UiState>()(
             ? cleaned
             : [...cleaned, HUB_TAB_ID],
           activeMainTabId: HUB_TAB_ID,
+          hubSection: "browse",
+        });
+      },
+      openHubInstalledTab: () => {
+        const { openMainTabs } = get();
+        const cleaned = closeEphemeralExcept(openMainTabs, HUB_TAB_ID);
+        set({
+          openMainTabs: cleaned.includes(HUB_TAB_ID)
+            ? cleaned
+            : [...cleaned, HUB_TAB_ID],
+          activeMainTabId: HUB_TAB_ID,
+          hubSection: "installed",
         });
       },
       openSettingsTab: () => {

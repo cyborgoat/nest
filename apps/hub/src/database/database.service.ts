@@ -178,6 +178,17 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
     `);
     this.ensurePublishRequestHistoryColumns();
     this.ensureLivePatchColumns();
+    this.ensurePackWidePendingConstraint();
+  }
+
+  private ensurePackWidePendingConstraint() {
+    // The service performs an early friendly check, while this index closes
+    // the race between two submissions that finish validation together.
+    this.database.exec(`
+      DROP INDEX IF EXISTS pending_release_idx;
+      CREATE UNIQUE INDEX IF NOT EXISTS pending_pack_idx
+        ON publish_requests(pack_id) WHERE status = 'pending';
+    `);
   }
 
   private ensurePublishRequestHistoryColumns() {

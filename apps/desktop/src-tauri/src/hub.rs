@@ -55,6 +55,10 @@ pub struct PublishRequest {
     pub created_at: String,
     pub reviewed_at: Option<String>,
     #[serde(default)]
+    pub submitter_id: Option<String>,
+    #[serde(default)]
+    pub submitter_name: Option<String>,
+    #[serde(default)]
     pub can_cancel: bool,
 }
 

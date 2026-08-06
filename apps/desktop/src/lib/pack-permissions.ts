@@ -65,12 +65,24 @@ export function isPackReviewLocked(
 export function packEditBlockReason(
   pack: Pick<
     InstalledPack,
-    "origin" | "owner_id" | "publish_review_status"
+    | "origin"
+    | "owner_id"
+    | "publish_review_status"
+    | "pending_submitter_id"
+    | "pending_submitter_name"
   >,
   hubUser: HubUser | null,
 ): string | undefined {
   if (isPackReviewLocked(pack)) {
-    return "This pack is locked while its publish request is under review.";
+    if (pack.pending_submitter_id && pack.pending_submitter_id === hubUser?.id) {
+      return "Your publish request is under review.";
+    }
+    const submitter = pack.pending_submitter_name
+      ? `${pack.pending_submitter_name}${pack.pending_submitter_id ? ` (@${pack.pending_submitter_id})` : ""}`
+      : pack.pending_submitter_id
+        ? `@${pack.pending_submitter_id}`
+        : "Another maintainer";
+    return `${submitter} has a pending publish request.`;
   }
   return canEditPack(pack, hubUser)
     ? undefined

@@ -10,7 +10,7 @@ import {
   extractMarkdownHeadings,
   tocHeadings,
 } from "@/lib/markdown-headings";
-import { canEditPack } from "@/lib/pack-permissions";
+import { canEditPack, packEditBlockReason } from "@/lib/pack-permissions";
 import { queryKeys } from "@/lib/query-keys";
 import { MarkdownBody } from "@/components/markdown/MarkdownBody";
 import { MarkdownFrontmatter } from "@/components/markdown/MarkdownFrontmatter";
@@ -129,6 +129,9 @@ export function MarkdownViewer({ path }: { path: string }) {
   });
   const pack = installed?.find((p) => p.local_path === rootPath);
   const canEdit = pack ? canEditPack(pack, hubAuth?.user ?? null) : false;
+  const readOnlyReason = pack
+    ? packEditBlockReason(pack, hubAuth?.user ?? null)
+    : "This file is read-only.";
 
   const { frontmatter, body } = useMemo(() => {
     if (data == null) return { frontmatter: null, body: data };
@@ -237,7 +240,7 @@ export function MarkdownViewer({ path }: { path: string }) {
             ) : (
               <Badge variant="muted">
                 <Lock className="size-3" />
-                Read-only
+                {readOnlyReason}
               </Badge>
             )}
           </>

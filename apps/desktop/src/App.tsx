@@ -1,7 +1,8 @@
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { TreeNode } from "@nest/shared";
+import type { PackProject, TreeNode } from "@nest/shared";
 import { Bell, Cloud, MessageSquare, Settings2 } from "lucide-react";
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, type ReactNode } from "react";
+import { toast } from "sonner";
 import { usePanelRef } from "react-resizable-panels";
 import { ChatPanel } from "@/components/chat/ChatPanel";
 import { ActivityBar } from "@/components/library/ActivityBar";
@@ -53,6 +54,7 @@ export default function App() {
   const queryClient = useQueryClient();
   const activeMainTabId = useUiStore((s) => s.activeMainTabId);
   const openHubTab = useUiStore((s) => s.openHubTab);
+  const openHubInstalledTab = useUiStore((s) => s.openHubInstalledTab);
   const openSettingsTab = useUiStore((s) => s.openSettingsTab);
   const openMessagesTab = useUiStore((s) => s.openMessagesTab);
   const pruneMainFileTabs = useUiStore((s) => s.pruneMainFileTabs);
@@ -83,6 +85,49 @@ export default function App() {
     queryKey: queryKeys.installedPacks,
     queryFn: api.hubListInstalled,
   });
+  const catalogQuery = useQuery({
+    queryKey: queryKeys.catalog,
+    queryFn: api.hubListPacks,
+    enabled: (installedQuery.data?.length ?? 0) > 0,
+    refetchInterval: 30_000,
+    retry: 1,
+  });
+  const availablePatches = useMemo(() => {
+    const catalog = new Map<string, PackProject>(
+      (catalogQuery.data ?? []).map((pack) => [pack.id, pack]),
+    );
+    return (installedQuery.data ?? []).flatMap((installed) => {
+      const project = catalog.get(installed.pack_id);
+      const release = project?.releases.find(
+        (candidate) => candidate.version === installed.version,
+      );
+      return release &&
+        !release.yanked &&
+        release.patch_revision > installed.patch_revision
+        ? [{ installed, project: project!, release }]
+        : [];
+    });
+  }, [catalogQuery.data, installedQuery.data]);
+  const seenPatchUpdates = useRef(new Set<string>());
+  useEffect(() => {
+    const unseen = availablePatches.filter(({ installed, release }) => {
+      const key = `${installed.pack_id}:${installed.version}:${release.patch_revision}`;
+      if (seenPatchUpdates.current.has(key)) return false;
+      seenPatchUpdates.current.add(key);
+      return true;
+    });
+    if (unseen.length === 0) return;
+    const first = unseen[0];
+    toast.info(
+      unseen.length === 1
+        ? `Patch ${first.release.patch_revision} is available for ${first.installed.name}`
+        : `${unseen.length} knowledge-pack patches are available`,
+      {
+        description: "Open Hub → Installed to review and sync updates.",
+        action: { label: "View updates", onClick: openHubInstalledTab },
+      },
+    );
+  }, [availablePatches, openHubInstalledTab]);
 
   const indexQuery = useQuery({
     queryKey: queryKeys.index,
@@ -275,6 +320,7 @@ export default function App() {
               onClick={openHubTab}
               icon={<Cloud className="size-4" />}
               label={shell.hub}
+              dot={availablePatches.length > 0}
             />
             <NavButton
               active={activeMainTabId === MESSAGES_TAB_ID}
@@ -304,6 +350,7 @@ export default function App() {
           <ActivityBar
             hasSourceControlChanges={hasSourceControlChanges}
             hasPacksUnderReview={hasPacksUnderReview}
+            hasPackUpdates={availablePatches.length > 0}
           />
           <ResizablePanelGroup orientation="horizontal" className="h-full flex-1">
             <ResizablePanel
