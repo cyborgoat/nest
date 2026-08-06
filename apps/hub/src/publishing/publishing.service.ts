@@ -289,13 +289,16 @@ export class PublishingService {
         buffer,
         requestType === 'live_patch' ? pack.version : undefined,
       );
-      if (requestType === 'live_patch' && reviewArtifact.changedFiles === 0) {
+      if (
+        reviewArtifact.baseVersion !== null &&
+        reviewArtifact.meaningfulChangedFiles === 0
+      ) {
         await fs.rm(reviewArtifact.artifactPath, {
           recursive: true,
           force: true,
         });
         throw new BadRequestException(
-          'Live patch must change at least one file',
+          'The pack has no changes from its current published version',
         );
       }
     } catch (error) {

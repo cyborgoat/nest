@@ -22,6 +22,11 @@ pending review for the pack.
 4. Enter a concise publish commit message describing what changed.
 5. Track the result in **Under Review** or **Messages**.
 
+Nest enables submission only when the pack differs from its current published
+version. Changing only the version number is not enough; edit a file or, for a
+new release, update the description first. A live patch always requires a file
+change.
+
 When the first publication of a new pack is approved, its submitter becomes the
 credited author and is added as a maintainer. Hub pack details show the author
 and current maintainers. Administrators can update attribution and maintainer

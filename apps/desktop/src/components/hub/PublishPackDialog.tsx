@@ -12,6 +12,7 @@ import {
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { hasPublishableChanges } from "@/lib/publish-changes";
 import { nextPatchVersion } from "@/lib/semver";
 
 export type PublishPackIntent =
@@ -35,6 +36,7 @@ export function PublishPackDialog({
   lockedPendingVersion,
   defaultsLoading = false,
   canLivePatch = false,
+  hasFileChanges,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -56,6 +58,9 @@ export function PublishPackDialog({
   /** True when the installed pack is already linked to a Hub project even
    * if catalog metadata is temporarily stale or unavailable. */
   canLivePatch?: boolean;
+  /** Whether content differs from the installed pack's approved baseline.
+   * Undefined means the lookup was unavailable; Hub still validates it. */
+  hasFileChanges?: boolean;
 }) {
   const [requestType, setRequestType] = useState<"release" | "live_patch">(
     "release",
@@ -63,6 +68,13 @@ export function PublishPackDialog({
   const [version, setVersion] = useState(currentVersion);
   const [description, setDescription] = useState(currentDescription);
   const [commitMessage, setCommitMessage] = useState("");
+  const hasChanges = hasPublishableChanges({
+    isFirstPublish,
+    hasFileChanges,
+    requestType,
+    currentDescription,
+    description,
+  });
 
   useLayoutEffect(() => {
     if (open) {
@@ -199,6 +211,13 @@ export function PublishPackDialog({
               maxLength={500}
             />
           </Field>
+          {!hasChanges && (
+            <p className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+              No changes were found from v{currentVersion}. Edit the pack
+              {requestType === "release" ? " or its description" : ""} before
+              publishing.
+            </p>
+          )}
         </div>
         <DialogFooter>
           <Button
@@ -212,6 +231,7 @@ export function PublishPackDialog({
           <Button
             disabled={
               publishing ||
+              !hasChanges ||
               !commitMessage.trim() ||
               (requestType === "live_patch"
                 ? !currentVersion.trim()

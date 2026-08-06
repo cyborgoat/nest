@@ -49,6 +49,10 @@ live patches. Messages are limited to 500 characters, stored with the review,
 and returned as `commit_message` in publish-request responses. The Hub accepts
 an omitted message as empty only for compatibility with legacy API clients.
 
+Submissions must differ from the pack's current published version. A semantic-
+version bump by itself is not a pack change; file changes and release metadata
+changes are. First-time publishes have no baseline and remain valid.
+
 Live patches use the same review endpoints and pack-wide pending-request lock
 as releases. The route identifies the target release; the server does not infer
 the operation from optional multipart fields. The target must exist and not be

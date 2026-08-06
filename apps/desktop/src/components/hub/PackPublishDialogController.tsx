@@ -31,6 +31,13 @@ export function PackPublishDialogController({
     : (catalogEntry?.versions.includes(pack.version) ?? false);
   const canLivePatch =
     currentReleaseExists || (catalogQuery.isError && pack.owner_id != null);
+  const isFirstPublish = catalogEntry == null && pack.owner_id == null;
+  const changeStatusQuery = useQuery({
+    queryKey: queryKeys.packStatus(pack.pack_id),
+    queryFn: () => api.hubPackChangeStatus(pack.pack_id),
+    enabled: open && !catalogQuery.isLoading && !isFirstPublish,
+    retry: 1,
+  });
   const publish = usePublishPack();
 
   return (
@@ -43,8 +50,18 @@ export function PackPublishDialogController({
         catalogEntry,
         pack.description,
       )}
-      isFirstPublish={catalogEntry == null && pack.owner_id == null}
-      defaultsLoading={catalogQuery.isLoading}
+      isFirstPublish={isFirstPublish}
+      defaultsLoading={
+        catalogQuery.isLoading ||
+        (!isFirstPublish && changeStatusQuery.isLoading)
+      }
+      hasFileChanges={
+        isFirstPublish
+          ? true
+          : changeStatusQuery.isSuccess
+            ? changeStatusQuery.data.length > 0
+            : undefined
+      }
       publishing={publish.isPending}
       lockedPendingVersion={pack.pending_version}
       canLivePatch={canLivePatch}

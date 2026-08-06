@@ -406,6 +406,33 @@ describe('Hub (e2e)', () => {
       .set('Authorization', `Bearer ${adminLogin.body.access_token}`)
       .send({ note: 'Documentation and validation checks passed.' })
       .expect(201);
+    const unchangedRelease = new AdmZip();
+    unchangedRelease.addFile(
+      'authored-pack/pack.json',
+      Buffer.from(
+        JSON.stringify({
+          id: 'authored-pack',
+          name: 'Authored Pack',
+          description: 'Review workflow fixture',
+          version: '1.0.1',
+        }),
+      ),
+    );
+    unchangedRelease.addFile(
+      'authored-pack/README.md',
+      Buffer.from('# Reviewed knowledge'),
+    );
+    await request(app.getHttpServer())
+      .post('/api/publish-requests/releases')
+      .set('Authorization', `Bearer ${authorLogin.body.access_token}`)
+      .field('commit_message', 'Only bump the version')
+      .attach('file', unchangedRelease.toBuffer(), 'unchanged-release.zip')
+      .expect(400)
+      .expect(({ body }) =>
+        expect(body.message).toBe(
+          'The pack has no changes from its current published version',
+        ),
+      );
     const reviewedMessages = await request(app.getHttpServer())
       .get('/api/messages?filter=unread')
       .set('Authorization', `Bearer ${authorLogin.body.access_token}`)
@@ -475,6 +502,33 @@ describe('Hub (e2e)', () => {
       .post('/api/auth/login')
       .send({ id: 'role-admin', password: 'role-test-password' })
       .expect(201);
+    const unchangedPatch = new AdmZip();
+    unchangedPatch.addFile(
+      'authored-pack/pack.json',
+      Buffer.from(
+        JSON.stringify({
+          id: 'authored-pack',
+          name: 'Authored Pack',
+          description: 'Review workflow fixture',
+          version: '1.0.0',
+        }),
+      ),
+    );
+    unchangedPatch.addFile(
+      'authored-pack/README.md',
+      Buffer.from('# Reviewed knowledge'),
+    );
+    await request(app.getHttpServer())
+      .post('/api/publish-requests/live-patches/authored-pack/1.0.0')
+      .set('Authorization', `Bearer ${authorLogin.body.access_token}`)
+      .field('commit_message', 'Submit unchanged files')
+      .attach('file', unchangedPatch.toBuffer(), 'unchanged-patch.zip')
+      .expect(400)
+      .expect(({ body }) =>
+        expect(body.message).toBe(
+          'The pack has no changes from its current published version',
+        ),
+      );
     const zip = new AdmZip();
     zip.addFile(
       'authored-pack/pack.json',

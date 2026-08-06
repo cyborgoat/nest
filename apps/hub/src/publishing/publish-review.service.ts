@@ -14,7 +14,7 @@ import { createHash } from 'crypto';
 import { diffLines } from 'diff';
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import { promisify } from 'util';
+import { isDeepStrictEqual, promisify } from 'util';
 import { gunzip, gzip } from 'zlib';
 import { DatabaseService } from '../database/database.service';
 import { HubRuntimeConfig } from '../hub.config';
@@ -53,7 +53,7 @@ type ReviewArtifact = {
 type BuiltArtifact = {
   artifactPath: string;
   baseVersion: string | null;
-  changedFiles: number;
+  meaningfulChangedFiles: number;
 };
 
 type ArtifactImage = {
@@ -97,6 +97,7 @@ export class PublishReviewService {
 
     try {
       const files: ArtifactFile[] = [];
+      let meaningfulChangedFiles = 0;
       const allPaths = [
         ...new Set([...baseline.keys(), ...candidate.keys()]),
       ].sort((a, b) => a.localeCompare(b));
@@ -106,6 +107,9 @@ export class PublishReviewService {
         const oldHash = oldBuffer ? sha256(oldBuffer) : null;
         const newHash = newBuffer ? sha256(newBuffer) : null;
         if (oldHash === newHash) continue;
+        if (isMeaningfulChange(filePath, oldBuffer, newBuffer)) {
+          meaningfulChangedFiles += 1;
+        }
         files.push(
           await this.persistChangedFile(
             artifactPath,
@@ -135,7 +139,7 @@ export class PublishReviewService {
       return {
         artifactPath,
         baseVersion,
-        changedFiles: summary.changed_files,
+        meaningfulChangedFiles,
       };
     } catch (error) {
       await fs.rm(artifactPath, { recursive: true, force: true });
@@ -403,6 +407,36 @@ export class PublishReviewService {
       throw new BadRequestException('Invalid review artifact path');
     }
     return resolved;
+  }
+}
+
+/**
+ * The managed root manifest remains visible in review, but a version-only
+ * edit is packaging bookkeeping rather than a publishable pack change.
+ * `path` is also ignored because it is an optional alias validated to equal
+ * the immutable pack id.
+ */
+function isMeaningfulChange(
+  filePath: string,
+  oldBuffer: Buffer | null,
+  newBuffer: Buffer | null,
+): boolean {
+  if (filePath.toLowerCase() !== 'pack.json' || !oldBuffer || !newBuffer) {
+    return true;
+  }
+  try {
+    const normalize = (buffer: Buffer) => {
+      const manifest = JSON.parse(buffer.toString('utf8')) as Record<
+        string,
+        unknown
+      >;
+      delete manifest.version;
+      delete manifest.path;
+      return manifest;
+    };
+    return !isDeepStrictEqual(normalize(oldBuffer), normalize(newBuffer));
+  } catch {
+    return !oldBuffer.equals(newBuffer);
   }
 }
 
