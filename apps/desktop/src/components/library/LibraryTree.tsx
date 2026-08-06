@@ -4,13 +4,14 @@ import type {
   InstalledPack,
   TreeNode,
 } from "@nest/shared";
-import { save } from "@tauri-apps/plugin-dialog";
+import { open as openDialog, save } from "@tauri-apps/plugin-dialog";
 import {
   ChevronDown,
   ChevronRight,
   Download,
   FilePlus2,
   FileText,
+  FileUp,
   Folder,
   FolderPlus,
   FolderOpen,
@@ -389,6 +390,56 @@ function TreeItem({
       toast.error("Could not create item", { description: e.message }),
   });
 
+  const importFiles = useMutation({
+    mutationFn: (paths: string[]) => api.vaultImportFiles(node.path, paths),
+    onSuccess: (result) => {
+      invalidateAfterEdit();
+      const count = result.imported.length;
+      toast.success(count === 1 ? "Imported 1 file" : `Imported ${count} files`, {
+        description: result.skipped.length
+          ? `Skipped: ${result.skipped.join("; ")}`
+          : undefined,
+      });
+    },
+    onError: (e: Error) =>
+      toast.error("Could not import files", { description: e.message }),
+  });
+
+  const chooseFilesToImport = async () => {
+    try {
+      const selected = await openDialog({
+        title: `Import files into ${node.name}`,
+        directory: false,
+        multiple: true,
+        filters: [
+          {
+            name: "Markdown and images",
+            extensions: [
+              "md",
+              "png",
+              "jpg",
+              "jpeg",
+              "gif",
+              "webp",
+              "svg",
+              "bmp",
+            ],
+          },
+        ],
+      });
+      const paths = Array.isArray(selected)
+        ? selected
+        : typeof selected === "string"
+          ? [selected]
+          : [];
+      if (paths.length > 0) importFiles.mutate(paths);
+    } catch (e) {
+      toast.error("Could not open file picker", {
+        description: e instanceof Error ? e.message : String(e),
+      });
+    }
+  };
+
   const rename = useMutation({
     mutationFn: (to: string) => api.vaultRenameEntry(node.path, to),
     onSuccess: () => {
@@ -637,6 +688,16 @@ function TreeItem({
               >
                 <FolderPlus className="size-3.5" />
                 New Folder
+              </PermissionMenuItem>
+              <PermissionMenuItem
+                disabled={!editableHere || importFiles.isPending}
+                reason={editReason}
+                onSelect={() =>
+                  afterMenuClose(() => void chooseFilesToImport())
+                }
+              >
+                <FileUp className="size-3.5" />
+                Import Files…
               </PermissionMenuItem>
               <ContextMenuSeparator />
             </>
