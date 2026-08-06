@@ -36,8 +36,6 @@ pub fn vault_root(app_data: &Path) -> PathBuf {
 
 pub fn list_tree(root: &Path) -> AppResult<Vec<TreeNode>> {
     ensure_dir(root)?;
-    // Clean leftovers from failed removes / accidental path creation.
-    prune_empty_dirs(root)?;
     build_tree(root, root)
 }
 
@@ -68,10 +66,6 @@ fn build_tree(root: &Path, dir: &Path) -> AppResult<Vec<TreeNode>> {
         let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
         if is_dir {
             let children = build_tree(root, &path)?;
-            // Hide empty folders (e.g. leftovers after a pack remove).
-            if children.is_empty() {
-                continue;
-            }
             nodes.push(TreeNode {
                 name,
                 path: rel,
@@ -202,56 +196,6 @@ pub fn resolve_vault_path(root: &Path, rel_path: &str) -> AppResult<PathBuf> {
     }
 }
 
-/// Remove empty directories under the vault root (never deletes the root itself).
-pub fn prune_empty_dirs(root: &Path) -> AppResult<()> {
-    if !root.is_dir() {
-        return Ok(());
-    }
-    prune_empty_dirs_inner(root, root)
-}
-
-fn prune_empty_dirs_inner(root: &Path, dir: &Path) -> AppResult<()> {
-    let entries: Vec<_> = match fs::read_dir(dir) {
-        Ok(rd) => rd.filter_map(|e| e.ok()).collect(),
-        Err(_) => return Ok(()),
-    };
-    for entry in &entries {
-        let path = entry.path();
-        // See `build_tree`: don't follow symlinks into a recursive walk.
-        let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
-        if is_dir {
-            let name = entry.file_name().to_string_lossy().to_string();
-            if name.starts_with('.') {
-                continue;
-            }
-            prune_empty_dirs_inner(root, &path)?;
-        }
-    }
-    // Re-check after children pruned; never remove vault root.
-    if dir != root {
-        let remaining = fs::read_dir(dir)?
-            .filter_map(|e| e.ok())
-            .filter(|e| {
-                let name = e.file_name().to_string_lossy().to_string();
-                !name.starts_with('.')
-            })
-            .count();
-        if remaining == 0 {
-            // Remove leftover .DS_Store / hidden junk, then the dir itself.
-            if let Ok(rd) = fs::read_dir(dir) {
-                for entry in rd.filter_map(|e| e.ok()) {
-                    let p = entry.path();
-                    if p.is_file() {
-                        let _ = fs::remove_file(&p);
-                    }
-                }
-            }
-            let _ = fs::remove_dir(dir);
-        }
-    }
-    Ok(())
-}
-
 /// Copy pack content from `src` into `dst`, keeping only markdown, supported
 /// images, and `pack.json`. Hidden and common build/dependency directories are
 /// not descended into.
@@ -337,8 +281,8 @@ pub fn create_file(root: &Path, rel_path: &str, initial_content: &str) -> AppRes
     Ok(())
 }
 
-/// Create a new (possibly nested) folder. Note: `list_tree` hides empty
-/// folders, so this won't be visible in the tree until it contains a file.
+/// Create a new (possibly nested) folder. Empty folders are returned by
+/// `list_tree`, so they become visible as soon as the tree refreshes.
 pub fn create_folder(root: &Path, rel_path: &str) -> AppResult<()> {
     let path = resolve_vault_path(root, rel_path)?;
     if path.is_file() {
@@ -599,8 +543,8 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         ensure_dir(&dir).unwrap();
         fs::write(dir.join("note.md"), b"hello").unwrap();
-        // A symlink back to the vault root: `build_tree`/`prune_empty_dirs`
-        // must never follow it into recursion, or this call hangs forever.
+        // A symlink back to the vault root: `build_tree` must never follow it
+        // into recursion, or this call hangs forever.
         std::os::unix::fs::symlink(&dir, dir.join("loop")).unwrap();
 
         let tree = list_tree(&dir).unwrap();
@@ -609,14 +553,22 @@ mod tests {
     }
 
     #[test]
-    fn prune_removes_empty_pack_folders() {
-        let dir = env::temp_dir().join("nest-vault-prune");
+    fn list_tree_preserves_and_includes_empty_folders() {
+        let dir = env::temp_dir().join("nest-vault-list-empty-folders");
         let _ = fs::remove_dir_all(&dir);
-        let empty = dir.join("empty-pack").join("nested");
+        let empty = dir.join("demo-pack").join("notes").join("drafts");
         ensure_dir(&empty).unwrap();
-        prune_empty_dirs(&dir).unwrap();
-        assert!(!dir.join("empty-pack").exists());
-        assert!(dir.is_dir());
+
+        let tree = list_tree(&dir).unwrap();
+
+        assert!(empty.is_dir());
+        assert_eq!(tree.len(), 1);
+        assert_eq!(tree[0].name, "demo-pack");
+        let notes = &tree[0].children.as_ref().unwrap()[0];
+        assert_eq!(notes.name, "notes");
+        let drafts = &notes.children.as_ref().unwrap()[0];
+        assert_eq!(drafts.name, "drafts");
+        assert!(drafts.children.as_ref().unwrap().is_empty());
     }
 
     #[test]

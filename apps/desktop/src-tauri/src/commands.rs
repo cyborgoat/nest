@@ -945,7 +945,6 @@ pub async fn hub_remove_pack(state: State<'_, SharedState>, pack_id: String) -> 
 
     let vault = state.vault_path();
     vault::remove_pack(&vault, &local_path)?;
-    vault::prune_empty_dirs(&vault)?;
     {
         let conn = state.db.lock();
         db::purge_path_data(&conn, &local_path)?;

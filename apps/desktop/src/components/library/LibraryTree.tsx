@@ -369,11 +369,7 @@ function TreeItem({
           preview: false,
         });
       } else {
-        // Empty folders are hidden from the tree until they contain a file,
-        // so the new folder won't be visible yet — tell the user why.
-        toast.success("Folder created", {
-          description: "It appears in the tree once it has a file in it.",
-        });
+        toast.success("Folder created");
       }
     },
     onError: (e: Error) =>

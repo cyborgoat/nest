@@ -17,6 +17,7 @@ it; open files appear in tabs.
 Right-click a pack or folder to import Markdown files and images. You can also
 drag files and folders between editable packs. The destination folder is
 highlighted while you drag; dropping moves the item rather than copying it.
+New folders appear in Explorer immediately and remain visible while empty.
 
 ## Update, export, remove
 
