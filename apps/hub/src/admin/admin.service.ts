@@ -32,6 +32,8 @@ const now = () => new Date().toISOString();
 export type PackPatch = {
   visibility?: PackVisibility;
   archived?: boolean;
+  /** Null clears attribution; undefined leaves it unchanged. */
+  author_uuid?: string | null;
 };
 type AdminUserView = AdminUser;
 type PackRow = {
@@ -42,6 +44,9 @@ type PackRow = {
   archived: number;
   created_at: string;
   updated_at: string;
+  author_uuid: string | null;
+  author_id: string | null;
+  author_name: string | null;
 };
 type ReleaseRow = Omit<AdminRelease, 'yanked'> & { yanked: number };
 type GrantRow = AdminGrant;
@@ -197,8 +202,14 @@ export class AdminService {
   listPacks(): AdminPackView[] {
     const packs = this.database.db
       .prepare(
-        `SELECT id, name, description, visibility, archived, created_at, updated_at
-      FROM packs ORDER BY id`,
+        `SELECT p.id, p.name, p.description, p.visibility, p.archived,
+                p.created_at, p.updated_at,
+                author.uuid AS author_uuid,
+                author.login_id AS author_id,
+                author.name AS author_name
+         FROM packs p
+         LEFT JOIN users author ON author.uuid = p.owner_uuid
+         ORDER BY p.id`,
       )
       .all() as PackRow[];
     const releases = this.database.db
@@ -219,12 +230,21 @@ export class AdminService {
       )
       .all() as MaintainerRow[];
     return packs.map((pack) => {
+      const { author_uuid, author_id, author_name, ...packFields } = pack;
       const packReleases = releases
         .filter((r) => r.pack_id === pack.id)
         .map((r) => ({ ...r, yanked: r.yanked === 1 }));
       return {
-        ...pack,
+        ...packFields,
         archived: pack.archived === 1,
+        author:
+          author_uuid && author_id && author_name
+            ? {
+                uuid: author_uuid,
+                id: author_id,
+                name: author_name,
+              }
+            : null,
         latest_version: latestInstallableVersion(packReleases),
         releases: packReleases,
         grants: grants.filter((g) => g.pack_id === pack.id),
@@ -245,18 +265,32 @@ export class AdminService {
       !['public', 'restricted'].includes(patch.visibility)
     )
       throw new BadRequestException('Invalid visibility');
-    this.database.db
-      .prepare(
-        `UPDATE packs SET
-      visibility = COALESCE(?, visibility), archived = COALESCE(?, archived),
-      updated_at = ? WHERE id = ?`,
-      )
-      .run(
-        patch.visibility ?? null,
-        patch.archived === undefined ? null : Number(patch.archived),
-        now(),
-        id,
-      );
+    if (patch.author_uuid != null) {
+      const author = this.database.db
+        .prepare('SELECT 1 FROM users WHERE uuid = ?')
+        .get(patch.author_uuid);
+      if (!author) throw new BadRequestException('Author user not found');
+    }
+    const timestamp = now();
+    this.database.db.transaction(() => {
+      this.database.db
+        .prepare(
+          `UPDATE packs SET
+        visibility = COALESCE(?, visibility), archived = COALESCE(?, archived),
+        updated_at = ? WHERE id = ?`,
+        )
+        .run(
+          patch.visibility ?? null,
+          patch.archived === undefined ? null : Number(patch.archived),
+          timestamp,
+          id,
+        );
+      if (patch.author_uuid !== undefined) {
+        this.database.db
+          .prepare('UPDATE packs SET owner_uuid = ? WHERE id = ?')
+          .run(patch.author_uuid, id);
+      }
+    })();
     this.audit.record(actor, 'pack.update', 'pack', id, patch);
     return this.listPacks().find((item) => item.id === id)!;
   }

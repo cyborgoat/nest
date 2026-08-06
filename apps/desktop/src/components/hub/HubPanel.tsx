@@ -133,6 +133,8 @@ export function HubPanel() {
         p.id.toLowerCase().includes(q) ||
         p.name.toLowerCase().includes(q) ||
         p.description.toLowerCase().includes(q) ||
+        p.author?.name.toLowerCase().includes(q) ||
+        p.author?.id.toLowerCase().includes(q) ||
         p.latest_version.toLowerCase().includes(q),
     );
   }, [packsQuery.data, catalogSearch]);

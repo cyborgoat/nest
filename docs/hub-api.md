@@ -18,6 +18,11 @@ Authenticated routes accept `Authorization: Bearer <access_token>`. The admin br
 
 Restricted projects are available to their owner, explicitly granted users, admins, and the superuser. Public projects require no account.
 
+Project responses include `author` and `maintainers` attribution. The author is
+the submitter whose first approved publish request created the pack;
+maintainers are the accounts currently allowed to publish later releases and
+live patches. These roles can diverge after an administrator updates them.
+
 ## Account and publishing
 
 | Method | Path | Access | Purpose |
@@ -87,10 +92,11 @@ Every `/api/admin/*` route requires role `admin` or `superuser`.
 | `GET` | `/api/admin/publish-requests/:id/review/image?path=…&side=old\|new` | Safely stream one side of a changed image |
 | `POST` | `/api/admin/publish-requests/:id/approve` | Publish the staged artifact with optional `{ "note": "…" }` |
 | `POST` | `/api/admin/publish-requests/:id/reject` | Reject with required `note` |
-| `GET` | `/api/admin/packs` | List projects, releases, and access grants |
-| `PATCH` | `/api/admin/packs/:id` | Edit name, description, owner, visibility, or archive state |
+| `GET` | `/api/admin/packs` | List projects, releases, author, maintainers, and access grants |
+| `PATCH` | `/api/admin/packs/:id` | Edit author attribution with `author_uuid` (or `null`), visibility, or archive state |
 | `DELETE` | `/api/admin/packs/:id` | Delete project metadata and release files |
 | `POST` | `/api/admin/packs/:id/access/:userUuid` | Set grant using `{ "allowed": true\|false }` |
+| `POST` | `/api/admin/packs/:id/maintainers/:userUuid` | Add or remove a maintainer using `{ "allowed": true\|false }` |
 | `POST` | `/api/admin/packs/:id/releases/:version/yank` | Set `{ "yanked": true\|false }` |
 | `POST` | `/api/admin/packs/upload` | Validate and immediately publish multipart field `file` |
 

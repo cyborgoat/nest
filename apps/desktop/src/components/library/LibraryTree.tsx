@@ -871,6 +871,8 @@ function TreeItem({
           name={installedPack?.name ?? node.name}
           description={installedPack?.description ?? ""}
           version={installedPack?.version}
+          packId={packId}
+          fromHub={installedPack?.origin === "registry"}
         />
       )}
     </>

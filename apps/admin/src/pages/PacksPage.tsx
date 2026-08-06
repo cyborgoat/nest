@@ -106,7 +106,7 @@ export function PacksPage() {
     .filter((pack) =>
       `${pack.id} ${pack.name} ${pack.description} ${pack.maintainers
         .map((maintainer) => maintainer.name)
-        .join(" ")}`
+        .join(" ")} ${pack.author?.name ?? ""} ${pack.author?.id ?? ""}`
         .toLowerCase()
         .includes(normalizedSearch),
     )
@@ -123,7 +123,7 @@ export function PacksPage() {
       <PageHeader
         eyebrow="Catalog"
         title="Knowledge packs"
-        description="Find a pack, then open its details to manage versions, access, maintainers, and lifecycle."
+        description="Find a pack, then open its details to manage versions, authorship, access, maintainers, and lifecycle."
         actions={
           <div className="flex items-center gap-2">
             <RefreshButton
@@ -151,7 +151,7 @@ export function PacksPage() {
             <InputGroupInput
               type="search"
               aria-label="Search packs"
-              placeholder="Search by name, ID, description, or maintainer…"
+              placeholder="Search by name, ID, author, or maintainer…"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
             />
@@ -247,6 +247,8 @@ export function PacksPage() {
                       </ItemDescription>
                       <p className="mt-1 text-xs text-muted-foreground">
                         <span className="font-mono">{pack.id}</span>
+                        <span aria-hidden="true"> · </span>
+                        Author: {pack.author?.name ?? "Unassigned"}
                         <span aria-hidden="true"> · </span>
                         Maintainer: {maintainer}
                       </p>

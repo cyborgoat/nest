@@ -23,6 +23,8 @@ const latestRelease: PackProject = {
     },
   ],
   visibility: "public",
+  author: { id: "owner", name: "Owner" },
+  maintainers: [{ id: "owner", name: "Owner" }],
   owner_id: "owner",
 };
 

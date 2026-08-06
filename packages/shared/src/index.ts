@@ -17,6 +17,9 @@ export type PackReleaseSummary = Pick<
   "version" | "yanked" | "patch_revision" | "patched_at"
 >;
 
+/** Public attribution for the account credited with creating a Hub pack. */
+export type PackAuthor = Pick<HubUser, "id" | "name">;
+
 /** Hub catalog project (may have multiple SemVer releases). */
 export type PackProject = {
   id: string;
@@ -26,6 +29,10 @@ export type PackProject = {
   versions: string[];
   releases: PackReleaseSummary[];
   visibility: PackVisibility;
+  /** The first user whose publish request created this pack. */
+  author: PackAuthor | null;
+  /** Accounts currently allowed to publish updates to this pack. */
+  maintainers: PackAuthor[];
   /** The requesting user's own login id, echoed back only if they're one of
    *  this pack's maintainers (a pack can have several) — null otherwise.
    *  Personalized per-request; not "the owner." */
@@ -203,6 +210,7 @@ export type AdminPack = {
   updated_at: string;
   releases: AdminRelease[];
   grants: AdminGrant[];
+  author: AdminMaintainer | null;
   maintainers: AdminMaintainer[];
 };
 

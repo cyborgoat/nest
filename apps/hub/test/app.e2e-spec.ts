@@ -99,6 +99,8 @@ describe('Hub (e2e)', () => {
     expect(gettingStarted).toBeDefined();
     expect(gettingStarted!.latest_version).toBe('1.0.0');
     expect(gettingStarted!.versions).toEqual(['1.0.0']);
+    expect(gettingStarted!.author).toBeNull();
+    expect(gettingStarted!.maintainers).toEqual([]);
   });
 
   it('/packs/:id/:version (GET)', async () => {
@@ -426,7 +428,32 @@ describe('Hub (e2e)', () => {
       .set('Authorization', `Bearer ${authorLogin.body.access_token}`)
       .expect(200)
       .expect(({ body }) => expect(body.deleted).toBe(1));
-    await request(app.getHttpServer()).get('/packs/authored-pack').expect(200);
+    await request(app.getHttpServer())
+      .get('/packs/authored-pack')
+      .expect(200)
+      .expect(({ body }) => {
+        expect(body.author).toEqual({
+          id: 'pack-author',
+          name: 'Pack Author',
+        });
+        expect(body.maintainers).toEqual([
+          { id: 'pack-author', name: 'Pack Author' },
+        ]);
+      });
+    await request(app.getHttpServer())
+      .patch('/api/admin/packs/authored-pack')
+      .set('Authorization', `Bearer ${adminLogin.body.access_token}`)
+      .send({ author_uuid: adminLogin.body.user.uuid })
+      .expect(200)
+      .expect(({ body }) => {
+        expect(body.author).toMatchObject({
+          id: 'role-admin',
+          name: 'Role Admin',
+        });
+        expect(body.maintainers).toEqual([
+          expect.objectContaining({ id: 'pack-author', name: 'Pack Author' }),
+        ]);
+      });
     await request(app.getHttpServer())
       .patch('/api/admin/packs/authored-pack')
       .set('Authorization', `Bearer ${adminLogin.body.access_token}`)

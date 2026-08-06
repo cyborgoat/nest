@@ -499,7 +499,10 @@ export class PacksService implements OnModuleInit {
 
   private projectFromReleases(
     releases: PackRelease[],
-  ): Omit<PackProject, 'visibility' | 'owner_id'> | null {
+  ): Omit<
+    PackProject,
+    'visibility' | 'owner_id' | 'author' | 'maintainers'
+  > | null {
     if (releases.length === 0) return null;
     const installable = releases.filter((r) => !r.yanked);
     const versions = sortSemVerDesc(releases.map((r) => r.version));
@@ -542,23 +545,44 @@ export class PacksService implements OnModuleInit {
     for (const id of [...byId.keys()].sort()) {
       const project = this.projectFromReleases(byId.get(id)!);
       if (project) {
-        // owner_id is resolved per-requester: the caller's own login id when
-        // they're one of the pack's maintainers, else null. There is no
-        // single "the owner" anymore now that packs support multiple
-        // maintainers — this field only ever answers "can *I* edit this."
+        // author is stable public attribution. owner_id remains a personalized
+        // compatibility field that answers only whether this requester is a
+        // maintainer and can edit the pack.
         const row = this.database.db
           .prepare(
-            `SELECT visibility, EXISTS (
-              SELECT 1 FROM pack_maintainers m WHERE m.pack_id = packs.id AND m.user_uuid = ?
-            ) AS is_maintainer FROM packs WHERE id = ?`,
+            `SELECT p.visibility,
+                    author.login_id AS author_id,
+                    author.name AS author_name,
+                    EXISTS (
+              SELECT 1 FROM pack_maintainers m WHERE m.pack_id = p.id AND m.user_uuid = ?
+            ) AS is_maintainer
+             FROM packs p
+             LEFT JOIN users author ON author.uuid = p.owner_uuid
+             WHERE p.id = ?`,
           )
           .get(user?.uuid ?? '', id) as {
           visibility: 'public' | 'restricted';
+          author_id: string | null;
+          author_name: string | null;
           is_maintainer: number;
         };
+        const maintainers = this.database.db
+          .prepare(
+            `SELECT u.login_id AS id, u.name
+             FROM pack_maintainers m
+             JOIN users u ON u.uuid = m.user_uuid
+             WHERE m.pack_id = ?
+             ORDER BY u.name COLLATE NOCASE, u.login_id COLLATE NOCASE`,
+          )
+          .all(id) as Array<{ id: string; name: string }>;
         projects.push({
           ...project,
           visibility: row.visibility,
+          author:
+            row.author_id && row.author_name
+              ? { id: row.author_id, name: row.author_name }
+              : null,
+          maintainers,
           owner_id: row.is_maintainer && user ? user.id : null,
         });
       }

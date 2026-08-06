@@ -350,7 +350,17 @@ pub struct PackProject {
     #[serde(default)]
     pub visibility: Option<String>,
     #[serde(default)]
+    pub author: Option<PackAuthor>,
+    #[serde(default)]
+    pub maintainers: Vec<PackAuthor>,
+    #[serde(default)]
     pub owner_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PackAuthor {
+    pub id: String,
+    pub name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

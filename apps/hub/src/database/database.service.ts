@@ -170,8 +170,8 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
       CREATE INDEX IF NOT EXISTS messages_user_unread_idx
         ON messages(user_uuid, read_at) WHERE read_at IS NULL;
     `);
-    // One-time backfill: packs.owner_uuid predates multi-maintainer support.
-    // Idempotent (INSERT OR IGNORE), safe to run on every boot.
+    // The credited author starts as a maintainer. Backfill older databases
+    // where owner_uuid existed before the separate maintainer list.
     this.database.exec(`
       INSERT OR IGNORE INTO pack_maintainers(pack_id, user_uuid, created_at)
       SELECT id, owner_uuid, created_at FROM packs WHERE owner_uuid IS NOT NULL;

@@ -22,6 +22,11 @@ pending review for the pack.
 4. Enter a concise publish commit message describing what changed.
 5. Track the result in **Under Review** or **Messages**.
 
+When the first publication of a new pack is approved, its submitter becomes the
+credited author and is added as a maintainer. Hub pack details show the author
+and current maintainers. Administrators can update attribution and maintainer
+access independently from the admin dashboard.
+
 ## After submission
 
 - **Pending:** the pack is locked. Its submitted changes stay visible and

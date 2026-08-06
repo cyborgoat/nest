@@ -48,7 +48,11 @@ export function PackDetailPage() {
       void qc.invalidateQueries({ queryKey: adminQueryKeys.packs }),
   });
   const update = useMutation({
-    mutationFn: (body: { visibility?: PackVisibility; archived?: boolean }) =>
+    mutationFn: (body: {
+      visibility?: PackVisibility;
+      archived?: boolean;
+      author_uuid?: string | null;
+    }) =>
       api(`/api/admin/packs/${packId}`, {
         method: "PATCH",
         body: JSON.stringify(body),
@@ -253,9 +257,30 @@ export function PackDetailPage() {
         <div className="space-y-5">
           <Card>
             <h2 className="text-xl font-semibold tracking-tight">
-              Access &amp; permissions
+              Authorship &amp; permissions
             </h2>
             <div className="mt-4 space-y-4">
+              <Field label="Author">
+                <Select
+                  value={pack.author?.uuid ?? "__unassigned__"}
+                  onValueChange={(value) =>
+                    update.mutate({
+                      author_uuid: value === "__unassigned__" ? null : value,
+                    })
+                  }
+                  options={[
+                    { value: "__unassigned__", label: "Unassigned" },
+                    ...(users.data ?? []).map((user) => ({
+                      value: user.uuid,
+                      label: `${user.name} (@${user.id})`,
+                    })),
+                  ]}
+                />
+                <p className="mt-1 text-xs text-muted-foreground">
+                  The first approved publisher is assigned automatically. This
+                  attribution is separate from edit access.
+                </p>
+              </Field>
               <Field label="Visibility">
                 <Select
                   value={pack.visibility}
@@ -293,6 +318,10 @@ export function PackDetailPage() {
                   placeholder="Search users to add as a maintainer…"
                   emptyHint="No user accounts exist yet."
                 />
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Maintainers can submit new releases and live patches. They do
+                  not replace the credited author.
+                </p>
               </Field>
             </div>
           </Card>

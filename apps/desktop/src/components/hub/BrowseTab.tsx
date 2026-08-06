@@ -289,6 +289,12 @@ function PackRow({
           <p className="mt-1 text-sm text-muted-foreground">
             {project.description}
           </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Author:{" "}
+            {project.author
+              ? `${project.author.name} (@${project.author.id})`
+              : "Unassigned"}
+          </p>
           {isInstalled && (
             <div className="mt-1 flex items-center gap-1.5">
               <Badge variant="muted">{t("hub.installedLabel", { version: installed.version })}</Badge>
