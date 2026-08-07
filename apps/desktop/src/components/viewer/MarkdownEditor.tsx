@@ -121,6 +121,7 @@ export function MarkdownEditor({ path }: { path: string }) {
   const setEditing = useEditorStore((s) => s.setEditing);
   const setDirty = useEditorStore((s) => s.setDirty);
   const clearPathsUnder = useUiStore((s) => s.clearPathsUnder);
+  const contentZoom = useUiStore((s) => s.contentZoom);
   const { startTransfer, conflictDialog } = useVaultTransfer();
   const dirty = useEditorStore((s) => s.dirtyPaths.has(path));
 
@@ -251,7 +252,7 @@ export function MarkdownEditor({ path }: { path: string }) {
     const source = sourceRef.current;
     if (!source) return;
     fitSourceHeight(source);
-  }, [markdown]);
+  }, [markdown, contentZoom]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -466,7 +467,7 @@ export function MarkdownEditor({ path }: { path: string }) {
             <div className="relative flex flex-1">
               <pre
                 aria-hidden
-                className="pointer-events-none absolute inset-0 m-0 whitespace-pre-wrap break-words font-sans text-sm leading-relaxed text-foreground"
+                className="pointer-events-none absolute inset-0 m-0 whitespace-pre-wrap break-words font-sans text-sm leading-relaxed text-foreground markdown-editor-text"
               >
                 {renderSourceHighlight(markdown)}
               </pre>
@@ -478,7 +479,7 @@ export function MarkdownEditor({ path }: { path: string }) {
                 onChange={(e) => updateMarkdown(e.target.value)}
                 spellCheck={false}
                 rows={1}
-                className="markdown-editor-surface relative z-10 m-0 block resize-none overflow-hidden border-none bg-transparent p-0 font-sans text-sm leading-relaxed text-transparent caret-foreground outline-none selection:bg-primary/20 selection:text-foreground"
+                className="markdown-editor-surface relative z-10 m-0 block resize-none overflow-hidden border-none bg-transparent p-0 font-sans text-sm leading-relaxed text-transparent caret-foreground outline-none selection:bg-primary/20 selection:text-foreground markdown-editor-text"
               />
             </div>
           )}

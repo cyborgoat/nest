@@ -1,5 +1,4 @@
 import { Bell, Cloud, FileText, GitCompare, Image as ImageIcon, Settings2 } from "lucide-react";
-import { useState } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -53,20 +52,16 @@ export function MainTabBar() {
   const activeMainTabId = useUiStore((s) => s.activeMainTabId);
   const previewMainTabId = useUiStore((s) => s.previewMainTabId);
   const setActiveMainTab = useUiStore((s) => s.setActiveMainTab);
-  const closeMainTab = useUiStore((s) => s.closeMainTab);
   const openFileTab = useUiStore((s) => s.openFileTab);
   const dirtyPaths = useEditorStore((s) => s.dirtyPaths);
-  const setDirty = useEditorStore((s) => s.setDirty);
-  const setEditing = useEditorStore((s) => s.setEditing);
-  const [pendingCloseId, setPendingCloseId] = useState<string | null>(null);
-
-  const requestClose = (id: string) => {
-    if (dirtyPaths.has(id)) {
-      setPendingCloseId(id);
-    } else {
-      closeMainTab(id);
-    }
-  };
+  const pendingCloseId = useUiStore((s) => s.pendingCloseTabId);
+  const requestCloseMainTab = useUiStore((s) => s.requestCloseMainTab);
+  const confirmDiscardAndCloseMainTab = useUiStore(
+    (s) => s.confirmDiscardAndCloseMainTab,
+  );
+  const cancelPendingCloseMainTab = useUiStore(
+    (s) => s.cancelPendingCloseMainTab,
+  );
 
   return (
     <>
@@ -81,7 +76,7 @@ export function MainTabBar() {
         }))}
         activeId={activeMainTabId}
         onSelect={setActiveMainTab}
-        onClose={requestClose}
+        onClose={requestCloseMainTab}
         onItemDoubleClick={(id) => {
           if (id === previewMainTabId) openFileTab(id, { preview: false });
         }}
@@ -89,7 +84,7 @@ export function MainTabBar() {
       />
       <AlertDialog
         open={pendingCloseId != null}
-        onOpenChange={(open) => !open && setPendingCloseId(null)}
+        onOpenChange={(open) => !open && cancelPendingCloseMainTab()}
       >
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -103,14 +98,7 @@ export function MainTabBar() {
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               className={cn(buttonVariants({ variant: "destructive" }))}
-              onClick={() => {
-                if (pendingCloseId) {
-                  setDirty(pendingCloseId, false);
-                  setEditing(pendingCloseId, false);
-                  closeMainTab(pendingCloseId);
-                }
-                setPendingCloseId(null);
-              }}
+              onClick={confirmDiscardAndCloseMainTab}
             >
               Discard and close
             </AlertDialogAction>

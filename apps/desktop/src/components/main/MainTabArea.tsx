@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { BookOpen, Cloud, PackageOpen } from "lucide-react";
+import { type CSSProperties, useEffect, useRef } from "react";
 import { HubPanel } from "@/components/hub/HubPanel";
 import { MainTabBar } from "@/components/main/MainTabBar";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
@@ -22,10 +23,40 @@ import {
   useUiStore,
 } from "@/stores/ui";
 
+const WHEEL_ZOOM_THRESHOLD = 50;
+
 export function MainTabArea() {
   const activeMainTabId = useUiStore((s) => s.activeMainTabId);
   const openHubTab = useUiStore((s) => s.openHubTab);
   const editingPaths = useEditorStore((s) => s.editingPaths);
+  const contentZoom = useUiStore((s) => s.contentZoom);
+  const contentRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = contentRef.current;
+    if (!el) return;
+    let accumulated = 0;
+    const handleWheel = (e: WheelEvent) => {
+      // Trackpad pinch-to-zoom is delivered as a wheel event with
+      // ctrlKey: true regardless of whether Ctrl is physically held.
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      accumulated += e.deltaY;
+      while (Math.abs(accumulated) >= WHEEL_ZOOM_THRESHOLD) {
+        if (accumulated > 0) {
+          useUiStore.getState().zoomOut();
+          accumulated -= WHEEL_ZOOM_THRESHOLD;
+        } else {
+          useUiStore.getState().zoomIn();
+          accumulated += WHEEL_ZOOM_THRESHOLD;
+        }
+      }
+    };
+    // React's synthetic onWheel is passive at the root and can't
+    // preventDefault, so this needs a native listener.
+    el.addEventListener("wheel", handleWheel, { passive: false });
+    return () => el.removeEventListener("wheel", handleWheel);
+  }, []);
 
   const treeQuery = useQuery({
     queryKey: queryKeys.tree,
@@ -86,7 +117,13 @@ export function MainTabArea() {
   return (
     <div className="flex h-full flex-col">
       <MainTabBar />
-      <div className="min-h-0 flex-1">{content}</div>
+      <div
+        ref={contentRef}
+        className="min-h-0 flex-1"
+        style={{ "--content-zoom": contentZoom } as CSSProperties}
+      >
+        {content}
+      </div>
     </div>
   );
 }

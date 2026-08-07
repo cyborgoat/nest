@@ -24,7 +24,7 @@ function DiffColumn({ rows, side }: { rows: DiffRow[]; side: "old" | "new" }) {
   return (
     <div className="min-w-0 flex-1 border-border first:border-r">
       <ScrollArea className="h-full" orientation="both">
-        <div className="pb-8 font-mono text-xs">
+        <div className="pb-8 font-mono text-xs diff-viewer-text">
           {rows.map((row, i) => {
             const value = row[side];
             if (value !== null) lineNo++;
