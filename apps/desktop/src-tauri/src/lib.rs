@@ -64,6 +64,7 @@ pub fn run() {
             commands::hub_pack_change_status,
             commands::hub_pack_file_diff,
             commands::hub_pack_discard_file,
+            commands::hub_pack_discard_all,
             commands::settings_get,
             commands::settings_preview_knowledge_dir,
             commands::settings_change_knowledge_dir,

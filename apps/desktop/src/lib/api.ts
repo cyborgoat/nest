@@ -88,6 +88,8 @@ export const api = {
     invoke<DiffPair>("hub_pack_file_diff", { packId, path }),
   hubPackDiscardFile: (packId: string, path: string) =>
     invoke<void>("hub_pack_discard_file", { packId, path }),
+  hubPackDiscardAll: (packId: string) =>
+    invoke<void>("hub_pack_discard_all", { packId }),
 
   settingsGet: () => invoke<AppSettings>("settings_get"),
   settingsPreviewKnowledgeDir: (knowledgeDir: string) =>

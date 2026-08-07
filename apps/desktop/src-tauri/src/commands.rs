@@ -356,6 +356,25 @@ pub fn hub_pack_discard_file(
     Ok(())
 }
 
+/// Revert every changed file in a pack back to its snapshot baseline (or
+/// delete it, for New files) in one go — the bulk counterpart of
+/// `hub_pack_discard_file` for the pack-root "Discard all" action.
+#[tauri::command]
+pub fn hub_pack_discard_all(state: State<'_, SharedState>, pack_id: String) -> AppResult<()> {
+    {
+        let conn = state.db.lock();
+        let installed = require_installed_pack(&conn, &pack_id)?;
+        ensure_pack_not_review_locked(&installed)?;
+    }
+    let (pack_dir, snapshot_dir, _local_path) = pack_dirs(&state, &pack_id)?;
+    let statuses = crate::snapshot::compute_status(&pack_dir, &snapshot_dir)?;
+    for status in &statuses {
+        crate::snapshot::discard_file(&pack_dir, &snapshot_dir, &status.path)?;
+    }
+    indexing::schedule(state.inner())?;
+    Ok(())
+}
+
 #[tauri::command]
 pub fn settings_get(state: State<'_, SharedState>) -> AppResult<AppSettings> {
     let mut settings = {

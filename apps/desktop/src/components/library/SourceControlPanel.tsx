@@ -23,8 +23,18 @@ import { toast } from "sonner";
 import { PackPublishDialogController } from "@/components/hub/PackPublishDialogController";
 import { PackMergeDialog } from "@/components/hub/PackMergeDialog";
 import { useMergeApprovedPack } from "@/hooks/use-merge-approved-pack";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -86,6 +96,7 @@ function PackChanges({
   const mergeApproved = useMergeApprovedPack();
   const [mergePreview, setMergePreview] = useState<PackMergePreview | null>(null);
   const [previewingMerge, setPreviewingMerge] = useState(false);
+  const [confirmDiscardAll, setConfirmDiscardAll] = useState(false);
 
   const previewApprovedMerge = async () => {
     if (!pack.pending_request_id) return;
@@ -152,6 +163,45 @@ function PackChanges({
       }),
   });
 
+  const discardAll = useMutation({
+    mutationFn: () => api.hubPackDiscardAll(pack.pack_id),
+    onSuccess: () => {
+      for (const change of statuses) {
+        setDirty(change.path, false);
+        if (change.status === "new") {
+          clearPathsUnder(change.path);
+          setEditing(change.path, false);
+        } else {
+          closeMainTab(diffTabId(pack.pack_id, change.path));
+        }
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.file(change.path),
+        });
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.fileDiff(pack.pack_id, change.path),
+        });
+        if (change.kind === "image") {
+          void queryClient.invalidateQueries({
+            queryKey: queryKeys.vaultImage(change.path),
+          });
+        }
+      }
+      for (const key of fileMutationInvalidations(pack.pack_id)) {
+        void queryClient.invalidateQueries({ queryKey: key });
+      }
+      setConfirmDiscardAll(false);
+      toast.success(
+        statuses.length === 1
+          ? "Discarded 1 change"
+          : `Discarded ${statuses.length} changes`,
+      );
+    },
+    onError: (error: Error) =>
+      toast.error("Could not discard changes", {
+        description: error.message,
+      }),
+  });
+
   return (
     <section className="space-y-1">
       <PackMergeDialog
@@ -209,6 +259,31 @@ function PackChanges({
                   </TooltipContent>
                 </Tooltip>
               )}
+              {statuses.length > 0 && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      size="icon-xs"
+                      variant="ghost"
+                      aria-label={`Discard all changes to ${pack.name}`}
+                      disabled={reviewLocked || discardAll.isPending}
+                      className="ml-auto shrink-0"
+                      onClick={() => setConfirmDiscardAll(true)}
+                    >
+                      <Undo2
+                        className={cn(
+                          "size-3.5",
+                          discardAll.isPending && "animate-spin",
+                        )}
+                      />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right">
+                    {reviewLocked ? "Locked for review" : "Discard all changes"}
+                  </TooltipContent>
+                </Tooltip>
+              )}
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
@@ -219,7 +294,10 @@ function PackChanges({
                       authenticated ? "Publish pack" : "Sign in to publish"
                     }
                     disabled={Boolean(pack.pending_version)}
-                    className="ml-auto -mr-1 shrink-0"
+                    className={cn(
+                      "-mr-1 shrink-0",
+                      statuses.length === 0 && "ml-auto",
+                    )}
                     onClick={openPublish}
                   >
                     <CloudUpload className="size-3.5" />
@@ -238,8 +316,49 @@ function PackChanges({
             </SectionLabel>
           </div>
         </ContextMenuTrigger>
-        <ContextMenuContent>{renderPublishMenuItem()}</ContextMenuContent>
+        <ContextMenuContent>
+          {renderPublishMenuItem()}
+          {statuses.length > 0 && (
+            <>
+              <ContextMenuSeparator />
+              <ContextMenuItem
+                disabled={reviewLocked || discardAll.isPending}
+                className="text-destructive focus:text-destructive"
+                onSelect={() => setConfirmDiscardAll(true)}
+              >
+                <Undo2 className="size-3.5" />
+                Discard All Changes
+              </ContextMenuItem>
+            </>
+          )}
+        </ContextMenuContent>
       </ContextMenu>
+      <AlertDialog
+        open={confirmDiscardAll}
+        onOpenChange={(open) => !open && setConfirmDiscardAll(false)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Discard all changes to {pack.name}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This discards {statuses.length}{" "}
+              {statuses.length === 1 ? "change" : "changes"} across this pack.
+              Edited files revert to their last synced version and new files
+              are deleted. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className={cn(buttonVariants({ variant: "destructive" }))}
+              disabled={discardAll.isPending}
+              onClick={() => discardAll.mutate()}
+            >
+              Discard all
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       {reviewLocked && (
         <div className="mx-3 mb-2 mt-1 border-t border-border/70 pt-2">
           {pack.pending_version && (
