@@ -59,6 +59,8 @@ pub fn run() {
             commands::vault_reveal_in_folder,
             commands::vault_open_folder,
             commands::vault_import_files,
+            commands::vault_preview_transfer,
+            commands::vault_apply_transfer,
             commands::hub_pack_change_status,
             commands::hub_pack_file_diff,
             commands::hub_pack_discard_file,

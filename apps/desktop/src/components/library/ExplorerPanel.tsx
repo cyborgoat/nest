@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { LibraryTree } from "@/components/library/LibraryTree";
 import { NewPackDialog } from "@/components/library/NewPackDialog";
+import { useVaultTransfer } from "@/components/library/VaultTransferController";
 import {
   LocalPackImportController,
   type LocalPackImportMode,
@@ -50,7 +51,10 @@ export function ExplorerPanel({
   const dropTargetRef = useRef<string | null>(null);
   const queryClient = useQueryClient();
   const openFileTab = useUiStore((s) => s.openFileTab);
+  const clearPathsUnder = useUiStore((s) => s.clearPathsUnder);
   const setEditing = useEditorStore((s) => s.setEditing);
+  const setDirty = useEditorStore((s) => s.setDirty);
+  const { startTransfer, conflictDialog } = useVaultTransfer();
 
   const hubAuthQuery = useQuery({
     queryKey: queryKeys.hubAuth,
@@ -98,26 +102,21 @@ export function ExplorerPanel({
       });
       return;
     }
-    try {
-      const result = await api.vaultImportFiles(folder, paths);
-      const packId = pack.pack_id;
-      for (const key of fileMutationInvalidations(packId)) {
-        void queryClient.invalidateQueries({ queryKey: key });
-      }
-      const n = result.imported.length;
-      if (n > 0) {
-        toast.success(
-          n === 1 ? "Imported 1 file" : `Imported ${n} files`,
-          result.skipped.length
-            ? { description: `Skipped: ${result.skipped.join("; ")}` }
-            : undefined,
-        );
-      }
-    } catch (e) {
-      toast.error("Could not import files", {
-        description: e instanceof Error ? e.message : String(e),
-      });
-    }
+    await startTransfer({
+      destDir: folder,
+      sourcePaths: paths,
+      operation: "copy",
+      onComplete: (result) => {
+        for (const path of result.replaced_paths) {
+          clearPathsUnder(path);
+          setEditing(path, false);
+          setDirty(path, false);
+        }
+        for (const key of fileMutationInvalidations(pack.pack_id)) {
+          void queryClient.invalidateQueries({ queryKey: key });
+        }
+      },
+    });
   };
 
   useEffect(() => {
@@ -218,6 +217,7 @@ export function ExplorerPanel({
         onModeChange={setImportMode}
         installed={installed}
       />
+      {conflictDialog}
     </div>
   );
 }

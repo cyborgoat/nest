@@ -1,4 +1,9 @@
-import type { HubUser, InstalledPack, TreeNode } from "@nest/shared";
+import type {
+  FileChangeStatus,
+  HubUser,
+  InstalledPack,
+  TreeNode,
+} from "@nest/shared";
 import { open as openDialog, save } from "@tauri-apps/plugin-dialog";
 import {
   ChevronDown,
@@ -32,10 +37,16 @@ import {
   useMemo,
   useRef,
   useState,
+  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQueries,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   Accordion,
@@ -53,6 +64,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
   ContextMenu,
@@ -73,8 +85,14 @@ import { PackPublishDialogController } from "@/components/hub/PackPublishDialogC
 import { PackDetailsDialog } from "@/components/hub/PackDetailsDialog";
 import { RenamePackDialog } from "@/components/hub/RenamePackDialog";
 import { NewVaultEntryDialog } from "@/components/library/NewVaultEntryDialog";
+import { useVaultTransfer } from "@/components/library/VaultTransferController";
 import { api } from "@/lib/api";
 import { appErrorMessage } from "@/lib/errors";
+import {
+  STATUS_BADGE_VARIANT,
+  STATUS_LETTER,
+  STATUS_TEXT_CLASSES,
+} from "@/lib/file-status-ui";
 import { useI18n } from "@/lib/i18n";
 import { afterMenuClose } from "@/lib/menu-actions";
 import {
@@ -95,6 +113,8 @@ import {
 } from "@/lib/vault-destinations";
 import {
   destinationFolderForNode,
+  normalizeVaultDragEntries,
+  rangeSelection,
   validateVaultDrop,
   type VaultDragEntry,
 } from "@/lib/tree-drag-drop";
@@ -111,7 +131,12 @@ import { useUiStore } from "@/stores/ui";
 const DropTargetContext = createContext<{
   externalDropTargetPath: string | null;
   internalDropTargetNodePath: string | null;
-  draggingPath: string | null;
+  draggingPaths: ReadonlySet<string>;
+  selectedPaths: ReadonlySet<string>;
+  selectEntry: (
+    entry: VaultDragEntry,
+    event: ReactMouseEvent<HTMLElement>,
+  ) => boolean;
   beginPointerDrag: (
     entry: VaultDragEntry,
     event: ReactPointerEvent<HTMLElement>,
@@ -121,11 +146,17 @@ const DropTargetContext = createContext<{
 }>({
   externalDropTargetPath: null,
   internalDropTargetNodePath: null,
-  draggingPath: null,
+  draggingPaths: new Set(),
+  selectedPaths: new Set(),
+  selectEntry: () => false,
   beginPointerDrag: () => {},
   suppressTreeClick: () => false,
   pathExists: () => false,
 });
+
+const ExplorerFileStatusContext = createContext<
+  ReadonlyMap<string, FileChangeStatus>
+>(new Map());
 
 type NewEntryKind = "file" | "folder";
 
@@ -382,12 +413,15 @@ function TreeItem({
   const isFolder = node.kind === "folder";
   const isRoot = depth === 0 && isFolder;
   const isImage = !isFolder && isImagePath(node.path);
+  const fileStatus = useContext(ExplorerFileStatusContext).get(node.path);
   const isSelected = activeMainTabId === node.path;
   const editableHere = canEdit;
   const {
     externalDropTargetPath,
     internalDropTargetNodePath,
-    draggingPath,
+    draggingPaths,
+    selectedPaths,
+    selectEntry,
     beginPointerDrag,
     suppressTreeClick,
     pathExists,
@@ -395,7 +429,8 @@ function TreeItem({
   const isDropTarget =
     (isFolder && externalDropTargetPath === node.path) ||
     internalDropTargetNodePath === node.path;
-  const isDragging = draggingPath === node.path;
+  const isDragging = draggingPaths.has(node.path);
+  const isMultiSelected = selectedPaths.has(node.path);
   const draggableHere = editableHere && !isRoot && pathExists(node.path);
   useEffect(() => {
     if (
@@ -571,7 +606,9 @@ function TreeItem({
         if (draggableHere) beginPointerDrag(node, event);
       }}
       className="flex min-w-0 flex-1 select-none items-center gap-1.5 py-1.5 text-left"
-      onClick={() => {
+      onClick={(event) => {
+        const selectionOnly = draggableHere ? selectEntry(node, event) : false;
+        if (selectionOnly) return;
         if (isFolder) setOpen((v) => !v);
         else openFileTab(node.path);
       }}
@@ -622,6 +659,7 @@ function TreeItem({
         className={cn(
           "min-w-0 flex-1 truncate",
           !packActive && "opacity-80",
+          fileStatus && STATUS_TEXT_CLASSES[fileStatus],
         )}
       >
         {node.name}
@@ -642,13 +680,16 @@ function TreeItem({
       }}
       className={cn(
         "group flex min-w-0 select-none items-center gap-1 rounded-md pr-1 text-sm transition-all duration-150",
-        isSelected ? "bg-primary/10 text-foreground" : "hover:bg-muted/80",
+        isSelected || isMultiSelected
+          ? "bg-primary/10 text-foreground"
+          : "hover:bg-muted/80",
         isDropTarget && "relative z-10 bg-primary/15 ring-2 ring-primary/60",
         isDragging && "scale-[0.98] opacity-45",
         draggableHere && "cursor-grab active:cursor-grabbing",
         !packActive && "text-muted-foreground",
       )}
       style={{ paddingLeft: 8 + depth * 12 }}
+      data-vault-draggable={draggableHere ? "true" : undefined}
     >
       {renaming ? (
         <div className="flex min-w-0 flex-1 items-center gap-1.5 py-1">
@@ -694,6 +735,15 @@ function TreeItem({
         </div>
       ) : (
         nameButton
+      )}
+
+      {!renaming && fileStatus && (
+        <Badge
+          variant={STATUS_BADGE_VARIANT[fileStatus]}
+          className="shrink-0 px-1 py-0 text-[10px] leading-4"
+        >
+          {STATUS_LETTER[fileStatus]}
+        </Badge>
       )}
 
       {isRoot && onSetActive && !renaming && (
@@ -1215,8 +1265,10 @@ export function LibraryTree({
   const [internalDropTargetNodePath, setInternalDropTargetNodePath] = useState<
     string | null
   >(null);
+  const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
+  const selectionAnchorRef = useRef<string | null>(null);
   const [dragVisual, setDragVisual] = useState<{
-    entry: VaultDragEntry;
+    entries: VaultDragEntry[];
     x: number;
     y: number;
   } | null>(null);
@@ -1224,9 +1276,10 @@ export function LibraryTree({
     kind: NewEntryKind;
     preferredDestination?: string;
   } | null>(null);
-  const dragSourceRef = useRef<VaultDragEntry | null>(null);
+  const dragSourceRef = useRef<VaultDragEntry[] | null>(null);
   const pointerStartRef = useRef<{ x: number; y: number } | null>(null);
   const pointerDraggingRef = useRef(false);
+  const dragReplacesSelectionRef = useRef(false);
   const suppressClickRef = useRef(false);
   const queryClient = useQueryClient();
   const clearPathsUnder = useUiStore((s) => s.clearPathsUnder);
@@ -1234,12 +1287,32 @@ export function LibraryTree({
   const openAccountSettingsTab = useUiStore((s) => s.openAccountSettingsTab);
   const setEditing = useEditorStore((s) => s.setEditing);
   const setDirty = useEditorStore((s) => s.setDirty);
+  const { startTransfer, conflictDialog, applying: transferPending } =
+    useVaultTransfer();
 
   const hubAuthQuery = useQuery({
     queryKey: queryKeys.hubAuth,
     queryFn: api.hubAuthState,
   });
   const hubUser = hubAuthQuery.data?.user ?? null;
+
+  const registryPacks = useMemo(
+    () => installed.filter((pack) => pack.origin === "registry"),
+    [installed],
+  );
+  const registryStatusQueries = useQueries({
+    queries: registryPacks.map((pack) => ({
+      queryKey: queryKeys.packStatus(pack.pack_id),
+      queryFn: () => api.hubPackChangeStatus(pack.pack_id),
+    })),
+  });
+  const explorerFileStatuses = useMemo(() => {
+    const statuses = new Map<string, FileChangeStatus>();
+    for (const query of registryStatusQueries) {
+      for (const file of query.data ?? []) statuses.set(file.path, file.status);
+    }
+    return statuses;
+  }, [registryStatusQueries]);
   const authenticated = hubAuthQuery.data?.authenticated ?? false;
 
   const byPath = useMemo(() => {
@@ -1330,6 +1403,15 @@ export function LibraryTree({
     return nodes;
   }, [tree]);
 
+  useEffect(() => {
+    setSelectedPaths((current) => {
+      const next = new Set(
+        [...current].filter((path) => nodeByPath.has(path)),
+      );
+      return next.size === current.size ? current : next;
+    });
+  }, [nodeByPath]);
+
   const findPackForPath = (path: string) => {
     let match: InstalledPack | undefined;
     for (const pack of installed) {
@@ -1343,28 +1425,35 @@ export function LibraryTree({
     return match;
   };
 
-  const validateDrop = (source: VaultDragEntry, target: TreeNode) => {
-    const sourcePack = findPackForPath(source.path);
+  const validateDrop = (sources: VaultDragEntry[], target: TreeNode) => {
     const destinationFolder = destinationFolderForNode(target);
     const destinationPack = findPackForPath(destinationFolder);
-    if (
-      (sourcePack && isPackReviewLocked(sourcePack)) ||
-      (destinationPack && isPackReviewLocked(destinationPack))
-    ) {
+    if (destinationPack && isPackReviewLocked(destinationPack)) {
       return {
-        sourcePack,
-        destinationPack,
-        validation: {
-          valid: false as const,
-          reason:
-            "Files cannot be moved into or out of a pack while its publish request is under review.",
-        },
+        valid: false as const,
+        reason:
+          "Files cannot be moved into a pack while its publish request is under review.",
       };
     }
-    return {
-      sourcePack,
-      destinationPack,
-      validation: validateVaultDrop({
+    const movable = sources.filter(
+      (source) => parentDir(source.path) !== destinationFolder,
+    );
+    if (movable.length === 0) {
+      return {
+        valid: false as const,
+        reason: "The selected items are already in that folder.",
+      };
+    }
+    for (const source of movable) {
+      const sourcePack = findPackForPath(source.path);
+      if (sourcePack && isPackReviewLocked(sourcePack)) {
+        return {
+          valid: false as const,
+          reason:
+            "Files cannot be moved out of a pack while its publish request is under review.",
+        };
+      }
+      const validation = validateVaultDrop({
         source,
         target,
         sourceEditable: Boolean(
@@ -1375,44 +1464,59 @@ export function LibraryTree({
         ),
         targetExists: existingPaths.has(target.path),
         existingPaths,
-      }),
-    };
+        allowExistingDestination: true,
+      });
+      if (!validation.valid) return validation;
+    }
+    return { valid: true as const, destinationFolder, sources: movable };
   };
 
-  const moveEntry = useMutation({
-    mutationFn: ({ from, to }: { from: string; to: string }) =>
-      api.vaultRenameEntry(from, to),
-    onSuccess: (_void, vars) => {
-      clearPathsUnder(vars.from);
-      setEditing(vars.from, false);
-      setDirty(vars.from, false);
-
-      const sourcePack = findPackForPath(vars.from);
-      const destinationPack = findPackForPath(vars.to);
-      const packIds = new Set(
-        [sourcePack?.pack_id, destinationPack?.pack_id].filter(
-          (id): id is string => Boolean(id),
-        ),
-      );
-      for (const packId of packIds) {
-        for (const key of fileMutationInvalidations(packId)) {
-          void queryClient.invalidateQueries({ queryKey: key });
+  const finishMove = (
+    sources: VaultDragEntry[],
+    destinationFolder: string,
+    result: { removed_paths: string[]; replaced_paths: string[] },
+  ) => {
+    for (const affected of [
+      ...result.removed_paths,
+      ...result.replaced_paths,
+    ]) {
+      clearPathsUnder(affected);
+      setEditing(affected, false);
+      setDirty(affected, false);
+    }
+    setSelectedPaths((current) => {
+      const next = new Set(current);
+      for (const selected of current) {
+        if (
+          result.removed_paths.some(
+            (removed) =>
+              selected === removed || selected.startsWith(`${removed}/`),
+          )
+        ) {
+          next.delete(selected);
         }
       }
-      toast.success("Item moved");
-    },
-    onError: (e: Error) =>
-      toast.error("Could not move item", { description: e.message }),
-    onSettled: () => {
-      dragSourceRef.current = null;
-      setInternalDropTargetNodePath(null);
-    },
-  });
+      return next;
+    });
+    const packIds = new Set<string>();
+    for (const source of sources) {
+      const pack = findPackForPath(source.path);
+      if (pack) packIds.add(pack.pack_id);
+    }
+    const destinationPack = findPackForPath(destinationFolder);
+    if (destinationPack) packIds.add(destinationPack.pack_id);
+    for (const packId of packIds) {
+      for (const key of fileMutationInvalidations(packId)) {
+        void queryClient.invalidateQueries({ queryKey: key });
+      }
+    }
+  };
 
   const endInternalDrag = () => {
     dragSourceRef.current = null;
     pointerStartRef.current = null;
     pointerDraggingRef.current = false;
+    dragReplacesSelectionRef.current = false;
     setInternalDropTargetNodePath(null);
     setDragVisual(null);
     document.body.style.cursor = "";
@@ -1427,9 +1531,9 @@ export function LibraryTree({
     };
 
     const onPointerMove = (event: PointerEvent) => {
-      const source = dragSourceRef.current;
+      const sources = dragSourceRef.current;
       const start = pointerStartRef.current;
-      if (!source || !start) return;
+      if (!sources || !start) return;
 
       if (!pointerDraggingRef.current) {
         const distance = Math.hypot(
@@ -1438,26 +1542,30 @@ export function LibraryTree({
         );
         if (distance < 5) return;
         pointerDraggingRef.current = true;
+        if (dragReplacesSelectionRef.current) {
+          setSelectedPaths(new Set(sources.map((source) => source.path)));
+          selectionAnchorRef.current = sources[0]?.path ?? null;
+        }
         suppressClickRef.current = true;
         document.body.style.cursor = "grabbing";
       }
 
       event.preventDefault();
-      setDragVisual({ entry: source, x: event.clientX, y: event.clientY });
+      setDragVisual({ entries: sources, x: event.clientX, y: event.clientY });
       const target = targetAtPoint(event.clientX, event.clientY);
       if (!target) {
         setInternalDropTargetNodePath(null);
         return;
       }
-      const { validation } = validateDrop(source, target);
+      const validation = validateDrop(sources, target);
       setInternalDropTargetNodePath(
         validation.valid ? validation.destinationFolder : null,
       );
     };
 
     const onPointerUp = (event: PointerEvent) => {
-      const source = dragSourceRef.current;
-      if (!source) return;
+      const sources = dragSourceRef.current;
+      if (!sources) return;
       if (!pointerDraggingRef.current) {
         endInternalDrag();
         return;
@@ -1466,14 +1574,21 @@ export function LibraryTree({
       event.preventDefault();
       const target = targetAtPoint(event.clientX, event.clientY);
       if (target) {
-        const { validation } = validateDrop(source, target);
+        const validation = validateDrop(sources, target);
         if (validation.valid) {
-          moveEntry.mutate({
-            from: source.path,
-            to: validation.destinationPath,
+          void startTransfer({
+            destDir: validation.destinationFolder,
+            sourcePaths: validation.sources.map((source) => source.path),
+            operation: "move",
+            onComplete: (result) =>
+              finishMove(
+                validation.sources,
+                validation.destinationFolder,
+                result,
+              ),
           });
         } else {
-          toast.error("Cannot move item", { description: validation.reason });
+          toast.error("Cannot move items", { description: validation.reason });
         }
       }
       endInternalDrag();
@@ -1502,13 +1617,60 @@ export function LibraryTree({
   const dropContext = {
     externalDropTargetPath: dropTargetPath,
     internalDropTargetNodePath,
-    draggingPath: dragVisual?.entry.path ?? null,
+    draggingPaths: new Set(
+      dragVisual?.entries.map((entry) => entry.path) ?? [],
+    ),
+    selectedPaths,
+    selectEntry: (
+      entry: VaultDragEntry,
+      event: ReactMouseEvent<HTMLElement>,
+    ) => {
+      const toggle = event.metaKey || event.ctrlKey;
+      if (event.shiftKey && selectionAnchorRef.current) {
+        const visible = Array.from(
+          document.querySelectorAll<HTMLElement>(
+            "[data-explorer-tree] [data-vault-draggable='true']",
+          ),
+        )
+          .map((element) => element.dataset.vaultPath)
+          .filter((path): path is string => Boolean(path));
+        setSelectedPaths((current) =>
+          rangeSelection(
+            visible,
+            selectionAnchorRef.current!,
+            entry.path,
+            current,
+            toggle,
+          ) ?? current,
+        );
+        return true;
+      }
+      selectionAnchorRef.current = entry.path;
+      if (toggle) {
+        setSelectedPaths((current) => {
+          const next = new Set(current);
+          if (next.has(entry.path)) next.delete(entry.path);
+          else next.add(entry.path);
+          return next;
+        });
+        return true;
+      }
+      setSelectedPaths(new Set([entry.path]));
+      return false;
+    },
     beginPointerDrag: (
       entry: VaultDragEntry,
       event: ReactPointerEvent<HTMLElement>,
     ) => {
-      if (event.button !== 0 || moveEntry.isPending) return;
-      dragSourceRef.current = entry;
+      if (event.button !== 0 || transferPending) return;
+      const candidates = selectedPaths.has(entry.path)
+        ? [...selectedPaths]
+            .map((path) => nodeByPath.get(path))
+            .filter((node): node is TreeNode => Boolean(node))
+        : [entry];
+      const entries = normalizeVaultDragEntries(candidates);
+      dragReplacesSelectionRef.current = !selectedPaths.has(entry.path);
+      dragSourceRef.current = entries;
       pointerStartRef.current = { x: event.clientX, y: event.clientY };
       pointerDraggingRef.current = false;
       suppressClickRef.current = false;
@@ -1628,6 +1790,7 @@ export function LibraryTree({
       }}
     >
       <DropTargetContext.Provider value={dropContext}>
+        <ExplorerFileStatusContext.Provider value={explorerFileStatuses}>
         {dragVisual &&
           createPortal(
             <motion.div
@@ -1638,15 +1801,19 @@ export function LibraryTree({
               className="pointer-events-none fixed z-[100] flex max-w-64 items-center gap-2 rounded-md border border-primary/30 bg-popover/95 px-2.5 py-1.5 text-xs text-popover-foreground shadow-lg backdrop-blur-sm"
               style={{ left: dragVisual.x + 14, top: dragVisual.y + 14 }}
             >
-              {dragVisual.entry.kind === "folder" ? (
+              {dragVisual.entries.length > 1 ? (
+                <FolderInput className="size-3.5 shrink-0 text-primary" />
+              ) : dragVisual.entries[0]?.kind === "folder" ? (
                 <Folder className="size-3.5 shrink-0 text-primary" />
-              ) : isImagePath(dragVisual.entry.path) ? (
+              ) : isImagePath(dragVisual.entries[0]?.path ?? "") ? (
                 <ImageIcon className="size-3.5 shrink-0 text-primary" />
               ) : (
                 <FileText className="size-3.5 shrink-0 text-primary" />
               )}
               <span className="truncate font-medium">
-                {dragVisual.entry.name}
+                {dragVisual.entries.length === 1
+                  ? dragVisual.entries[0]?.name
+                  : `${dragVisual.entries.length} items`}
               </span>
               {internalDropTargetNodePath && (
                 <span className="shrink-0 text-muted-foreground">
@@ -1781,6 +1948,8 @@ export function LibraryTree({
             });
           }}
         />
+        {conflictDialog}
+        </ExplorerFileStatusContext.Provider>
       </DropTargetContext.Provider>
     </ExplorerActionsContext.Provider>
   );

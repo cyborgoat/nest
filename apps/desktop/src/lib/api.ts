@@ -25,6 +25,10 @@ import type {
   VaultChangeMode,
   VaultChangePreview,
   VaultChangeResult,
+  VaultConflictPolicy,
+  VaultTransferOperation,
+  VaultTransferPreview,
+  VaultTransferResult,
 } from "@nest/shared";
 
 export const api = {
@@ -54,6 +58,28 @@ export const api = {
     invoke<{ imported: string[]; skipped: string[] }>("vault_import_files", {
       destDir,
       sourcePaths,
+    }),
+  vaultPreviewTransfer: (
+    destDir: string,
+    sourcePaths: string[],
+    operation: VaultTransferOperation,
+  ) =>
+    invoke<VaultTransferPreview>("vault_preview_transfer", {
+      destDir,
+      sourcePaths,
+      operation,
+    }),
+  vaultApplyTransfer: (
+    destDir: string,
+    sourcePaths: string[],
+    operation: VaultTransferOperation,
+    conflictPolicy: VaultConflictPolicy,
+  ) =>
+    invoke<VaultTransferResult>("vault_apply_transfer", {
+      destDir,
+      sourcePaths,
+      operation,
+      conflictPolicy,
     }),
 
   hubPackChangeStatus: (packId: string) =>

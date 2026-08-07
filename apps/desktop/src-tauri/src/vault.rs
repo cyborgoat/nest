@@ -1,6 +1,7 @@
 use crate::error::{AppError, AppResult};
 use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -398,6 +399,476 @@ pub fn absolute_path(root: &Path, rel_path: &str) -> AppResult<PathBuf> {
 pub struct ImportFilesResult {
     pub imported: Vec<String>,
     pub skipped: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TransferOperation {
+    Copy,
+    Move,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ConflictPolicy {
+    Error,
+    Replace,
+    Skip,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TransferConflict {
+    pub source_path: String,
+    pub destination_path: String,
+    pub kind: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TransferPreview {
+    pub conflicts: Vec<TransferConflict>,
+    pub eligible_count: usize,
+    pub skipped: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct TransferResult {
+    pub written_files: Vec<String>,
+    pub created_folders: Vec<String>,
+    pub removed_paths: Vec<String>,
+    pub replaced_paths: Vec<String>,
+    pub skipped: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+struct TransferRoot {
+    source: PathBuf,
+    source_label: String,
+    destination: PathBuf,
+    destination_rel: String,
+}
+
+fn normalized_move_sources(paths: &[PathBuf]) -> Vec<PathBuf> {
+    let mut normalized = paths
+        .iter()
+        .map(|path| PathBuf::from(path.to_string_lossy().trim_matches('/')))
+        .filter(|path| path.components().count() > 1)
+        .collect::<Vec<_>>();
+    normalized.sort();
+    normalized.dedup();
+    let mut roots: Vec<PathBuf> = Vec::new();
+    for path in normalized {
+        if roots.iter().any(|root| path.starts_with(root)) {
+            continue;
+        }
+        roots.push(path);
+    }
+    roots
+}
+
+fn normalized_copy_sources(paths: &[PathBuf]) -> Vec<PathBuf> {
+    let mut normalized = paths.to_vec();
+    normalized.sort();
+    normalized.dedup();
+    let mut roots: Vec<PathBuf> = Vec::new();
+    for path in normalized {
+        if roots.iter().any(|root| path.starts_with(root)) {
+            continue;
+        }
+        roots.push(path);
+    }
+    roots
+}
+
+fn transfer_roots(
+    root: &Path,
+    dest_dir_rel: &str,
+    source_paths: &[PathBuf],
+    operation: TransferOperation,
+) -> AppResult<(Vec<TransferRoot>, Vec<String>)> {
+    let dest_rel = dest_dir_rel.trim_matches('/');
+    if dest_rel.is_empty() {
+        return Err(AppError::msg(
+            "Drop items into a knowledge pack folder, not the vault root",
+        ));
+    }
+    let destination_dir = resolve_vault_path(root, dest_rel)?;
+    if destination_dir.exists() && !destination_dir.is_dir() {
+        return Err(AppError::msg(format!("{dest_rel} is a file, not a folder")));
+    }
+
+    let candidates = if operation == TransferOperation::Move {
+        normalized_move_sources(source_paths)
+    } else {
+        normalized_copy_sources(source_paths)
+    };
+    let mut roots = Vec::new();
+    let mut skipped = Vec::new();
+    for candidate in candidates {
+        let (source, source_label) = if operation == TransferOperation::Move {
+            let label = candidate.to_string_lossy().replace('\\', "/");
+            (resolve_vault_path(root, &label)?, label)
+        } else {
+            (candidate.clone(), candidate.to_string_lossy().into_owned())
+        };
+        let metadata = match fs::symlink_metadata(&source) {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                skipped.push(format!("{source_label}: {error}"));
+                continue;
+            }
+        };
+        if metadata.file_type().is_symlink() {
+            skipped.push(format!("{source_label}: symbolic links are not imported"));
+            continue;
+        }
+        if !metadata.is_file() && !metadata.is_dir() {
+            skipped.push(format!("{source_label}: not a file or folder"));
+            continue;
+        }
+        if operation == TransferOperation::Copy
+            && metadata.is_file()
+            && (!is_pack_content_file(&source)
+                || source
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .map(|name| name.eq_ignore_ascii_case("pack.json"))
+                    .unwrap_or(false))
+        {
+            skipped.push(format!(
+                "{source_label}: only markdown and images can be imported"
+            ));
+            continue;
+        }
+        let Some(name) = source.file_name().and_then(|name| name.to_str()) else {
+            skipped.push(format!("{source_label}: invalid file name"));
+            continue;
+        };
+        if operation == TransferOperation::Copy && metadata.is_dir() && should_skip_pack_entry(name)
+        {
+            skipped.push(format!("{source_label}: folder is not imported"));
+            continue;
+        }
+        let destination_rel = format!("{dest_rel}/{name}").replace('\\', "/");
+        let destination = destination_dir.join(name);
+        if operation == TransferOperation::Copy {
+            let canonical_source = fs::canonicalize(&source)?;
+            let canonical_destination_dir =
+                fs::canonicalize(&destination_dir).unwrap_or(destination_dir.clone());
+            let canonical_destination = canonical_destination_dir.join(name);
+            if canonical_source == canonical_destination {
+                skipped.push(format!("{source_label}: already in that folder"));
+                continue;
+            }
+            if metadata.is_dir() && canonical_destination.starts_with(&canonical_source) {
+                return Err(AppError::msg("A folder cannot be copied inside itself"));
+            }
+        }
+        if operation == TransferOperation::Move {
+            let source_rel = Path::new(&source_label);
+            let destination_rel_path = Path::new(&destination_rel);
+            if source_rel.parent() == Some(Path::new(dest_rel)) {
+                skipped.push(format!("{source_label}: already in that folder"));
+                continue;
+            }
+            if metadata.is_dir() && destination_rel_path.starts_with(source_rel) {
+                return Err(AppError::msg("A folder cannot be moved inside itself"));
+            }
+        }
+        roots.push(TransferRoot {
+            source,
+            source_label,
+            destination,
+            destination_rel,
+        });
+    }
+    Ok((roots, skipped))
+}
+
+fn external_file_allowed(path: &Path) -> bool {
+    is_pack_content_file(path)
+        && !path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(|name| name.eq_ignore_ascii_case("pack.json"))
+            .unwrap_or(false)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn inspect_transfer_entry(
+    source: &Path,
+    source_label: &str,
+    destination: &Path,
+    destination_rel: &str,
+    operation: TransferOperation,
+    conflicts: &mut Vec<TransferConflict>,
+    skipped: &mut Vec<String>,
+    incoming: &mut HashMap<String, bool>,
+) -> AppResult<()> {
+    let metadata = fs::symlink_metadata(source)?;
+    if metadata.file_type().is_symlink() {
+        skipped.push(format!("{source_label}: symbolic links are not imported"));
+        return Ok(());
+    }
+    let source_is_dir = metadata.is_dir();
+    if let Some(existing_is_dir) = incoming.get(destination_rel) {
+        if !source_is_dir || !existing_is_dir {
+            conflicts.push(TransferConflict {
+                source_path: source_label.to_string(),
+                destination_path: destination_rel.to_string(),
+                kind: if !source_is_dir && !existing_is_dir {
+                    "file".into()
+                } else {
+                    "type_mismatch".into()
+                },
+            });
+            return Ok(());
+        }
+    } else {
+        incoming.insert(destination_rel.to_string(), source_is_dir);
+    }
+    if metadata.is_file() {
+        if operation == TransferOperation::Copy && !external_file_allowed(source) {
+            skipped.push(format!(
+                "{source_label}: only markdown and images can be imported"
+            ));
+            return Ok(());
+        }
+        if destination.exists() {
+            conflicts.push(TransferConflict {
+                source_path: source_label.to_string(),
+                destination_path: destination_rel.to_string(),
+                kind: if destination.is_file() {
+                    "file".into()
+                } else {
+                    "type_mismatch".into()
+                },
+            });
+        }
+        return Ok(());
+    }
+    if !metadata.is_dir() {
+        skipped.push(format!("{source_label}: not a file or folder"));
+        return Ok(());
+    }
+    if destination.exists() && !destination.is_dir() {
+        conflicts.push(TransferConflict {
+            source_path: source_label.to_string(),
+            destination_path: destination_rel.to_string(),
+            kind: "type_mismatch".into(),
+        });
+        return Ok(());
+    }
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let child_label = format!("{source_label}/{}", name.to_string_lossy());
+        if operation == TransferOperation::Copy
+            && entry.file_type()?.is_dir()
+            && should_skip_pack_entry(&name.to_string_lossy())
+        {
+            skipped.push(format!("{child_label}: folder is not imported"));
+            continue;
+        }
+        let child_rel = format!("{destination_rel}/{}", name.to_string_lossy());
+        inspect_transfer_entry(
+            &entry.path(),
+            &child_label,
+            &destination.join(&name),
+            &child_rel,
+            operation,
+            conflicts,
+            skipped,
+            incoming,
+        )?;
+    }
+    Ok(())
+}
+
+pub fn preview_transfer(
+    root: &Path,
+    dest_dir_rel: &str,
+    source_paths: &[PathBuf],
+    operation: TransferOperation,
+) -> AppResult<TransferPreview> {
+    let (roots, mut skipped) = transfer_roots(root, dest_dir_rel, source_paths, operation)?;
+    let mut conflicts = Vec::new();
+    let mut incoming = HashMap::new();
+    for item in &roots {
+        inspect_transfer_entry(
+            &item.source,
+            &item.source_label,
+            &item.destination,
+            &item.destination_rel,
+            operation,
+            &mut conflicts,
+            &mut skipped,
+            &mut incoming,
+        )?;
+    }
+    Ok(TransferPreview {
+        conflicts,
+        eligible_count: roots.len(),
+        skipped,
+    })
+}
+
+fn remove_existing(path: &Path) -> AppResult<()> {
+    if path.is_dir() {
+        fs::remove_dir_all(path)?;
+    } else if path.exists() {
+        fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn apply_transfer_entry(
+    source: &Path,
+    source_label: &str,
+    destination: &Path,
+    destination_rel: &str,
+    operation: TransferOperation,
+    policy: ConflictPolicy,
+    result: &mut TransferResult,
+    source_is_external: bool,
+) -> AppResult<bool> {
+    let metadata = fs::symlink_metadata(source)?;
+    if metadata.file_type().is_symlink() {
+        result
+            .skipped
+            .push(format!("{source_label}: symbolic links are not imported"));
+        return Ok(false);
+    }
+    if metadata.is_file() {
+        if source_is_external && !external_file_allowed(source) {
+            result.skipped.push(format!(
+                "{source_label}: only markdown and images can be imported"
+            ));
+            return Ok(false);
+        }
+        if destination.exists() {
+            match policy {
+                ConflictPolicy::Error => {
+                    return Err(AppError::msg(format!(
+                        "{destination_rel} already exists; review conflicts and try again"
+                    )))
+                }
+                ConflictPolicy::Skip => {
+                    result.skipped.push(format!("{destination_rel}: conflict"));
+                    return Ok(false);
+                }
+                ConflictPolicy::Replace => {
+                    remove_existing(destination)?;
+                    result.replaced_paths.push(destination_rel.to_string());
+                }
+            }
+        }
+        if let Some(parent) = destination.parent() {
+            ensure_dir(parent)?;
+        }
+        if operation == TransferOperation::Move {
+            rename_or_copy_remove(source, destination)?;
+            result.removed_paths.push(source_label.to_string());
+        } else {
+            fs::copy(source, destination)?;
+        }
+        result.written_files.push(destination_rel.to_string());
+        return Ok(true);
+    }
+    if !metadata.is_dir() {
+        result
+            .skipped
+            .push(format!("{source_label}: not a file or folder"));
+        return Ok(false);
+    }
+    let destination_was_directory = destination.is_dir();
+    if destination.exists() && !destination.is_dir() {
+        match policy {
+            ConflictPolicy::Error => {
+                return Err(AppError::msg(format!(
+                    "{destination_rel} already exists; review conflicts and try again"
+                )))
+            }
+            ConflictPolicy::Skip => {
+                result.skipped.push(format!("{destination_rel}: conflict"));
+                return Ok(false);
+            }
+            ConflictPolicy::Replace => {
+                remove_existing(destination)?;
+                result.replaced_paths.push(destination_rel.to_string());
+            }
+        }
+    }
+    ensure_dir(destination)?;
+    if !destination_was_directory {
+        result.created_folders.push(destination_rel.to_string());
+    }
+    let mut fully_moved = true;
+    let entries = fs::read_dir(source)?.collect::<Result<Vec<_>, _>>()?;
+    for entry in entries {
+        let name = entry.file_name();
+        let child_label = format!("{source_label}/{}", name.to_string_lossy());
+        if source_is_external
+            && entry.file_type()?.is_dir()
+            && should_skip_pack_entry(&name.to_string_lossy())
+        {
+            result
+                .skipped
+                .push(format!("{child_label}: folder is not imported"));
+            continue;
+        }
+        let child_rel = format!("{destination_rel}/{}", name.to_string_lossy());
+        if !apply_transfer_entry(
+            &entry.path(),
+            &child_label,
+            &destination.join(&name),
+            &child_rel,
+            operation,
+            policy,
+            result,
+            source_is_external,
+        )? {
+            fully_moved = false;
+        }
+    }
+    if operation == TransferOperation::Move && fully_moved {
+        fs::remove_dir(source)?;
+        result.removed_paths.push(source_label.to_string());
+    }
+    Ok(fully_moved)
+}
+
+pub fn apply_transfer(
+    root: &Path,
+    dest_dir_rel: &str,
+    source_paths: &[PathBuf],
+    operation: TransferOperation,
+    policy: ConflictPolicy,
+) -> AppResult<TransferResult> {
+    if policy == ConflictPolicy::Error {
+        let preview = preview_transfer(root, dest_dir_rel, source_paths, operation)?;
+        if !preview.conflicts.is_empty() {
+            return Err(AppError::msg("File conflicts require confirmation"));
+        }
+    }
+    let (roots, skipped) = transfer_roots(root, dest_dir_rel, source_paths, operation)?;
+    let mut result = TransferResult {
+        skipped,
+        ..TransferResult::default()
+    };
+    for item in roots {
+        apply_transfer_entry(
+            &item.source,
+            &item.source_label,
+            &item.destination,
+            &item.destination_rel,
+            operation,
+            policy,
+            &mut result,
+            operation == TransferOperation::Copy,
+        )?;
+    }
+    Ok(result)
 }
 
 /// Copy external markdown/image files into a vault folder.
@@ -809,5 +1280,200 @@ mod tests {
         assert!(!dst.join("docs/notes.pdf").exists());
         assert!(!dst.join("node_modules").exists());
         assert!(!dst.join(".git").exists());
+    }
+
+    #[test]
+    fn external_folder_transfer_previews_and_skips_conflicting_files() {
+        let vault = env::temp_dir().join("nest-vault-transfer-copy");
+        let source = env::temp_dir().join("nest-vault-transfer-copy-source");
+        let _ = fs::remove_dir_all(&vault);
+        let _ = fs::remove_dir_all(&source);
+        ensure_dir(&vault.join("pack/docs")).unwrap();
+        ensure_dir(&source.join("docs")).unwrap();
+        fs::write(vault.join("pack/docs/note.md"), "destination").unwrap();
+        fs::write(source.join("docs/note.md"), "incoming").unwrap();
+        fs::write(source.join("docs/new.md"), "new").unwrap();
+        fs::write(source.join("docs/ignored.txt"), "ignored").unwrap();
+
+        let preview = preview_transfer(
+            &vault,
+            "pack",
+            &[source.join("docs")],
+            TransferOperation::Copy,
+        )
+        .unwrap();
+        assert_eq!(preview.eligible_count, 1);
+        assert_eq!(preview.conflicts.len(), 1);
+        assert!(preview.skipped[0].contains("ignored.txt"));
+
+        let result = apply_transfer(
+            &vault,
+            "pack",
+            &[source.join("docs")],
+            TransferOperation::Copy,
+            ConflictPolicy::Skip,
+        )
+        .unwrap();
+        assert_eq!(
+            fs::read_to_string(vault.join("pack/docs/note.md")).unwrap(),
+            "destination"
+        );
+        assert_eq!(
+            fs::read_to_string(vault.join("pack/docs/new.md")).unwrap(),
+            "new"
+        );
+        assert!(!vault.join("pack/docs/ignored.txt").exists());
+        assert!(result.written_files.contains(&"pack/docs/new.md".into()));
+    }
+
+    #[test]
+    fn external_transfer_replaces_a_destination_type_mismatch() {
+        let vault = env::temp_dir().join("nest-vault-transfer-replace");
+        let source = env::temp_dir().join("nest-vault-transfer-replace-source");
+        let _ = fs::remove_dir_all(&vault);
+        let _ = fs::remove_dir_all(&source);
+        ensure_dir(&vault.join("pack/note.md")).unwrap();
+        ensure_dir(&source).unwrap();
+        fs::write(source.join("note.md"), "incoming").unwrap();
+
+        let result = apply_transfer(
+            &vault,
+            "pack",
+            &[source.join("note.md")],
+            TransferOperation::Copy,
+            ConflictPolicy::Replace,
+        )
+        .unwrap();
+        assert_eq!(
+            fs::read_to_string(vault.join("pack/note.md")).unwrap(),
+            "incoming"
+        );
+        assert_eq!(result.replaced_paths, vec!["pack/note.md"]);
+    }
+
+    #[test]
+    fn internal_batch_move_merges_folders_and_keeps_skipped_sources() {
+        let vault = env::temp_dir().join("nest-vault-transfer-move");
+        let _ = fs::remove_dir_all(&vault);
+        ensure_dir(&vault.join("source/docs")).unwrap();
+        ensure_dir(&vault.join("destination/docs")).unwrap();
+        fs::write(vault.join("source/docs/conflict.md"), "source").unwrap();
+        fs::write(vault.join("source/docs/moved.md"), "moved").unwrap();
+        fs::write(vault.join("destination/docs/conflict.md"), "destination").unwrap();
+
+        let sources = vec![
+            PathBuf::from("source/docs"),
+            PathBuf::from("source/docs/moved.md"),
+        ];
+        let preview =
+            preview_transfer(&vault, "destination", &sources, TransferOperation::Move).unwrap();
+        assert_eq!(preview.eligible_count, 1);
+        assert_eq!(preview.conflicts.len(), 1);
+
+        let result = apply_transfer(
+            &vault,
+            "destination",
+            &sources,
+            TransferOperation::Move,
+            ConflictPolicy::Skip,
+        )
+        .unwrap();
+        assert!(vault.join("source/docs/conflict.md").is_file());
+        assert!(!vault.join("source/docs/moved.md").exists());
+        assert!(vault.join("destination/docs/moved.md").is_file());
+        assert_eq!(
+            fs::read_to_string(vault.join("destination/docs/conflict.md")).unwrap(),
+            "destination"
+        );
+        assert!(result
+            .removed_paths
+            .contains(&"source/docs/moved.md".into()));
+    }
+
+    #[test]
+    fn transfer_preserves_empty_external_folders() {
+        let vault = env::temp_dir().join("nest-vault-transfer-empty");
+        let source = env::temp_dir().join("nest-vault-transfer-empty-source");
+        let _ = fs::remove_dir_all(&vault);
+        let _ = fs::remove_dir_all(&source);
+        ensure_dir(&vault.join("pack")).unwrap();
+        ensure_dir(&source.join("empty")).unwrap();
+        apply_transfer(
+            &vault,
+            "pack",
+            &[source.join("empty")],
+            TransferOperation::Copy,
+            ConflictPolicy::Error,
+        )
+        .unwrap();
+        assert!(vault.join("pack/empty").is_dir());
+    }
+
+    #[test]
+    fn transfer_preview_detects_conflicts_within_the_incoming_batch() {
+        let vault = env::temp_dir().join("nest-vault-transfer-batch-conflict");
+        let first = env::temp_dir().join("nest-vault-transfer-batch-first");
+        let second = env::temp_dir().join("nest-vault-transfer-batch-second");
+        let _ = fs::remove_dir_all(&vault);
+        let _ = fs::remove_dir_all(&first);
+        let _ = fs::remove_dir_all(&second);
+        ensure_dir(&vault.join("pack")).unwrap();
+        ensure_dir(&first).unwrap();
+        ensure_dir(&second).unwrap();
+        fs::write(first.join("same.md"), "first").unwrap();
+        fs::write(second.join("same.md"), "second").unwrap();
+
+        let preview = preview_transfer(
+            &vault,
+            "pack",
+            &[first.join("same.md"), second.join("same.md")],
+            TransferOperation::Copy,
+        )
+        .unwrap();
+        assert_eq!(preview.conflicts.len(), 1);
+        assert_eq!(preview.conflicts[0].destination_path, "pack/same.md");
+        assert!(!vault.join("pack/same.md").exists());
+
+        assert!(apply_transfer(
+            &vault,
+            "pack",
+            &[first.join("same.md"), second.join("same.md")],
+            TransferOperation::Copy,
+            ConflictPolicy::Error,
+        )
+        .is_err());
+        assert!(!vault.join("pack/same.md").exists());
+    }
+
+    #[test]
+    fn external_transfer_skips_self_copies_and_normalizes_nested_sources() {
+        let vault = env::temp_dir().join("nest-vault-transfer-self-copy");
+        let _ = fs::remove_dir_all(&vault);
+        ensure_dir(&vault.join("pack/docs")).unwrap();
+        fs::write(vault.join("pack/docs/note.md"), "keep").unwrap();
+
+        let self_preview = preview_transfer(
+            &vault,
+            "pack/docs",
+            &[vault.join("pack/docs/note.md")],
+            TransferOperation::Copy,
+        )
+        .unwrap();
+        assert_eq!(self_preview.eligible_count, 0);
+        assert!(self_preview.conflicts.is_empty());
+        assert_eq!(
+            fs::read_to_string(vault.join("pack/docs/note.md")).unwrap(),
+            "keep"
+        );
+
+        ensure_dir(&vault.join("other")).unwrap();
+        let nested_preview = preview_transfer(
+            &vault,
+            "other",
+            &[vault.join("pack/docs"), vault.join("pack/docs/note.md")],
+            TransferOperation::Copy,
+        )
+        .unwrap();
+        assert_eq!(nested_preview.eligible_count, 1);
     }
 }

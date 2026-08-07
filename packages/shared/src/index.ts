@@ -311,6 +311,29 @@ export type VaultChangeResult = {
   cleanup_warning: string | null;
 };
 
+export type VaultTransferOperation = "copy" | "move";
+export type VaultConflictPolicy = "error" | "replace" | "skip";
+
+export type VaultTransferConflict = {
+  source_path: string;
+  destination_path: string;
+  kind: "file" | "type_mismatch";
+};
+
+export type VaultTransferPreview = {
+  conflicts: VaultTransferConflict[];
+  eligible_count: number;
+  skipped: string[];
+};
+
+export type VaultTransferResult = {
+  written_files: string[];
+  created_folders: string[];
+  removed_paths: string[];
+  replaced_paths: string[];
+  skipped: string[];
+};
+
 /** Editable metadata used when creating a knowledge pack from a folder or ZIP. */
 export type KnowledgePackMeta = {
   id: string;

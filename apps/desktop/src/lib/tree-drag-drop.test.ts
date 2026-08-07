@@ -2,6 +2,8 @@ import type { TreeNode } from "@nest/shared";
 import { describe, expect, it } from "vitest";
 import {
   destinationFolderForNode,
+  normalizeVaultDragEntries,
+  rangeSelection,
   validateVaultDrop,
   type VaultDragEntry,
 } from "./tree-drag-drop";
@@ -40,6 +42,32 @@ describe("destinationFolderForNode", () => {
   });
 });
 
+describe("multi-selection helpers", () => {
+  it("removes descendants when their selected parent is dragged", () => {
+    expect(
+      normalizeVaultDragEntries([
+        { kind: "file", name: "a.md", path: "pack/docs/a.md" },
+        { kind: "folder", name: "docs", path: "pack/docs" },
+        { kind: "file", name: "b.md", path: "pack/b.md" },
+      ]).map((entry) => entry.path),
+    ).toEqual(["pack/b.md", "pack/docs"]);
+  });
+
+  it("builds replacement and additive visible ranges", () => {
+    const visible = ["a", "b", "c", "d"];
+    expect([...rangeSelection(visible, "b", "d", new Set(["a"]), false)!]).toEqual([
+      "b",
+      "c",
+      "d",
+    ]);
+    expect([...rangeSelection(visible, "b", "c", new Set(["a"]), true)!]).toEqual([
+      "a",
+      "b",
+      "c",
+    ]);
+  });
+});
+
 describe("validateVaultDrop", () => {
   it("builds a destination path for a valid move", () => {
     expect(validate(node("destination/guides"))).toEqual({
@@ -71,6 +99,15 @@ describe("validateVaultDrop", () => {
         existingPaths: new Set(["destination/note.md"]),
       }),
     ).toMatchObject({ valid: false });
+  });
+
+  it("allows an existing destination when conflicts are handled later", () => {
+    expect(
+      validate(node("destination"), {
+        existingPaths: new Set(["destination/note.md"]),
+        allowExistingDestination: true,
+      }),
+    ).toMatchObject({ valid: true });
   });
 
   it("rejects moving a folder onto itself or a descendant", () => {

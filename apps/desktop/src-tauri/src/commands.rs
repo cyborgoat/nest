@@ -136,6 +136,53 @@ pub fn vault_import_files(
     Ok(result)
 }
 
+#[tauri::command]
+pub fn vault_preview_transfer(
+    state: State<'_, SharedState>,
+    dest_dir: String,
+    source_paths: Vec<String>,
+    operation: vault::TransferOperation,
+) -> AppResult<vault::TransferPreview> {
+    ensure_vault_path_not_review_locked(state.inner(), &dest_dir)?;
+    if operation == vault::TransferOperation::Move {
+        for path in &source_paths {
+            ensure_vault_path_not_review_locked(state.inner(), path)?;
+        }
+    }
+    let vault = state.vault_path();
+    let paths = source_paths
+        .into_iter()
+        .map(PathBuf::from)
+        .collect::<Vec<_>>();
+    vault::preview_transfer(&vault, &dest_dir, &paths, operation)
+}
+
+#[tauri::command]
+pub fn vault_apply_transfer(
+    state: State<'_, SharedState>,
+    dest_dir: String,
+    source_paths: Vec<String>,
+    operation: vault::TransferOperation,
+    conflict_policy: vault::ConflictPolicy,
+) -> AppResult<vault::TransferResult> {
+    ensure_vault_path_not_review_locked(state.inner(), &dest_dir)?;
+    if operation == vault::TransferOperation::Move {
+        for path in &source_paths {
+            ensure_vault_path_not_review_locked(state.inner(), path)?;
+        }
+    }
+    let vault = state.vault_path();
+    let paths = source_paths
+        .into_iter()
+        .map(PathBuf::from)
+        .collect::<Vec<_>>();
+    let result = vault::apply_transfer(&vault, &dest_dir, &paths, operation, conflict_policy)?;
+    if !result.written_files.is_empty() || !result.removed_paths.is_empty() {
+        indexing::schedule(state.inner())?;
+    }
+    Ok(result)
+}
+
 /// Look up an installed pack by id, or fail with a consistent error message.
 /// Shared by every command that needs "the pack, or a clear error" before
 /// doing anything else.

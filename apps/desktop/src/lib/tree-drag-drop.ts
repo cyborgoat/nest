@@ -7,6 +7,37 @@ export type VaultDropValidation =
   | { valid: true; destinationFolder: string; destinationPath: string }
   | { valid: false; reason: string };
 
+export function normalizeVaultDragEntries(
+  entries: VaultDragEntry[],
+): VaultDragEntry[] {
+  const sorted = [...entries].sort(
+    (a, b) => a.path.length - b.path.length || a.path.localeCompare(b.path),
+  );
+  return sorted.filter(
+    (entry, index) =>
+      !sorted
+        .slice(0, index)
+        .some((parent) => entry.path.startsWith(`${parent.path}/`)),
+  );
+}
+
+export function rangeSelection(
+  visiblePaths: string[],
+  anchor: string,
+  target: string,
+  current: ReadonlySet<string>,
+  additive: boolean,
+): Set<string> | null {
+  const start = visiblePaths.indexOf(anchor);
+  const end = visiblePaths.indexOf(target);
+  if (start === -1 || end === -1) return null;
+  const range = visiblePaths.slice(
+    Math.min(start, end),
+    Math.max(start, end) + 1,
+  );
+  return new Set(additive ? [...current, ...range] : range);
+}
+
 export function destinationFolderForNode(node: TreeNode): string {
   return node.kind === "folder" ? node.path : parentDir(node.path);
 }
@@ -18,6 +49,7 @@ export function validateVaultDrop({
   destinationEditable,
   targetExists,
   existingPaths,
+  allowExistingDestination = false,
 }: {
   source: VaultDragEntry;
   target: TreeNode;
@@ -25,6 +57,7 @@ export function validateVaultDrop({
   destinationEditable: boolean;
   targetExists: boolean;
   existingPaths: ReadonlySet<string>;
+  allowExistingDestination?: boolean;
 }): VaultDropValidation {
   if (!targetExists) {
     return {
@@ -55,7 +88,7 @@ export function validateVaultDrop({
       reason: "A folder cannot be moved inside itself.",
     };
   }
-  if (existingPaths.has(destinationPath)) {
+  if (!allowExistingDestination && existingPaths.has(destinationPath)) {
     return {
       valid: false,
       reason: `${source.name} already exists in that folder.`,

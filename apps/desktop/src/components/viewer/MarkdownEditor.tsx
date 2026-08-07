@@ -3,6 +3,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Eye, Redo2, Save, Undo2, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { useVaultTransfer } from "@/components/library/VaultTransferController";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -38,6 +39,7 @@ import {
   parentDir,
 } from "@/lib/vault-paths";
 import { useEditorStore } from "@/stores/editor";
+import { useUiStore } from "@/stores/ui";
 
 function fitSourceHeight(source: HTMLTextAreaElement) {
   source.style.height = "auto";
@@ -118,6 +120,8 @@ export function MarkdownEditor({ path }: { path: string }) {
   const queryClient = useQueryClient();
   const setEditing = useEditorStore((s) => s.setEditing);
   const setDirty = useEditorStore((s) => s.setDirty);
+  const clearPathsUnder = useUiStore((s) => s.clearPathsUnder);
+  const { startTransfer, conflictDialog } = useVaultTransfer();
   const dirty = useEditorStore((s) => s.dirtyPaths.has(path));
 
   const installedQuery = useQuery({
@@ -293,6 +297,8 @@ export function MarkdownEditor({ path }: { path: string }) {
   insertAtCaretRef.current = insertAtCaret;
   const pathRef = useRef(path);
   pathRef.current = path;
+  const startTransferRef = useRef(startTransfer);
+  startTransferRef.current = startTransfer;
 
   const installedPack = installedQuery.data?.find(
     (p) => p.local_path === rootPath,
@@ -330,35 +336,29 @@ export function MarkdownEditor({ path }: { path: string }) {
           return;
         }
         const destDir = parentDir(pathRef.current);
-        void (async () => {
-          try {
-            const result = await api.vaultImportFiles(destDir, paths);
+        void startTransferRef.current({
+          destDir,
+          sourcePaths: paths,
+          operation: "copy",
+          onComplete: (result) => {
             for (const key of fileMutationInvalidations(packId)) {
               void queryClient.invalidateQueries({ queryKey: key });
             }
-            if (result.imported.length === 0) {
-              if (result.skipped.length) {
-                toast.error("Nothing imported", {
-                  description: result.skipped.join("; "),
-                });
-              }
-              return;
+            for (const replaced of result.replaced_paths) {
+              clearPathsUnder(replaced);
+              setEditing(replaced, false);
+              setDirty(replaced, false);
             }
-            const snippets = result.imported.map((p) =>
-              markdownForVaultDrop(pathRef.current, p),
-            );
-            insertAtCaretRef.current(snippets.join("\n"));
-            if (result.skipped.length) {
-              toast.message("Some files were skipped", {
-                description: result.skipped.join("; "),
-              });
+            if (!result.replaced_paths.includes(pathRef.current)) {
+              const snippets = result.written_files
+                .filter((written) => written !== pathRef.current)
+                .map((written) =>
+                  markdownForVaultDrop(pathRef.current, written),
+                );
+              if (snippets.length) insertAtCaretRef.current(snippets.join("\n"));
             }
-          } catch (e) {
-            toast.error("Could not import files", {
-              description: e instanceof Error ? e.message : String(e),
-            });
-          }
-        })();
+          },
+        });
       })
       .then((fn) => {
         if (cancelled) fn();
@@ -509,6 +509,7 @@ export function MarkdownEditor({ path }: { path: string }) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      {conflictDialog}
     </div>
   );
 }

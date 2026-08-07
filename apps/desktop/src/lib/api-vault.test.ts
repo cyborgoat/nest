@@ -15,4 +15,26 @@ describe("vault command contracts", () => {
 
     expect(invoke).toHaveBeenCalledWith("vault_open_folder");
   });
+
+  it("passes batch transfer previews and conflict policies to Tauri", async () => {
+    await api.vaultPreviewTransfer("pack/docs", ["/tmp/a.md"], "copy");
+    expect(invoke).toHaveBeenLastCalledWith("vault_preview_transfer", {
+      destDir: "pack/docs",
+      sourcePaths: ["/tmp/a.md"],
+      operation: "copy",
+    });
+
+    await api.vaultApplyTransfer(
+      "pack/docs",
+      ["source/a.md", "source/b.md"],
+      "move",
+      "skip",
+    );
+    expect(invoke).toHaveBeenLastCalledWith("vault_apply_transfer", {
+      destDir: "pack/docs",
+      sourcePaths: ["source/a.md", "source/b.md"],
+      operation: "move",
+      conflictPolicy: "skip",
+    });
+  });
 });
