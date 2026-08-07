@@ -191,10 +191,6 @@ function format(template: string, params?: Record<string, string | number>) {
   });
 }
 
-export function isLocale(value: string): value is Locale {
-  return value === "en";
-}
-
 type I18nValue = {
   locale: Locale;
   t: (key: string, params?: Record<string, string | number>) => string;
