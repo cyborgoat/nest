@@ -32,10 +32,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             nest_debug!("app", "app_data_dir bootstrap starting");
-            let app_data = app
-                .path()
-                .app_data_dir()
-                .expect("failed to resolve app data dir");
+            let app_data = app.path().app_data_dir()?;
             nest_debug!("app", "app_data_dir={}", app_data.display());
             let state = AppState::new(app_data)?;
             app.manage(Arc::new(state) as SharedState);

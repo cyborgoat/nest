@@ -149,247 +149,215 @@ function closeEphemeralExcept(tabs: string[], keepId: string) {
 
 export const useUiStore = create<UiState>()(
   persist(
-    (set, get) => ({
-      sidebarOpen: true,
-      chatOpen: true,
-      activitySidebarView: "explorer",
-      setActivitySidebarView: (view) => set({ activitySidebarView: view }),
-      statusMessage: null,
-      chatSessionId: null,
-      openChatTabs: [],
-      openMainTabs: [],
-      activeMainTabId: null,
-      settingsSection: "general",
-      hubSection: "browse",
-      requestedPublishMessageId: null,
-      previewMainTabId: null,
-      contentZoom: CONTENT_ZOOM_DEFAULT,
-      zoomIn: () =>
-        set((s) => ({
-          contentZoom: clampContentZoom(s.contentZoom + CONTENT_ZOOM_STEP),
-        })),
-      zoomOut: () =>
-        set((s) => ({
-          contentZoom: clampContentZoom(s.contentZoom - CONTENT_ZOOM_STEP),
-        })),
-      resetContentZoom: () => set({ contentZoom: CONTENT_ZOOM_DEFAULT }),
-      pendingCloseTabId: null,
-      requestCloseMainTab: (id) => {
-        if (useEditorStore.getState().dirtyPaths.has(id)) {
-          set({ pendingCloseTabId: id });
-        } else {
-          get().closeMainTab(id);
-        }
-      },
-      confirmDiscardAndCloseMainTab: () => {
-        const { pendingCloseTabId } = get();
-        if (pendingCloseTabId) {
-          useEditorStore.getState().setDirty(pendingCloseTabId, false);
-          useEditorStore.getState().setEditing(pendingCloseTabId, false);
-          get().closeMainTab(pendingCloseTabId);
-        }
-        set({ pendingCloseTabId: null });
-      },
-      cancelPendingCloseMainTab: () => set({ pendingCloseTabId: null }),
-      setActiveMainTab: (id) => {
+    (set, get) => {
+      /** Shared body for the ephemeral (Hub/Settings/Messages) tab-open
+       * actions below: promote/append `tabId` and make it active, merging
+       * any tab-specific extra fields (e.g. which settings section). */
+      const openEphemeralTab = (tabId: string, patch?: Partial<UiState>) => {
         const { openMainTabs } = get();
+        const cleaned = closeEphemeralExcept(openMainTabs, tabId);
         set({
-          openMainTabs: closeEphemeralExcept(openMainTabs, id),
-          activeMainTabId: id,
+          openMainTabs: cleaned.includes(tabId) ? cleaned : [...cleaned, tabId],
+          activeMainTabId: tabId,
+          ...patch,
         });
-      },
-      clearPathsUnder: (path) => {
-        const { openMainTabs, activeMainTabId, previewMainTabId } = get();
-        const nextTabs = openMainTabs.filter(
-          (id) => !tabMatchesRemovedPath(id, path),
-        );
-        set({
-          openMainTabs: nextTabs,
-          activeMainTabId: nextActiveAfterRemoval(
-            openMainTabs,
-            nextTabs,
-            activeMainTabId,
-          ),
-          previewMainTabId: prunedPreview(previewMainTabId, nextTabs),
-        });
-      },
-      setSidebarOpen: (open) => set({ sidebarOpen: open }),
-      setChatOpen: (open) => set({ chatOpen: open }),
-      setStatusMessage: (message) => set({ statusMessage: message }),
-      openChatTab: (id) => {
-        const { openChatTabs } = get();
-        set({
-          openChatTabs: openChatTabs.includes(id)
-            ? openChatTabs
-            : [...openChatTabs, id],
-          chatSessionId: id,
-        });
-      },
-      closeChatTab: (id) => {
-        const { openChatTabs, chatSessionId } = get();
-        const nextTabs = openChatTabs.filter((t) => t !== id);
-        let nextActive = chatSessionId;
-        if (chatSessionId === id) {
-          const idx = openChatTabs.indexOf(id);
-          nextActive =
-            nextTabs[Math.min(idx, Math.max(0, nextTabs.length - 1))] ?? null;
-        }
-        set({ openChatTabs: nextTabs, chatSessionId: nextActive });
-      },
-      pruneChatTabs: (validIds) => {
-        const { openChatTabs, chatSessionId } = get();
-        const nextTabs = openChatTabs.filter((id) => validIds.has(id));
-        const nextActive =
-          chatSessionId && validIds.has(chatSessionId)
-            ? chatSessionId
-            : (nextTabs[0] ?? null);
-        set({ openChatTabs: nextTabs, chatSessionId: nextActive });
-      },
-      openFileTab: (path, opts) => {
-        const asPreview = opts?.preview ?? true;
-        const { openMainTabs, previewMainTabId } = get();
-        const cleaned = closeEphemeralExcept(openMainTabs, path);
-        if (cleaned.includes(path)) {
+      };
+
+      return {
+        sidebarOpen: true,
+        chatOpen: true,
+        activitySidebarView: "explorer",
+        setActivitySidebarView: (view) => set({ activitySidebarView: view }),
+        statusMessage: null,
+        chatSessionId: null,
+        openChatTabs: [],
+        openMainTabs: [],
+        activeMainTabId: null,
+        settingsSection: "general",
+        hubSection: "browse",
+        requestedPublishMessageId: null,
+        previewMainTabId: null,
+        contentZoom: CONTENT_ZOOM_DEFAULT,
+        zoomIn: () =>
+          set((s) => ({
+            contentZoom: clampContentZoom(s.contentZoom + CONTENT_ZOOM_STEP),
+          })),
+        zoomOut: () =>
+          set((s) => ({
+            contentZoom: clampContentZoom(s.contentZoom - CONTENT_ZOOM_STEP),
+          })),
+        resetContentZoom: () => set({ contentZoom: CONTENT_ZOOM_DEFAULT }),
+        pendingCloseTabId: null,
+        requestCloseMainTab: (id) => {
+          if (useEditorStore.getState().dirtyPaths.has(id)) {
+            set({ pendingCloseTabId: id });
+          } else {
+            get().closeMainTab(id);
+          }
+        },
+        confirmDiscardAndCloseMainTab: () => {
+          const { pendingCloseTabId } = get();
+          if (pendingCloseTabId) {
+            useEditorStore.getState().setDirty(pendingCloseTabId, false);
+            useEditorStore.getState().setEditing(pendingCloseTabId, false);
+            get().closeMainTab(pendingCloseTabId);
+          }
+          set({ pendingCloseTabId: null });
+        },
+        cancelPendingCloseMainTab: () => set({ pendingCloseTabId: null }),
+        setActiveMainTab: (id) => {
+          const { openMainTabs } = get();
           set({
-            openMainTabs: cleaned,
-            activeMainTabId: path,
-            // Opening an already-open tab again promotes it out of preview.
-            previewMainTabId:
-              previewMainTabId === path ? null : previewMainTabId,
-          });
-          return;
-        }
-        set({
-          openMainTabs: replacePreviewOrAppend(cleaned, previewMainTabId, path),
-          activeMainTabId: path,
-          previewMainTabId: asPreview ? path : null,
-        });
-      },
-      openDiffTab: (packId, path) => {
-        const id = diffTabId(packId, path);
-        const { openMainTabs, previewMainTabId } = get();
-        const cleaned = closeEphemeralExcept(openMainTabs, id);
-        if (cleaned.includes(id)) {
-          set({
-            openMainTabs: cleaned,
+            openMainTabs: closeEphemeralExcept(openMainTabs, id),
             activeMainTabId: id,
-            previewMainTabId: previewMainTabId === id ? null : previewMainTabId,
           });
-          return;
-        }
-        set({
-          // Diff tabs always open as preview — clicking through several
-          // changed files in Source Control shouldn't spam permanent tabs.
-          openMainTabs: replacePreviewOrAppend(cleaned, previewMainTabId, id),
-          activeMainTabId: id,
-          previewMainTabId: id,
-        });
-      },
-      openHubTab: () => {
-        const { openMainTabs } = get();
-        const cleaned = closeEphemeralExcept(openMainTabs, HUB_TAB_ID);
-        set({
-          openMainTabs: cleaned.includes(HUB_TAB_ID)
-            ? cleaned
-            : [...cleaned, HUB_TAB_ID],
-          activeMainTabId: HUB_TAB_ID,
-          hubSection: "browse",
-        });
-      },
-      openHubInstalledTab: () => {
-        const { openMainTabs } = get();
-        const cleaned = closeEphemeralExcept(openMainTabs, HUB_TAB_ID);
-        set({
-          openMainTabs: cleaned.includes(HUB_TAB_ID)
-            ? cleaned
-            : [...cleaned, HUB_TAB_ID],
-          activeMainTabId: HUB_TAB_ID,
-          hubSection: "installed",
-        });
-      },
-      openSettingsTab: () => {
-        const { openMainTabs } = get();
-        const cleaned = closeEphemeralExcept(openMainTabs, SETTINGS_TAB_ID);
-        set({
-          openMainTabs: cleaned.includes(SETTINGS_TAB_ID)
-            ? cleaned
-            : [...cleaned, SETTINGS_TAB_ID],
-          activeMainTabId: SETTINGS_TAB_ID,
-          settingsSection: "general",
-        });
-      },
-      openAccountSettingsTab: () => {
-        const { openMainTabs } = get();
-        const cleaned = closeEphemeralExcept(openMainTabs, SETTINGS_TAB_ID);
-        set({
-          openMainTabs: cleaned.includes(SETTINGS_TAB_ID)
-            ? cleaned
-            : [...cleaned, SETTINGS_TAB_ID],
-          activeMainTabId: SETTINGS_TAB_ID,
-          settingsSection: "account",
-        });
-      },
-      setSettingsSection: (settingsSection) => set({ settingsSection }),
-      openMessagesTab: () => {
-        const { openMainTabs } = get();
-        const cleaned = closeEphemeralExcept(openMainTabs, MESSAGES_TAB_ID);
-        set({
-          openMainTabs: cleaned.includes(MESSAGES_TAB_ID)
-            ? cleaned
-            : [...cleaned, MESSAGES_TAB_ID],
-          activeMainTabId: MESSAGES_TAB_ID,
-        });
-      },
-      openPublishMessage: (requestId) => {
-        const { openMainTabs } = get();
-        const cleaned = closeEphemeralExcept(openMainTabs, MESSAGES_TAB_ID);
-        set({
-          openMainTabs: cleaned.includes(MESSAGES_TAB_ID)
-            ? cleaned
-            : [...cleaned, MESSAGES_TAB_ID],
-          activeMainTabId: MESSAGES_TAB_ID,
-          requestedPublishMessageId: requestId,
-        });
-      },
-      clearRequestedPublishMessage: () =>
-        set({ requestedPublishMessageId: null }),
-      closeMainTab: (id) => {
-        const { openMainTabs, activeMainTabId, previewMainTabId } = get();
-        const nextTabs = openMainTabs.filter((t) => t !== id);
-        set({
-          openMainTabs: nextTabs,
-          activeMainTabId: nextActiveAfterRemoval(
-            openMainTabs,
-            nextTabs,
-            activeMainTabId,
-          ),
-          previewMainTabId: prunedPreview(previewMainTabId, nextTabs),
-        });
-      },
-      pruneMainFileTabs: (validPaths) => {
-        const { openMainTabs, activeMainTabId, previewMainTabId } = get();
-        const nextTabs = openMainTabs.filter(
-          (id) =>
-            id === HUB_TAB_ID ||
-            id === SETTINGS_TAB_ID ||
-            id === MESSAGES_TAB_ID ||
-            // Diff tabs can legitimately point at paths absent from the tree
-            // (deleted files) — their lifecycle is managed by discard/close,
-            // not this path-existence check.
-            parseDiffTabId(id) != null ||
-            validPaths.has(id),
-        );
-        set({
-          openMainTabs: nextTabs,
-          activeMainTabId: nextActiveAfterRemoval(
-            openMainTabs,
-            nextTabs,
-            activeMainTabId,
-          ),
-          previewMainTabId: prunedPreview(previewMainTabId, nextTabs),
-        });
-      },
-    }),
+        },
+        clearPathsUnder: (path) => {
+          const { openMainTabs, activeMainTabId, previewMainTabId } = get();
+          const nextTabs = openMainTabs.filter(
+            (id) => !tabMatchesRemovedPath(id, path),
+          );
+          set({
+            openMainTabs: nextTabs,
+            activeMainTabId: nextActiveAfterRemoval(
+              openMainTabs,
+              nextTabs,
+              activeMainTabId,
+            ),
+            previewMainTabId: prunedPreview(previewMainTabId, nextTabs),
+          });
+        },
+        setSidebarOpen: (open) => set({ sidebarOpen: open }),
+        setChatOpen: (open) => set({ chatOpen: open }),
+        setStatusMessage: (message) => set({ statusMessage: message }),
+        openChatTab: (id) => {
+          const { openChatTabs } = get();
+          set({
+            openChatTabs: openChatTabs.includes(id)
+              ? openChatTabs
+              : [...openChatTabs, id],
+            chatSessionId: id,
+          });
+        },
+        closeChatTab: (id) => {
+          const { openChatTabs, chatSessionId } = get();
+          const nextTabs = openChatTabs.filter((t) => t !== id);
+          let nextActive = chatSessionId;
+          if (chatSessionId === id) {
+            const idx = openChatTabs.indexOf(id);
+            nextActive =
+              nextTabs[Math.min(idx, Math.max(0, nextTabs.length - 1))] ??
+              null;
+          }
+          set({ openChatTabs: nextTabs, chatSessionId: nextActive });
+        },
+        pruneChatTabs: (validIds) => {
+          const { openChatTabs, chatSessionId } = get();
+          const nextTabs = openChatTabs.filter((id) => validIds.has(id));
+          const nextActive =
+            chatSessionId && validIds.has(chatSessionId)
+              ? chatSessionId
+              : (nextTabs[0] ?? null);
+          set({ openChatTabs: nextTabs, chatSessionId: nextActive });
+        },
+        openFileTab: (path, opts) => {
+          const asPreview = opts?.preview ?? true;
+          const { openMainTabs, previewMainTabId } = get();
+          const cleaned = closeEphemeralExcept(openMainTabs, path);
+          if (cleaned.includes(path)) {
+            set({
+              openMainTabs: cleaned,
+              activeMainTabId: path,
+              // Opening an already-open tab again promotes it out of preview.
+              previewMainTabId:
+                previewMainTabId === path ? null : previewMainTabId,
+            });
+            return;
+          }
+          set({
+            openMainTabs: replacePreviewOrAppend(
+              cleaned,
+              previewMainTabId,
+              path,
+            ),
+            activeMainTabId: path,
+            previewMainTabId: asPreview ? path : null,
+          });
+        },
+        openDiffTab: (packId, path) => {
+          const id = diffTabId(packId, path);
+          const { openMainTabs, previewMainTabId } = get();
+          const cleaned = closeEphemeralExcept(openMainTabs, id);
+          if (cleaned.includes(id)) {
+            set({
+              openMainTabs: cleaned,
+              activeMainTabId: id,
+              previewMainTabId:
+                previewMainTabId === id ? null : previewMainTabId,
+            });
+            return;
+          }
+          set({
+            // Diff tabs always open as preview — clicking through several
+            // changed files in Source Control shouldn't spam permanent tabs.
+            openMainTabs: replacePreviewOrAppend(cleaned, previewMainTabId, id),
+            activeMainTabId: id,
+            previewMainTabId: id,
+          });
+        },
+        openHubTab: () => openEphemeralTab(HUB_TAB_ID, { hubSection: "browse" }),
+        openHubInstalledTab: () =>
+          openEphemeralTab(HUB_TAB_ID, { hubSection: "installed" }),
+        openSettingsTab: () =>
+          openEphemeralTab(SETTINGS_TAB_ID, { settingsSection: "general" }),
+        openAccountSettingsTab: () =>
+          openEphemeralTab(SETTINGS_TAB_ID, { settingsSection: "account" }),
+        setSettingsSection: (settingsSection) => set({ settingsSection }),
+        openMessagesTab: () => openEphemeralTab(MESSAGES_TAB_ID),
+        openPublishMessage: (requestId) =>
+          openEphemeralTab(MESSAGES_TAB_ID, {
+            requestedPublishMessageId: requestId,
+          }),
+        clearRequestedPublishMessage: () =>
+          set({ requestedPublishMessageId: null }),
+        closeMainTab: (id) => {
+          const { openMainTabs, activeMainTabId, previewMainTabId } = get();
+          const nextTabs = openMainTabs.filter((t) => t !== id);
+          set({
+            openMainTabs: nextTabs,
+            activeMainTabId: nextActiveAfterRemoval(
+              openMainTabs,
+              nextTabs,
+              activeMainTabId,
+            ),
+            previewMainTabId: prunedPreview(previewMainTabId, nextTabs),
+          });
+        },
+        pruneMainFileTabs: (validPaths) => {
+          const { openMainTabs, activeMainTabId, previewMainTabId } = get();
+          const nextTabs = openMainTabs.filter(
+            (id) =>
+              id === HUB_TAB_ID ||
+              id === SETTINGS_TAB_ID ||
+              id === MESSAGES_TAB_ID ||
+              // Diff tabs can legitimately point at paths absent from the
+              // tree (deleted files) — their lifecycle is managed by
+              // discard/close, not this path-existence check.
+              parseDiffTabId(id) != null ||
+              validPaths.has(id),
+          );
+          set({
+            openMainTabs: nextTabs,
+            activeMainTabId: nextActiveAfterRemoval(
+              openMainTabs,
+              nextTabs,
+              activeMainTabId,
+            ),
+            previewMainTabId: prunedPreview(previewMainTabId, nextTabs),
+          });
+        },
+      };
+    },
     {
       name: "nest-ui-chat-tabs",
       partialize: (state) => {

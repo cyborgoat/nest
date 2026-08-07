@@ -5,16 +5,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useVaultTransfer } from "@/components/library/VaultTransferController";
 import { Button } from "@/components/ui/button";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { DiscardChangesDialog } from "@/components/ui/discard-changes-dialog";
 import { PanelHeader } from "@/components/ui/panel-header";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -35,6 +26,7 @@ import {
 import { canEditPack, packEditBlockReason } from "@/lib/pack-permissions";
 import { fileMutationInvalidations, queryKeys } from "@/lib/query-keys";
 import {
+  fileName,
   markdownForVaultDrop,
   parentDir,
 } from "@/lib/vault-paths";
@@ -450,7 +442,7 @@ export function MarkdownEditor({ path }: { path: string }) {
         }
       >
         <span className="truncate text-sm text-muted-foreground">
-          {path.split("/").pop()}
+          {fileName(path)}
         </span>
       </PanelHeader>
       <ScrollArea className="markdown-editor-scroll min-h-0 flex-1">
@@ -485,31 +477,20 @@ export function MarkdownEditor({ path }: { path: string }) {
           )}
         </div>
       </ScrollArea>
-      <AlertDialog open={cancelOpen} onOpenChange={setCancelOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Discard unsaved changes?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This restores the last saved content and exits the editor.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Keep editing</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                const saved = savedRef.current ?? "";
-                setMarkdown(saved);
-                setHistory(createEditorHistory(saved));
-                setDirty(path, false);
-                setCancelOpen(false);
-                setEditing(path, false);
-              }}
-            >
-              Discard changes
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <DiscardChangesDialog
+        open={cancelOpen}
+        onOpenChange={setCancelOpen}
+        description="This restores the last saved content and exits the editor."
+        cancelLabel="Keep editing"
+        onConfirm={() => {
+          const saved = savedRef.current ?? "";
+          setMarkdown(saved);
+          setHistory(createEditorHistory(saved));
+          setDirty(path, false);
+          setCancelOpen(false);
+          setEditing(path, false);
+        }}
+      />
       {conflictDialog}
     </div>
   );

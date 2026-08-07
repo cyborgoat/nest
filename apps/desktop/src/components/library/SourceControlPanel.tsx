@@ -634,7 +634,7 @@ export function SourceControlPanel({
     const refreshedPacks = await api.hubReconcilePublishRequests();
     queryClient.setQueryData(queryKeys.installedPacks, refreshedPacks);
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["pack-status"] }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.allPackStatus }),
       queryClient.invalidateQueries({
         queryKey: queryKeys.sourceControlRejections,
       }),

@@ -1,19 +1,8 @@
 import { Bell, Cloud, FileText, GitCompare, Image as ImageIcon, Settings2 } from "lucide-react";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { buttonVariants } from "@/components/ui/button";
+import { DiscardChangesDialog } from "@/components/ui/discard-changes-dialog";
 import { TabStrip } from "@/components/ui/tab-strip";
 import { useI18n } from "@/lib/i18n";
-import { cn } from "@/lib/utils";
-import { isImagePath } from "@/lib/vault-paths";
+import { fileName, isImagePath } from "@/lib/vault-paths";
 import { useEditorStore } from "@/stores/editor";
 import {
   HUB_TAB_ID,
@@ -28,8 +17,8 @@ function tabLabel(id: string, t: ReturnType<typeof useI18n>["t"]) {
   if (id === SETTINGS_TAB_ID) return t("shell.settings");
   if (id === MESSAGES_TAB_ID) return "Messages";
   const diffTab = parseDiffTabId(id);
-  if (diffTab) return `${diffTab.path.split("/").pop() || diffTab.path} (diff)`;
-  return id.split("/").pop() || id;
+  if (diffTab) return `${fileName(diffTab.path)} (diff)`;
+  return fileName(id);
 }
 
 function tabIcon(id: string) {
@@ -82,29 +71,13 @@ export function MainTabBar() {
         }}
         emptyLabel={t("shell.noFilesOpen")}
       />
-      <AlertDialog
+      <DiscardChangesDialog
         open={pendingCloseId != null}
         onOpenChange={(open) => !open && cancelPendingCloseMainTab()}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Discard unsaved changes?</AlertDialogTitle>
-            <AlertDialogDescription>
-              {pendingCloseId ? tabLabel(pendingCloseId, t) : ""} has unsaved
-              edits. Closing this tab discards them.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              className={cn(buttonVariants({ variant: "destructive" }))}
-              onClick={confirmDiscardAndCloseMainTab}
-            >
-              Discard and close
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        description={`${pendingCloseId ? tabLabel(pendingCloseId, t) : ""} has unsaved edits. Closing this tab discards them.`}
+        confirmLabel="Discard and close"
+        onConfirm={confirmDiscardAndCloseMainTab}
+      />
     </>
   );
 }

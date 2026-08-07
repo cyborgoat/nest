@@ -1,3 +1,6 @@
+const PACK_STATUS_KEY = "pack-status";
+const FILE_DIFF_KEY = "file-diff";
+
 export const queryKeys = {
   tree: ["tree"] as const,
   settings: ["settings"] as const,
@@ -22,9 +25,14 @@ export const queryKeys = {
   file: (path: string) => ["file", path] as const,
   allFiles: ["file"] as const,
   vaultImage: (path: string) => ["vault-image", path] as const,
-  packStatus: (packId: string) => ["pack-status", packId] as const,
+  packStatus: (packId: string) => [PACK_STATUS_KEY, packId] as const,
+  /** Prefix key matching every pack's status query, for a broad invalidation
+   * (e.g. after publishing/reconciling) that isn't scoped to one pack. */
+  allPackStatus: [PACK_STATUS_KEY] as const,
   fileDiff: (packId: string, path: string) =>
-    ["file-diff", packId, path] as const,
+    [FILE_DIFF_KEY, packId, path] as const,
+  /** Prefix key matching every diff query for one pack, regardless of path. */
+  packFileDiffs: (packId: string) => [FILE_DIFF_KEY, packId] as const,
 };
 
 export const packMutationInvalidations = [

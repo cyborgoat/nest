@@ -25,7 +25,7 @@ export function useMergeApprovedPack() {
           queryKey: queryKeys.packStatus(pack.pack_id),
         }),
         queryClient.invalidateQueries({
-          queryKey: ["file-diff", pack.pack_id],
+          queryKey: queryKeys.packFileDiffs(pack.pack_id),
         }),
         queryClient.invalidateQueries({ queryKey: queryKeys.tree }),
         queryClient.invalidateQueries({ queryKey: queryKeys.messages }),

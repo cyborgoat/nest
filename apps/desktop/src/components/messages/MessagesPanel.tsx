@@ -124,7 +124,7 @@ export function MessagesPanel() {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: queryKeys.messages }),
       queryClient.invalidateQueries({ queryKey: queryKeys.messageCount }),
-      queryClient.invalidateQueries({ queryKey: ["pack-status"] }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.allPackStatus }),
     ]);
   };
   useEffect(() => {

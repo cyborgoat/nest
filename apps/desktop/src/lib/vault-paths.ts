@@ -8,8 +8,12 @@ const IMAGE_EXTENSIONS = new Set([
   "bmp",
 ]);
 
+export function fileName(path: string): string {
+  return path.split("/").pop() || path;
+}
+
 export function fileExtension(path: string): string {
-  const base = path.split("/").pop() ?? path;
+  const base = fileName(path);
   const dot = base.lastIndexOf(".");
   if (dot <= 0) return "";
   return base.slice(dot + 1).toLowerCase();
@@ -63,7 +67,7 @@ export function markdownForVaultDrop(
 ): string {
   const fromDir = parentDir(openFilePath);
   const rel = relativeVaultPath(fromDir, droppedPath);
-  const name = fileStem(droppedPath.split("/").pop() ?? droppedPath);
+  const name = fileStem(fileName(droppedPath));
   if (isImagePath(droppedPath)) {
     return `![${name}](${rel})`;
   }

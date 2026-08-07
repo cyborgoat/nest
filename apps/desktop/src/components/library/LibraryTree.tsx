@@ -121,6 +121,7 @@ import {
 import {
   ensureImageExtension,
   ensureMdExtension,
+  fileName,
   isImagePath,
   joinPath,
   parentDir,
@@ -1817,7 +1818,7 @@ export function LibraryTree({
               </span>
               {internalDropTargetNodePath && (
                 <span className="shrink-0 text-muted-foreground">
-                  → {internalDropTargetNodePath.split("/").pop()}
+                  → {fileName(internalDropTargetNodePath)}
                 </span>
               )}
             </motion.div>,

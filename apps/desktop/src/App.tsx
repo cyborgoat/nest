@@ -185,7 +185,7 @@ export default function App() {
   useEffect(() => {
     if (!reconcileQuery.data) return;
     queryClient.setQueryData(queryKeys.installedPacks, reconcileQuery.data);
-    void queryClient.invalidateQueries({ queryKey: ["pack-status"] });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.allPackStatus });
   }, [reconcileQuery.data, queryClient]);
 
   const fontSizePt = settingsQuery.data?.font_size_pt ?? 10;

@@ -1,5 +1,6 @@
 import { FileText, Loader2 } from "lucide-react";
 import { TextShimmer } from "@/components/motion-primitives/text-shimmer";
+import { fileName } from "@/lib/vault-paths";
 
 export type AgentActivity =
   | { kind: "reading"; path: string }
@@ -8,8 +9,7 @@ export type AgentActivity =
 
 function labelFor(activity: NonNullable<AgentActivity>): string {
   if (activity.kind === "generating") return "Generating response…";
-  const name = activity.path.split("/").pop() || activity.path;
-  return `Reading ${name}…`;
+  return `Reading ${fileName(activity.path)}…`;
 }
 
 export function AgentStatusIndicator({ activity }: { activity: AgentActivity }) {

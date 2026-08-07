@@ -23,6 +23,7 @@ import {
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Field } from "@/components/ui/field";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -797,22 +798,3 @@ function GeneralGroup({
   );
 }
 
-function Field({
-  label,
-  description,
-  children,
-}: {
-  label: string;
-  description?: string;
-  children: ReactNode;
-}) {
-  return (
-    <div className="space-y-1.5">
-      <Label>{label}</Label>
-      {description ? (
-        <p className="text-xs text-muted-foreground">{description}</p>
-      ) : null}
-      {children}
-    </div>
-  );
-}

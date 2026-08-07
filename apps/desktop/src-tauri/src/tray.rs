@@ -21,7 +21,7 @@ pub fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     #[cfg(not(target_os = "windows"))]
     let icon_bytes = include_bytes!("../icons/tray-icon.png");
 
-    let icon = Image::from_bytes(icon_bytes).expect("failed to load tray icon");
+    let icon = Image::from_bytes(icon_bytes)?;
 
     let _tray = TrayIconBuilder::with_id("main")
         .icon(icon)

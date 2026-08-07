@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ensureImageExtension,
+  fileName,
   isImagePath,
   isMarkdownPath,
   markdownForVaultDrop,
@@ -8,6 +9,11 @@ import {
 } from "./vault-paths";
 
 describe("vault-paths", () => {
+  it("extracts the file name from a path", () => {
+    expect(fileName("pack/docs/a.md")).toBe("a.md");
+    expect(fileName("a.md")).toBe("a.md");
+  });
+
   it("detects markdown and image paths", () => {
     expect(isMarkdownPath("pack/a.md")).toBe(true);
     expect(isImagePath("pack/pic.PNG")).toBe(true);

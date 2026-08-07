@@ -2,11 +2,12 @@ import { useQuery } from "@tanstack/react-query";
 import { ImageOff } from "lucide-react";
 import { api } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
+import { fileName } from "@/lib/vault-paths";
 import { PanelHeader } from "@/components/ui/panel-header";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 export function ImageViewer({ path }: { path: string }) {
-  const name = path.split("/").pop() || path;
+  const name = fileName(path);
   const { data, isLoading, error } = useQuery({
     queryKey: queryKeys.vaultImage(path),
     queryFn: () => api.vaultReadImage(path),

@@ -1,3 +1,5 @@
+import { parentDir } from "@/lib/vault-paths";
+
 /** Find the nearest explorer folder path under a screen point (Tauri drop). */
 export function vaultFolderPathAtPoint(x: number, y: number): string | null {
   const el = document.elementFromPoint(x, y);
@@ -10,8 +12,9 @@ export function vaultFolderPathAtPoint(x: number, y: number): string | null {
   const file = el.closest("[data-vault-kind='file'][data-vault-path]");
   if (file instanceof HTMLElement) {
     const path = file.dataset.vaultPath ?? "";
-    const idx = path.lastIndexOf("/");
-    return idx === -1 ? null : path.slice(0, idx);
+    // A root-level file (no "/") has no parent folder to drop into — keep
+    // that `null`, distinct from parentDir's `""` ("root is the parent").
+    return path.includes("/") ? parentDir(path) : null;
   }
   // Anywhere else inside the explorer tree: no specific folder.
   if (el.closest("[data-explorer-tree]")) {

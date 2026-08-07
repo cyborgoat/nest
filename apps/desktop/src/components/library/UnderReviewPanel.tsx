@@ -58,7 +58,7 @@ export function UnderReviewPanel({
             pack.pack_id === updated.pack_id ? updated : pack,
           ) ?? [updated],
       );
-      void queryClient.invalidateQueries({ queryKey: ["pack-status"] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.allPackStatus });
       void queryClient.invalidateQueries({ queryKey: queryKeys.messages });
       void queryClient.invalidateQueries({ queryKey: queryKeys.messageCount });
       void queryClient.invalidateQueries({

@@ -11,14 +11,22 @@ pub fn build_client(proxy_url: &str) -> AppResult<reqwest::Client> {
 }
 
 pub fn build_client_with_timeout(proxy_url: &str, timeout: Duration) -> AppResult<reqwest::Client> {
+    apply_proxy(reqwest::Client::builder().timeout(timeout), proxy_url)
+}
+
+/// Apply the configured proxy (or explicitly opt out of the system default)
+/// to a client builder and finish building it. Shared by
+/// `build_client_with_timeout` and `build_hub_client`, which only differ in
+/// their builder's own config (timeout, redirect policy) before this step.
+fn apply_proxy(builder: reqwest::ClientBuilder, proxy_url: &str) -> AppResult<reqwest::Client> {
     let proxy = proxy_url.trim();
-    let builder = reqwest::Client::builder().timeout(timeout);
+    let builder = builder.no_proxy();
     if proxy.is_empty() {
-        return Ok(builder.no_proxy().build()?);
+        return Ok(builder.build()?);
     }
     let proxy = reqwest::Proxy::all(proxy)
         .map_err(|e| AppError::msg(format!("Proxy URL is invalid: {e}")))?;
-    Ok(builder.no_proxy().proxy(proxy).build()?)
+    Ok(builder.proxy(proxy).build()?)
 }
 
 /// Build an HTTP client for talking to the Nest Hub specifically. Unlike
@@ -31,16 +39,12 @@ pub fn build_client_with_timeout(proxy_url: &str, timeout: Duration) -> AppResul
 /// misleading 401/404 with no indication a redirect ever happened. Callers
 /// should treat a 3xx response as an explicit, reportable error instead.
 pub fn build_hub_client(proxy_url: &str) -> AppResult<reqwest::Client> {
-    let proxy = proxy_url.trim();
-    let builder = reqwest::Client::builder()
-        .timeout(DEFAULT_HTTP_TIMEOUT)
-        .redirect(reqwest::redirect::Policy::none());
-    if proxy.is_empty() {
-        return Ok(builder.no_proxy().build()?);
-    }
-    let proxy = reqwest::Proxy::all(proxy)
-        .map_err(|e| AppError::msg(format!("Proxy URL is invalid: {e}")))?;
-    Ok(builder.no_proxy().proxy(proxy).build()?)
+    apply_proxy(
+        reqwest::Client::builder()
+            .timeout(DEFAULT_HTTP_TIMEOUT)
+            .redirect(reqwest::redirect::Policy::none()),
+        proxy_url,
+    )
 }
 
 /// Validate an optional proxy URL (`http`, `https`, or `socks5`). Empty is ok.
