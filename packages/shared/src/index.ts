@@ -340,6 +340,8 @@ export type KnowledgePackMeta = {
   name: string;
   description: string;
   version: string;
+  /** Detected sub-path within an inspected folder/ZIP; absent on input. */
+  path?: string;
 };
 
 export type KnowledgePackDefaults = {
