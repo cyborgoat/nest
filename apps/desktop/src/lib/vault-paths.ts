@@ -12,7 +12,7 @@ export function fileName(path: string): string {
   return path.split("/").pop() || path;
 }
 
-export function fileExtension(path: string): string {
+function fileExtension(path: string): string {
   const base = fileName(path);
   const dot = base.lastIndexOf(".");
   if (dot <= 0) return "";
@@ -36,7 +36,7 @@ export function joinPath(dir: string, name: string): string {
   return dir ? `${dir}/${name}` : name;
 }
 
-export function fileStem(name: string): string {
+function fileStem(name: string): string {
   const dot = name.lastIndexOf(".");
   return dot > 0 ? name.slice(0, dot) : name;
 }

@@ -14,7 +14,7 @@ export type ActivitySidebarView = "explorer" | "source-control" | "reviews";
 export const CONTENT_ZOOM_MIN = 0.5;
 export const CONTENT_ZOOM_MAX = 2;
 export const CONTENT_ZOOM_DEFAULT = 1;
-export const CONTENT_ZOOM_STEP = 0.1;
+const CONTENT_ZOOM_STEP = 0.1;
 
 function clampContentZoom(value: number): number {
   return Math.min(
