@@ -13,7 +13,7 @@ import {
 import { ChatSessionBar } from "@/components/chat/ChatSessionBar";
 import { MentionComposer, type MentionRef } from "@/components/chat/MentionComposer";
 import { renderWithMentions } from "@/components/chat/mention-pill";
-import { collectMentionCandidates } from "@/components/library/LibraryTree";
+import { collectMentionCandidates } from "@/lib/tree-mentions";
 import { MarkdownBody } from "@/components/markdown/MarkdownBody";
 import {
   Accordion,
