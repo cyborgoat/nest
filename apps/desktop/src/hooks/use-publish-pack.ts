@@ -2,8 +2,8 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRef } from "react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import { appErrorMessage } from "@/lib/errors";
 import { packMutationInvalidations, queryKeys } from "@/lib/query-keys";
+import { publishErrorMessage } from "@/lib/publish-errors";
 
 export type PublishPackInput =
   | {
@@ -66,19 +66,9 @@ export function usePublishPack() {
     },
     onError: (error: unknown, variables) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.hubAuth });
-      const fallback =
-        variables.kind === "live_patch"
-          ? "Could not submit live patch"
-          : "Could not publish release";
-      const message = appErrorMessage(error, fallback);
-      toast.error(
-        message.includes("hub_publish_live_patch")
-          ? "Restart the desktop app to enable live patch publishing"
-          : message,
-        {
-          id: toastIdRef.current,
-        },
-      );
+      toast.error(publishErrorMessage(error, variables.kind), {
+        id: toastIdRef.current,
+      });
     },
     onSettled: () => {
       // Publishing can migrate a legacy sidebar-created local pack from a
