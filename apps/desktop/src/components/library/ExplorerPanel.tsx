@@ -25,6 +25,7 @@ import {
   isPointOverExplorer,
   vaultFolderPathAtPoint,
 } from "@/lib/drop-targets";
+import { appErrorMessage } from "@/lib/errors";
 import { canEditPack, packEditBlockReason } from "@/lib/pack-permissions";
 import {
   fileMutationInvalidations,
@@ -84,8 +85,8 @@ export function ExplorerPanel({
       setEditing(readmePath, true);
       toast.success("Knowledge pack created");
     },
-    onError: (e: Error) =>
-      toast.error("Could not create pack", { description: e.message }),
+    onError: (e) =>
+      toast.error("Could not create pack", { description: appErrorMessage(e) }),
   });
 
   const importIntoFolder = useRef(
@@ -210,7 +211,9 @@ export function ExplorerPanel({
         onOpenChange={setNewPackOpen}
         onCreate={(metadata) => createPack.mutate(metadata)}
         creating={createPack.isPending}
-        error={createPack.error?.message}
+        error={
+          createPack.error ? appErrorMessage(createPack.error) : undefined
+        }
       />
       <LocalPackImportController
         mode={importMode}

@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
 import { isPointOverEditor } from "@/lib/drop-targets";
+import { appErrorMessage } from "@/lib/errors";
 import {
   createEditorHistory,
   currentEditorHistory,
@@ -168,8 +169,7 @@ export function MarkdownEditor({ path }: { path: string }) {
       }
       toast.success("Saved");
     },
-    onError: (e: Error) =>
-      toast.error("Could not save", { description: e.message }),
+    onError: (e) => toast.error("Could not save", { description: appErrorMessage(e) }),
   });
 
   // `save` is a new object every render (useMutation) and `dirty` changes on
@@ -452,7 +452,7 @@ export function MarkdownEditor({ path }: { path: string }) {
               <p className="text-muted-foreground">Loading…</p>
             ) : fileQuery.error ? (
               <p className="text-destructive">
-                {(fileQuery.error as Error).message}
+                {appErrorMessage(fileQuery.error)}
               </p>
             ) : null
           ) : (

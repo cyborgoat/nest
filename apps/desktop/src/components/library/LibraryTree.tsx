@@ -496,8 +496,8 @@ function TreeItem({
         toast.success("Folder created");
       }
     },
-    onError: (e: Error) =>
-      toast.error("Could not create item", { description: e.message }),
+    onError: (e) =>
+      toast.error("Could not create item", { description: appErrorMessage(e) }),
   });
 
   const importFiles = useMutation({
@@ -511,8 +511,8 @@ function TreeItem({
           : undefined,
       });
     },
-    onError: (e: Error) =>
-      toast.error("Could not import files", { description: e.message }),
+    onError: (e) =>
+      toast.error("Could not import files", { description: appErrorMessage(e) }),
   });
 
   const chooseFilesToImport = async () => {
@@ -545,7 +545,7 @@ function TreeItem({
       if (paths.length > 0) importFiles.mutate(paths);
     } catch (e) {
       toast.error("Could not open file picker", {
-        description: e instanceof Error ? e.message : String(e),
+        description: appErrorMessage(e),
       });
     }
   };
@@ -560,8 +560,8 @@ function TreeItem({
       setDirty(node.path, false);
       invalidateAfterEdit();
     },
-    onError: (e: Error) =>
-      toast.error("Could not rename", { description: e.message }),
+    onError: (e) =>
+      toast.error("Could not rename", { description: appErrorMessage(e) }),
   });
 
   const remove = useMutation({
@@ -575,8 +575,8 @@ function TreeItem({
       setDirty(node.path, false);
       invalidateAfterEdit();
     },
-    onError: (e: Error) =>
-      toast.error("Could not delete", { description: e.message }),
+    onError: (e) =>
+      toast.error("Could not delete", { description: appErrorMessage(e) }),
   });
 
   const startRename = () => setRenaming(true);
@@ -832,9 +832,9 @@ function TreeItem({
               afterMenuClose(() => {
                 void api
                   .vaultRevealInFolder(node.path)
-                  .catch((e: Error) =>
+                  .catch((e) =>
                     toast.error("Could not reveal in folder", {
-                      description: e.message,
+                      description: appErrorMessage(e),
                     }),
                   );
               })
@@ -1364,8 +1364,8 @@ export function LibraryTree({
         toast.success("Folder created");
       }
     },
-    onError: (error: Error) =>
-      toast.error("Could not create item", { description: error.message }),
+    onError: (error) =>
+      toast.error("Could not create item", { description: appErrorMessage(error) }),
   });
 
   const openNewEntryDialog = (
@@ -1377,9 +1377,9 @@ export function LibraryTree({
   };
 
   const openVaultFolder = () => {
-    void api.vaultOpenFolder().catch((error: Error) =>
+    void api.vaultOpenFolder().catch((error) =>
       toast.error("Could not open vault folder", {
-        description: error.message,
+        description: appErrorMessage(error),
       }),
     );
   };
@@ -1707,8 +1707,8 @@ export function LibraryTree({
         vars.active ? "Knowledge pack activated" : "Knowledge pack deactivated",
       );
     },
-    onError: (e: Error) =>
-      toast.error("Could not update pack", { description: e.message }),
+    onError: (e) =>
+      toast.error("Could not update pack", { description: appErrorMessage(e) }),
   });
 
   const exportPack = useMutation({
@@ -1720,8 +1720,8 @@ export function LibraryTree({
       destinationPath: string;
     }) => api.hubExportPack(packId, destinationPath),
     onSuccess: () => toast.success(t("hub.packExported")),
-    onError: (e: Error) =>
-      toast.error(t("hub.exportFailed"), { description: e.message }),
+    onError: (e) =>
+      toast.error(t("hub.exportFailed"), { description: appErrorMessage(e) }),
   });
 
   const uninstallPack = useMutation({
@@ -1734,8 +1734,8 @@ export function LibraryTree({
       }
       toast.success(t("hub.packRemoved"));
     },
-    onError: (e: Error) =>
-      toast.error(t("hub.removeFailed"), { description: e.message }),
+    onError: (e) =>
+      toast.error(t("hub.removeFailed"), { description: appErrorMessage(e) }),
   });
 
   const renamePack = useMutation({
@@ -1939,7 +1939,9 @@ export function LibraryTree({
           destinations={editableDestinations}
           preferredDestination={newEntryRequest?.preferredDestination}
           creating={createEntry.isPending}
-          error={createEntry.error?.message}
+          error={
+            createEntry.error ? appErrorMessage(createEntry.error) : undefined
+          }
           onCreate={(destination, name) => {
             if (!newEntryRequest) return;
             createEntry.mutate({

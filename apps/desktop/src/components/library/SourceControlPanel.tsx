@@ -52,6 +52,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
+import { appErrorMessage } from "@/lib/errors";
 import {
   STATUS_BADGE_VARIANT,
   STATUS_LETTER,
@@ -107,7 +108,7 @@ function PackChanges({
       );
     } catch (error) {
       toast.error("Could not prepare merge", {
-        description: error instanceof Error ? error.message : String(error),
+        description: appErrorMessage(error),
       });
     } finally {
       setPreviewingMerge(false);
@@ -157,9 +158,9 @@ function PackChanges({
       }
       toast.success("Change discarded");
     },
-    onError: (error: Error) =>
+    onError: (error) =>
       toast.error("Could not discard change", {
-        description: error.message,
+        description: appErrorMessage(error),
       }),
   });
 
@@ -196,9 +197,9 @@ function PackChanges({
           : `Discarded ${statuses.length} changes`,
       );
     },
-    onError: (error: Error) =>
+    onError: (error) =>
       toast.error("Could not discard changes", {
-        description: error.message,
+        description: appErrorMessage(error),
       }),
   });
 

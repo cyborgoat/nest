@@ -24,6 +24,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { RefreshButton } from "@/components/ui/refresh-button";
 import { SidebarPaneHeader } from "@/components/ui/sidebar-pane-header";
 import { api } from "@/lib/api";
+import { appErrorMessage } from "@/lib/errors";
 import { pendingPublishVersionLabel } from "@/lib/publish-request-labels";
 import { queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
@@ -69,9 +70,9 @@ export function UnderReviewPanel({
         description: `${updated.name} is editable again.`,
       });
     },
-    onError: (error: Error) =>
+    onError: (error) =>
       toast.error("Could not cancel publish request", {
-        description: error.message,
+        description: appErrorMessage(error),
       }),
   });
 
@@ -82,7 +83,7 @@ export function UnderReviewPanel({
       await queryClient.invalidateQueries({ queryKey: queryKeys.messages });
     } catch (error) {
       toast.error("Could not refresh review status", {
-        description: error instanceof Error ? error.message : String(error),
+        description: appErrorMessage(error),
       });
     }
   };

@@ -294,9 +294,9 @@ export function HubPanel() {
       destinationPath: string;
     }) => api.hubExportPack(packId, destinationPath),
     onSuccess: () => toast.success(t("hub.packExported")),
-    onError: (e: Error) =>
+    onError: (e) =>
       toast.error(t("hub.exportFailed"), {
-        description: e.message || String(e),
+        description: appErrorMessage(e),
       }),
   });
 
@@ -310,9 +310,9 @@ export function HubPanel() {
       invalidateAfterPackChange();
       toast.success(t("hub.packRemoved"));
     },
-    onError: (e: Error) =>
+    onError: (e) =>
       toast.error(t("hub.removeFailed"), {
-        description: e.message || String(e),
+        description: appErrorMessage(e),
       }),
   });
 

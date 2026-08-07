@@ -18,6 +18,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { api } from "@/lib/api";
+import { appErrorMessage } from "@/lib/errors";
 import { useI18n } from "@/lib/i18n";
 import { packMutationInvalidations } from "@/lib/query-keys";
 
@@ -71,9 +72,9 @@ export function LocalPackImportController({
       overwrite: boolean;
     }) => api.hubImportLocalPack(sourcePath, overwrite),
     onSuccess: () => finishImport(t("hub.packImported")),
-    onError: (error: Error) =>
+    onError: (error) =>
       toast.error(t("hub.importFailed"), {
-        description: error.message || String(error),
+        description: appErrorMessage(error),
       }),
   });
 
@@ -88,9 +89,9 @@ export function LocalPackImportController({
       overwrite: boolean;
     }) => api.hubCreatePackFromFolder(sourcePath, metadata, overwrite),
     onSuccess: () => finishImport(t("hub.packCreated")),
-    onError: (error: Error) =>
+    onError: (error) =>
       toast.error(t("hub.createFailed"), {
-        description: error.message || String(error),
+        description: appErrorMessage(error),
       }),
   });
 
@@ -105,9 +106,9 @@ export function LocalPackImportController({
       overwrite: boolean;
     }) => api.hubCreatePackFromZip(sourcePath, metadata, overwrite),
     onSuccess: () => finishImport(t("hub.packCreated")),
-    onError: (error: Error) =>
+    onError: (error) =>
       toast.error(t("hub.createFailed"), {
-        description: error.message || String(error),
+        description: appErrorMessage(error),
       }),
   });
 

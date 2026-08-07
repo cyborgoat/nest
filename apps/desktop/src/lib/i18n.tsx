@@ -1,5 +1,17 @@
 import { createContext, useContext, useMemo, type ReactNode } from "react";
 
+/**
+ * Only ~10 of 116 frontend files route their strings through `t()` — most
+ * hardcode English directly, including inconsistently within some of the
+ * 10 files that do use `t()`. This is a known, deliberate state, not an
+ * oversight: `Locale` has exactly one variant today, so there is no
+ * user-visible i18n bug, and mechanically converting the rest of the app's
+ * strings now (100+ files, thousands of literals) would be a large,
+ * error-prone change for zero current benefit. Treat this file as the
+ * pattern to extend *if* a second locale is ever actually added — at that
+ * point, finish the conversion file-by-file as those areas are touched,
+ * rather than a single big-bang pass.
+ */
 export type Locale = "en";
 
 type MessageTree = Record<string, unknown>;
