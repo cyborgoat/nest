@@ -434,6 +434,12 @@
 .markdown-body .mermaid-diagram svg {
   max-width: 100%;
   height: auto;
+  /* `zoom` (not `transform: scale`) so the diagram's layout box actually
+     grows/shrinks with it — the wrapper's reserved height changes and
+     pushes surrounding content, instead of visually overflowing past a
+     stale unscaled box. Both of this app's webviews (WKWebView, WebView2)
+     support it, unlike a general public site. */
+  zoom: var(--content-zoom, 1);
 }
 
 .markdown-body .mermaid-loading,
