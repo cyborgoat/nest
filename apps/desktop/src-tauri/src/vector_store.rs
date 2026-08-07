@@ -195,3 +195,113 @@ pub async fn vector_search(
         .map(|(score, _id, doc)| (score, doc))
         .collect())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::embeddings::load_embedding_model;
+
+    #[test]
+    fn vectors_db_path_is_a_sibling_file_under_app_data() {
+        let dir = Path::new("/tmp/some-app-data");
+        assert_eq!(vectors_db_path(dir), dir.join("nest-vectors.db"));
+    }
+
+    #[tokio::test]
+    async fn clear_vector_db_removes_existing_files_and_is_a_noop_when_absent() {
+        let root =
+            std::env::temp_dir().join(format!("nest-vector-clear-test-{}", uuid::Uuid::new_v4()));
+        tokio::fs::create_dir_all(&root).await.unwrap();
+        let db_path = vectors_db_path(&root);
+        tokio::fs::write(&db_path, b"stub").await.unwrap();
+        tokio::fs::write(format!("{}-wal", db_path.display()), b"stub")
+            .await
+            .unwrap();
+        tokio::fs::write(format!("{}-shm", db_path.display()), b"stub")
+            .await
+            .unwrap();
+
+        clear_vector_db(&root).await.unwrap();
+
+        assert!(!db_path.exists());
+        assert!(!Path::new(&format!("{}-wal", db_path.display())).exists());
+        assert!(!Path::new(&format!("{}-shm", db_path.display())).exists());
+
+        // Nothing left to remove — must not error on a second call.
+        clear_vector_db(&root).await.unwrap();
+
+        let _ = tokio::fs::remove_dir_all(root).await;
+    }
+
+    #[tokio::test]
+    async fn vector_search_returns_empty_when_no_index_exists_yet() {
+        let root =
+            std::env::temp_dir().join(format!("nest-vector-missing-test-{}", uuid::Uuid::new_v4()));
+        tokio::fs::create_dir_all(&root).await.unwrap();
+        let model = load_embedding_model().expect("bundled model should load");
+
+        let results = vector_search(&root, model, "anything", 5, &["docs".to_string()])
+            .await
+            .unwrap();
+        assert!(results.is_empty());
+
+        let _ = tokio::fs::remove_dir_all(root).await;
+    }
+
+    /// Exercises the real embed -> insert -> search path end to end: builds
+    /// an index from two semantically distinct chunks, then confirms a
+    /// query finds the relevant one and that prefix filtering (and an empty
+    /// filter list) behave as `chat_send`'s retrieval path relies on.
+    #[tokio::test]
+    async fn rebuild_then_search_finds_the_relevant_chunk_and_respects_prefix_filters() {
+        let root = std::env::temp_dir().join(format!(
+            "nest-vector-roundtrip-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        tokio::fs::create_dir_all(&root).await.unwrap();
+        let model = load_embedding_model().expect("bundled model should load");
+
+        let chunks = vec![
+            KnowledgeChunk {
+                id: "1".to_string(),
+                file_path: "docs/cats.md".to_string(),
+                title: "Cats".to_string(),
+                content: "Cats are small domesticated carnivorous mammals valued as pets."
+                    .to_string(),
+            },
+            KnowledgeChunk {
+                id: "2".to_string(),
+                file_path: "docs/rockets.md".to_string(),
+                title: "Rockets".to_string(),
+                content: "A rocket engine produces thrust by expelling propellant at high speed."
+                    .to_string(),
+            },
+        ];
+        rebuild_vector_index(&root, model.clone(), chunks)
+            .await
+            .expect("rebuild should succeed");
+
+        // Empty retrieval_prefixes short-circuits to no hits even once a
+        // real index exists — chat resolves active packs/focus before
+        // calling, and an empty scope means nothing is in scope.
+        let scoped_out = vector_search(&root, model.clone(), "domesticated pet animal", 5, &[])
+            .await
+            .unwrap();
+        assert!(scoped_out.is_empty());
+
+        let results = vector_search(
+            &root,
+            model,
+            "domesticated pet animal",
+            5,
+            &["docs/cats.md".to_string()],
+        )
+        .await
+        .expect("search should succeed");
+
+        assert!(!results.is_empty());
+        assert_eq!(results[0].1.file_path, "docs/cats.md");
+
+        let _ = tokio::fs::remove_dir_all(root).await;
+    }
+}
