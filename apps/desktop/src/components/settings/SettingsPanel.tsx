@@ -430,6 +430,51 @@ export function SettingsPanel() {
             </TabsContent>
             <TabsContent value="general">
               <SettingsSection>
+                <GeneralGroup icon={Cloud} title={t("settings.knowledgeHub")}>
+                  <Field
+                    label={t("settings.hubBaseUrl")}
+                    description={t("settings.hubBaseUrlDescription")}
+                  >
+                    <Input
+                      value={form.hub_base_url}
+                      onChange={(e) => update("hub_base_url", e.target.value)}
+                      placeholder="http://127.0.0.1:8787"
+                    />
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      {hubTestResult ? (
+                        <p
+                          className={
+                            hubTestResult.online
+                              ? "flex items-center gap-1.5 text-xs text-primary"
+                              : "flex items-center gap-1.5 text-xs text-destructive"
+                          }
+                        >
+                          {hubTestResult.online ? (
+                            <CheckCircle2 className="size-3.5 shrink-0" />
+                          ) : (
+                            <XCircle className="size-3.5 shrink-0" />
+                          )}
+                          {hubTestResult.message}
+                        </p>
+                      ) : (
+                        <span />
+                      )}
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={testHubConnection.isPending}
+                        onClick={() => testHubConnection.mutate()}
+                      >
+                        {testHubConnection.isPending && (
+                          <LoaderCircle className="size-3.5 animate-spin" />
+                        )}
+                        {testHubConnection.isPending
+                          ? t("settings.testing")
+                          : t("settings.testConnection")}
+                      </Button>
+                    </div>
+                  </Field>
+                </GeneralGroup>
                 <GeneralGroup icon={FolderOpen} title="Knowledge vault">
                   <Field
                     label={t("settings.knowledgeDirectory")}
@@ -589,51 +634,6 @@ export function SettingsPanel() {
                       onChange={(e) => update("chat_model", e.target.value)}
                       placeholder="openai/gpt-4o-mini"
                     />
-                  </Field>
-                </GeneralGroup>
-                <GeneralGroup icon={Cloud} title={t("settings.knowledgeHub")}>
-                  <Field
-                    label={t("settings.hubBaseUrl")}
-                    description={t("settings.hubBaseUrlDescription")}
-                  >
-                    <Input
-                      value={form.hub_base_url}
-                      onChange={(e) => update("hub_base_url", e.target.value)}
-                      placeholder="http://127.0.0.1:8787"
-                    />
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      {hubTestResult ? (
-                        <p
-                          className={
-                            hubTestResult.online
-                              ? "flex items-center gap-1.5 text-xs text-primary"
-                              : "flex items-center gap-1.5 text-xs text-destructive"
-                          }
-                        >
-                          {hubTestResult.online ? (
-                            <CheckCircle2 className="size-3.5 shrink-0" />
-                          ) : (
-                            <XCircle className="size-3.5 shrink-0" />
-                          )}
-                          {hubTestResult.message}
-                        </p>
-                      ) : (
-                        <span />
-                      )}
-                      <Button
-                        type="button"
-                        size="sm"
-                        disabled={testHubConnection.isPending}
-                        onClick={() => testHubConnection.mutate()}
-                      >
-                        {testHubConnection.isPending && (
-                          <LoaderCircle className="size-3.5 animate-spin" />
-                        )}
-                        {testHubConnection.isPending
-                          ? t("settings.testing")
-                          : t("settings.testConnection")}
-                      </Button>
-                    </div>
                   </Field>
                 </GeneralGroup>
                 <GeneralGroup icon={Network} title={t("settings.network")}>
@@ -797,4 +797,3 @@ function GeneralGroup({
     </div>
   );
 }
-
