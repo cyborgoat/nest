@@ -33,7 +33,7 @@ export function ImageViewer({ path }: { path: string }) {
             <img
               src={data}
               alt={name}
-              className="max-h-[calc(100vh-8rem)] max-w-full object-contain image-viewer-zoom"
+              className="max-h-[calc(100vh-8rem)] max-w-full object-contain"
             />
           )}
         </div>

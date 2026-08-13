@@ -114,7 +114,6 @@ export function MarkdownEditor({ path }: { path: string }) {
   const setEditing = useEditorStore((s) => s.setEditing);
   const setDirty = useEditorStore((s) => s.setDirty);
   const clearPathsUnder = useUiStore((s) => s.clearPathsUnder);
-  const contentZoom = useUiStore((s) => s.contentZoom);
   const { startTransfer, conflictDialog } = useVaultTransfer();
   const dirty = useEditorStore((s) => s.dirtyPaths.has(path));
 
@@ -244,7 +243,7 @@ export function MarkdownEditor({ path }: { path: string }) {
     const source = sourceRef.current;
     if (!source) return;
     fitSourceHeight(source);
-  }, [markdown, contentZoom]);
+  }, [markdown]);
 
   useEffect(() => {
     const container = containerRef.current;

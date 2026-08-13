@@ -186,7 +186,7 @@
      document when headings are CJK/emoji-heavy (e.g. "📋 我的任务清单"). */
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
-  font-size: calc(0.875rem * var(--content-zoom, 1));
+  font-size: 0.875rem;
   line-height: 1.625;
   font-family:
     "Source Sans 3",
@@ -273,23 +273,12 @@
   color: var(--source-separator);
 }
 
-/* Content-view zoom (Ctrl+Scroll-wheel / Ctrl-Cmd+Plus/Minus/0). Scoped via
-   --content-zoom, set as an inline custom property on MainTabArea's content
-   wrapper — deliberately NOT the --app-font-size / html root font-size
-   mechanism (that's the Settings font-size preference and must stay
-   independent). */
-
 .markdown-editor-text {
-  font-size: calc(0.875rem * var(--content-zoom, 1));
+  font-size: 0.875rem;
 }
 
 .diff-viewer-text {
-  font-size: calc(0.75rem * var(--content-zoom, 1));
-}
-
-.image-viewer-zoom {
-  transform: scale(var(--content-zoom, 1));
-  transform-origin: center center;
+  font-size: 0.75rem;
 }
 
 .markdown-body > :first-child {
@@ -310,17 +299,17 @@
 }
 
 .markdown-body h1 {
-  font-size: calc(1.35rem * var(--content-zoom, 1));
+  font-size: 1.35rem;
   line-height: 1.35;
 }
 
 .markdown-body h2 {
-  font-size: calc(1.2rem * var(--content-zoom, 1));
+  font-size: 1.2rem;
   line-height: 1.4;
 }
 
 .markdown-body h3 {
-  font-size: calc(1.1rem * var(--content-zoom, 1));
+  font-size: 1.1rem;
   line-height: 1.4;
 }
 
@@ -421,12 +410,6 @@
 .markdown-body .mermaid-diagram svg {
   max-width: 100%;
   height: auto;
-  /* `zoom` (not `transform: scale`) so the diagram's layout box actually
-     grows/shrinks with it — the wrapper's reserved height changes and
-     pushes surrounding content, instead of visually overflowing past a
-     stale unscaled box. Both of this app's webviews (WKWebView, WebView2)
-     support it, unlike a general public site. */
-  zoom: var(--content-zoom, 1);
 }
 
 .markdown-body .mermaid-loading,

@@ -9,18 +9,17 @@ export type SettingsSection = "general" | "account";
 export type SettingsTarget = "hub-url";
 export type ActivitySidebarView = "explorer" | "source-control" | "reviews";
 
-/** Content-view zoom (Ctrl+Scroll-wheel / Ctrl-Cmd+Plus/Minus/0) — scoped to
- * the active tab's document/image, independent of the app-wide font-size
- * preference. Session-only: deliberately excluded from `partialize` below. */
-export const CONTENT_ZOOM_MIN = 0.5;
-export const CONTENT_ZOOM_MAX = 2;
-export const CONTENT_ZOOM_DEFAULT = 1;
-const CONTENT_ZOOM_STEP = 0.1;
+/** Whole-app webview zoom. Session-only: deliberately excluded from
+ * `partialize` below so every launch starts at 100%. */
+export const APP_ZOOM_MIN = 0.5;
+export const APP_ZOOM_MAX = 2;
+export const APP_ZOOM_DEFAULT = 1;
+const APP_ZOOM_STEP = 0.1;
 
-function clampContentZoom(value: number): number {
+function clampAppZoom(value: number): number {
   return Math.min(
-    CONTENT_ZOOM_MAX,
-    Math.max(CONTENT_ZOOM_MIN, Math.round(value * 100) / 100),
+    APP_ZOOM_MAX,
+    Math.max(APP_ZOOM_MIN, Math.round(value * 100) / 100),
   );
 }
 
@@ -60,11 +59,11 @@ type UiState = {
   /** VS Code-style "preview" tab: at most one, replaced (not appended) by the
    * next single-clicked file until it's promoted to a permanent tab. */
   previewMainTabId: string | null;
-  /** Content-view zoom level (1 = 100%), session-only. */
-  contentZoom: number;
+  /** Whole-app zoom level (1 = 100%), session-only. */
+  appZoom: number;
   zoomIn: () => void;
   zoomOut: () => void;
-  resetContentZoom: () => void;
+  resetAppZoom: () => void;
   /** Tab awaiting discard-confirmation before it can close, session-only. */
   pendingCloseTabId: string | null;
   requestCloseMainTab: (id: string) => void;
@@ -182,16 +181,16 @@ export const useUiStore = create<UiState>()(
         hubSection: "browse",
         requestedPublishMessageId: null,
         previewMainTabId: null,
-        contentZoom: CONTENT_ZOOM_DEFAULT,
+        appZoom: APP_ZOOM_DEFAULT,
         zoomIn: () =>
           set((s) => ({
-            contentZoom: clampContentZoom(s.contentZoom + CONTENT_ZOOM_STEP),
+            appZoom: clampAppZoom(s.appZoom + APP_ZOOM_STEP),
           })),
         zoomOut: () =>
           set((s) => ({
-            contentZoom: clampContentZoom(s.contentZoom - CONTENT_ZOOM_STEP),
+            appZoom: clampAppZoom(s.appZoom - APP_ZOOM_STEP),
           })),
-        resetContentZoom: () => set({ contentZoom: CONTENT_ZOOM_DEFAULT }),
+        resetAppZoom: () => set({ appZoom: APP_ZOOM_DEFAULT }),
         pendingCloseTabId: null,
         requestCloseMainTab: (id) => {
           if (useEditorStore.getState().dirtyPaths.has(id)) {

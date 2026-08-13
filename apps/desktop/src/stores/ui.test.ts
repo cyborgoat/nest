@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useEditorStore } from "./editor";
 import {
-  CONTENT_ZOOM_DEFAULT,
-  CONTENT_ZOOM_MAX,
-  CONTENT_ZOOM_MIN,
+  APP_ZOOM_DEFAULT,
+  APP_ZOOM_MAX,
+  APP_ZOOM_MIN,
   SETTINGS_TAB_ID,
   useUiStore,
 } from "./ui";
@@ -48,27 +48,27 @@ describe("settings navigation", () => {
   });
 });
 
-describe("content zoom", () => {
+describe("app zoom", () => {
   beforeEach(() => {
-    useUiStore.setState({ contentZoom: CONTENT_ZOOM_DEFAULT });
+    useUiStore.setState({ appZoom: APP_ZOOM_DEFAULT });
   });
 
   it("zooms in and out in steps, clamped to the max/min", () => {
     useUiStore.getState().zoomIn();
-    expect(useUiStore.getState().contentZoom).toBeCloseTo(1.1);
+    expect(useUiStore.getState().appZoom).toBeCloseTo(1.1);
 
     for (let i = 0; i < 20; i++) useUiStore.getState().zoomIn();
-    expect(useUiStore.getState().contentZoom).toBe(CONTENT_ZOOM_MAX);
+    expect(useUiStore.getState().appZoom).toBe(APP_ZOOM_MAX);
 
     for (let i = 0; i < 40; i++) useUiStore.getState().zoomOut();
-    expect(useUiStore.getState().contentZoom).toBe(CONTENT_ZOOM_MIN);
+    expect(useUiStore.getState().appZoom).toBe(APP_ZOOM_MIN);
   });
 
   it("resets to the default zoom level", () => {
     useUiStore.getState().zoomIn();
-    useUiStore.getState().resetContentZoom();
+    useUiStore.getState().resetAppZoom();
 
-    expect(useUiStore.getState().contentZoom).toBe(CONTENT_ZOOM_DEFAULT);
+    expect(useUiStore.getState().appZoom).toBe(APP_ZOOM_DEFAULT);
   });
 });
 

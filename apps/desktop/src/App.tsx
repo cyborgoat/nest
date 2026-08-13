@@ -30,7 +30,7 @@ import { queryKeys } from "@/lib/query-keys";
 import { I18nProvider } from "@/lib/i18n";
 import { animatePanelSize, cancelPanelAnimation } from "@/lib/panel-animation";
 import { cn } from "@/lib/utils";
-import { useMainContentHotkeys } from "@/hooks/use-main-content-hotkeys";
+import { useAppHotkeys } from "@/hooks/use-app-hotkeys";
 import {
   HUB_TAB_ID,
   MESSAGES_TAB_ID,
@@ -51,7 +51,7 @@ function collectFilePaths(nodes: TreeNode[]): string[] {
 }
 
 export default function App() {
-  useMainContentHotkeys();
+  useAppHotkeys();
   const queryClient = useQueryClient();
   const activeMainTabId = useUiStore((s) => s.activeMainTabId);
   const openHubTab = useUiStore((s) => s.openHubTab);
