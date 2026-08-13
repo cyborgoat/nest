@@ -1,5 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { KeyRound, LogIn, LogOut, Save, UserPlus } from "lucide-react";
+import {
+  CircleAlert,
+  Cloud,
+  KeyRound,
+  LogIn,
+  LogOut,
+  Save,
+  UserPlus,
+  UserRound,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -12,11 +21,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PanelHeader } from "@/components/ui/panel-header";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
 import { appErrorMessage } from "@/lib/errors";
+import { useI18n } from "@/lib/i18n";
 import {
   passwordsConfirmed,
   passwordsMismatch,
@@ -24,9 +38,27 @@ import {
 import { queryKeys } from "@/lib/query-keys";
 import { useUiStore } from "@/stores/ui";
 
-export function HubAccountSettings() {
+export function AccountPanel() {
+  const { t } = useI18n();
+
+  return (
+    <div className="flex h-full flex-col">
+      <PanelHeader
+        title={t("account.title")}
+        description={t("account.description")}
+      />
+      <ScrollArea className="min-h-0 flex-1">
+        <div className="mx-auto max-w-2xl px-6 py-5">
+          <HubAccountSettings />
+        </div>
+      </ScrollArea>
+    </div>
+  );
+}
+
+function HubAccountSettings() {
   const queryClient = useQueryClient();
-  const setSettingsSection = useUiStore((state) => state.setSettingsSection);
+  const openHubSettingsTab = useUiStore((state) => state.openHubSettingsTab);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [profileName, setProfileName] = useState("");
@@ -77,108 +109,169 @@ export function HubAccountSettings() {
       }),
   });
 
-  return (
-    <section className="space-y-6">
-      <div className="space-y-6">
-        {auth.data?.authenticated && auth.data.user ? (
-          <>
-            <div className="flex items-center justify-end gap-2">
-              <Badge variant="muted" className="capitalize">
-                {auth.data.user.role}
-              </Badge>
+  let accountContent;
+  if (auth.isLoading || (!auth.data?.authenticated && settings.isLoading)) {
+    accountContent = (
+      <div className="flex min-h-[360px] items-center justify-center gap-2 text-sm text-muted-foreground">
+        <Spinner />
+        Checking account…
+      </div>
+    );
+  } else if (auth.error || (!auth.data?.authenticated && settings.error)) {
+    const error = auth.error ?? settings.error;
+    accountContent = (
+      <EmptyState
+        className="min-h-[360px]"
+        icon={<CircleAlert className="size-7 text-destructive" />}
+        title="Account status is unavailable"
+        description={appErrorMessage(error)}
+        footnote="Your local library remains available while Hub is unavailable."
+      >
+        <Button
+          disabled={auth.isFetching || settings.isFetching}
+          onClick={() => void Promise.all([auth.refetch(), settings.refetch()])}
+        >
+          {(auth.isFetching || settings.isFetching) && <Spinner />}
+          Try again
+        </Button>
+      </EmptyState>
+    );
+  } else if (auth.data?.authenticated && auth.data.user) {
+    accountContent = (
+      <div className="space-y-7">
+        <section className="flex flex-wrap items-center gap-3 rounded-lg bg-muted/40 px-4 py-3">
+          <div className="grid size-10 shrink-0 place-items-center rounded-full bg-info/10 text-info">
+            <UserRound className="size-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-semibold">
+              {auth.data.user.name}
+            </p>
+            <p className="truncate text-xs text-muted-foreground">
+              {auth.data.user.id}
+            </p>
+          </div>
+          <Badge variant="muted" className="capitalize">
+            {auth.data.user.role}
+          </Badge>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={logout.isPending}
+            onClick={() => logout.mutate()}
+          >
+            <LogOut className="size-4" /> Sign out
+          </Button>
+        </section>
+
+        <section className="space-y-4">
+          <div>
+            <h3 className="text-sm font-semibold">Profile</h3>
+            <p className="text-xs text-muted-foreground">
+              Manage how your Nest identity appears across Hub.
+            </p>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="account-id">Account ID</Label>
+            <Input id="account-id" value={auth.data.user.id} disabled />
+            <p className="text-xs text-muted-foreground">
+              Account IDs cannot be changed.
+            </p>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="profile-name">Display name</Label>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Input
+                id="profile-name"
+                value={profileName}
+                maxLength={100}
+                disabled={accountManaged}
+                onChange={(event) => setProfileName(event.target.value)}
+              />
               <Button
-                variant="outline"
-                size="sm"
-                disabled={logout.isPending}
-                onClick={() => logout.mutate()}
+                type="button"
+                className="shrink-0"
+                disabled={
+                  updateProfile.isPending ||
+                  accountManaged ||
+                  !profileName.trim() ||
+                  profileName.trim() === auth.data.user.name
+                }
+                onClick={() => updateProfile.mutate()}
               >
-                <LogOut className="size-4" /> Sign out
+                <Save className="size-4" />
+                Save changes
               </Button>
             </div>
-            <div className="grid gap-4">
-              <div className="space-y-1.5">
-                <Label htmlFor="account-id">Account ID</Label>
-                <Input id="account-id" value={auth.data.user.id} disabled />
-                <p className="text-xs text-muted-foreground">
-                  Account IDs cannot be changed.
-                </p>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="profile-name">Display name</Label>
-                <div className="flex gap-2">
-                  <Input
-                    id="profile-name"
-                    value={profileName}
-                    maxLength={100}
-                    disabled={accountManaged}
-                    onChange={(event) => setProfileName(event.target.value)}
-                  />
-                  <Button
-                    type="button"
-                    disabled={
-                      updateProfile.isPending ||
-                      accountManaged ||
-                      !profileName.trim() ||
-                      profileName.trim() === auth.data.user.name
-                    }
-                    onClick={() => updateProfile.mutate()}
-                  >
-                    <Save className="size-4" />
-                    Save
-                  </Button>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  {accountManaged
-                    ? "This account is managed by the Hub environment configuration."
-                    : "Used everywhere your Nest identity is displayed."}
-                </p>
-              </div>
-              <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-muted/40 p-3">
-                <div>
-                  <p className="text-sm font-medium">Password</p>
-                  <p className="text-xs text-muted-foreground">
-                    {accountManaged
-                      ? "The Hub environment configuration locks this password."
-                      : "Change your password and revoke older sessions."}
-                  </p>
-                </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={accountManaged}
-                  onClick={() => setPasswordOpen(true)}
-                >
-                  <KeyRound className="size-4" />
-                  Change password
-                </Button>
-              </div>
-            </div>
-          </>
-        ) : (
-          <div className="flex flex-wrap items-center justify-between gap-4">
+            <p className="text-xs text-muted-foreground">
+              {accountManaged
+                ? "This account is managed by the Hub environment configuration."
+                : "Used everywhere your Nest identity is displayed."}
+            </p>
+          </div>
+        </section>
+
+        <section className="space-y-3">
+          <div>
+            <h3 className="text-sm font-semibold">Security</h3>
+            <p className="text-xs text-muted-foreground">
+              Keep your Hub credentials and active sessions secure.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-muted/40 px-4 py-3">
             <div>
-              <p className="text-sm font-medium">Not signed in</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Your local library remains fully available without an account.
+              <p className="text-sm font-medium">Password</p>
+              <p className="text-xs text-muted-foreground">
+                {accountManaged
+                  ? "The Hub environment configuration locks this password."
+                  : "Change your password and revoke older sessions."}
               </p>
             </div>
             <Button
-              onClick={() => {
-                if (!hubConfigured) {
-                  setSettingsSection("general");
-                  toast.error("Hub URL is not configured", {
-                    description: "Set it in Settings before signing in.",
-                  });
-                  return;
-                }
-                setDialogOpen(true);
-              }}
+              type="button"
+              variant="outline"
+              disabled={accountManaged}
+              onClick={() => setPasswordOpen(true)}
             >
-              <LogIn className="size-4" /> Sign in or create account
+              <KeyRound className="size-4" />
+              Change password
             </Button>
           </div>
-        )}
+        </section>
       </div>
+    );
+  } else if (!hubConfigured) {
+    accountContent = (
+      <EmptyState
+        className="min-h-[360px]"
+        icon={<Cloud className="size-7 text-amber-700" />}
+        title="Connect a Hub before signing in"
+        description="Add your team's Hub URL so Nest knows where to authenticate your account."
+        footnote="An account is optional for local packs and public downloads."
+      >
+        <Button onClick={openHubSettingsTab}>Configure Hub</Button>
+      </EmptyState>
+    );
+  } else {
+    accountContent = (
+      <EmptyState
+        className="min-h-[360px]"
+        icon={<UserRound className="size-7 text-info" />}
+        title="Sign in to Nest Hub"
+        description="Sign in or create an account to publish packs and access restricted knowledge."
+        footnote="Your local library remains fully available without an account."
+      >
+        <Button onClick={() => setDialogOpen(true)}>
+          <LogIn className="size-4" />
+          Sign in or create account
+        </Button>
+      </EmptyState>
+    );
+  }
+
+  return (
+    <section className="space-y-6">
+      {accountContent}
       <HubAuthDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}
@@ -286,7 +379,7 @@ function PasswordDialog({
           {Boolean(change.error) && (
             <div
               role="alert"
-              className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+              className="rounded-r-md border-l-2 border-destructive bg-destructive/[0.08] px-3 py-2 text-xs text-destructive"
             >
               {appErrorMessage(change.error)}
             </div>
@@ -374,16 +467,16 @@ function HubAuthDialog({
             </DialogDescription>
           </DialogHeader>
           <Tabs value={mode} onValueChange={changeMode}>
-            <TabsList className="grid h-11 w-full grid-cols-2 bg-muted/80">
+            <TabsList className="h-auto w-full justify-start gap-5 rounded-none border-b bg-transparent p-0">
               <TabsTrigger
                 value="login"
-                className="h-9 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow"
+                className="rounded-none border-b-2 border-transparent px-0 pt-0 pb-2.5 shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none"
               >
                 <LogIn className="size-4" /> Sign in
               </TabsTrigger>
               <TabsTrigger
                 value="register"
-                className="h-9 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow"
+                className="rounded-none border-b-2 border-transparent px-0 pt-0 pb-2.5 shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none"
               >
                 <UserPlus className="size-4" /> Create account
               </TabsTrigger>
@@ -436,13 +529,15 @@ function HubAuthDialog({
                 </p>
               )}
               {mode === "login" && (
-                <button
+                <Button
                   type="button"
-                  className="text-xs text-muted-foreground underline-offset-2 hover:underline"
+                  variant="ghost"
+                  size="sm"
+                  className="h-auto px-0 py-0 text-xs text-muted-foreground hover:bg-transparent hover:text-foreground hover:underline"
                   onClick={() => setForgotOpen(true)}
                 >
                   Forgot password?
-                </button>
+                </Button>
               )}
             </div>
             {mode === "register" && (
@@ -469,7 +564,7 @@ function HubAuthDialog({
             {Boolean(error) && (
               <div
                 role="alert"
-                className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+                className="rounded-r-md border-l-2 border-destructive bg-destructive/[0.08] px-3 py-2 text-xs text-destructive"
               >
                 {appErrorMessage(error)}
               </div>

@@ -1,10 +1,19 @@
-import { Bell, Cloud, FileText, GitCompare, Image as ImageIcon, Settings2 } from "lucide-react";
+import {
+  Bell,
+  Cloud,
+  FileText,
+  GitCompare,
+  Image as ImageIcon,
+  Settings2,
+  UserRound,
+} from "lucide-react";
 import { DiscardChangesDialog } from "@/components/ui/discard-changes-dialog";
 import { TabStrip } from "@/components/ui/tab-strip";
 import { useI18n } from "@/lib/i18n";
 import { fileName, isImagePath } from "@/lib/vault-paths";
 import { useEditorStore } from "@/stores/editor";
 import {
+  ACCOUNT_TAB_ID,
   HUB_TAB_ID,
   MESSAGES_TAB_ID,
   parseDiffTabId,
@@ -14,6 +23,7 @@ import {
 
 function tabLabel(id: string, t: ReturnType<typeof useI18n>["t"]) {
   if (id === HUB_TAB_ID) return t("shell.hub");
+  if (id === ACCOUNT_TAB_ID) return t("shell.account");
   if (id === SETTINGS_TAB_ID) return t("shell.settings");
   if (id === MESSAGES_TAB_ID) return "Messages";
   const diffTab = parseDiffTabId(id);
@@ -24,6 +34,8 @@ function tabLabel(id: string, t: ReturnType<typeof useI18n>["t"]) {
 function tabIcon(id: string) {
   if (id === HUB_TAB_ID)
     return <Cloud className="size-3 shrink-0 text-accent" />;
+  if (id === ACCOUNT_TAB_ID)
+    return <UserRound className="size-3 shrink-0 text-accent" />;
   if (id === SETTINGS_TAB_ID)
     return <Settings2 className="size-3 shrink-0 text-accent" />;
   if (id === MESSAGES_TAB_ID)

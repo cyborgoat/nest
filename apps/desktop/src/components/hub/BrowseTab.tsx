@@ -3,8 +3,10 @@ import { save } from "@tauri-apps/plugin-dialog";
 import {
   ArrowDownCircle,
   ArrowUpCircle,
+  Cloud,
   CloudDownload,
-  FolderInput,
+  CloudOff,
+  LoaderCircle,
   Package,
   Search,
 } from "lucide-react";
@@ -28,6 +30,7 @@ import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { useI18n } from "@/lib/i18n";
 import { compareSemVer } from "@/lib/semver";
+import type { HubDisplayState } from "@/lib/hub-display-state";
 import {
   Select,
   SelectContent,
@@ -37,7 +40,7 @@ import {
 } from "@/components/ui/select";
 
 export function BrowseTab({
-  hubOffline,
+  connectionState,
   packs,
   filteredPacks,
   packsLoading,
@@ -51,9 +54,11 @@ export function BrowseTab({
   onInstall,
   onRemove,
   onExport,
-  onOpenImport,
+  onConfigureHub,
+  onRetryConnection,
+  retryingConnection,
 }: {
-  hubOffline: boolean;
+  connectionState: HubDisplayState;
   packs: PackProject[] | undefined;
   filteredPacks: PackProject[];
   packsLoading: boolean;
@@ -72,21 +77,57 @@ export function BrowseTab({
   ) => void;
   onRemove: (packId: string) => void;
   onExport: (packId: string, destinationPath: string) => void;
-  onOpenImport: () => void;
+  onConfigureHub: () => void;
+  onRetryConnection: () => void;
+  retryingConnection: boolean;
 }) {
   const { t } = useI18n();
-  if (hubOffline) {
+  if (connectionState.kind === "loading") {
+    return (
+      <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
+        <Spinner />
+        {t("hub.loadingPacks")}
+      </div>
+    );
+  }
+
+  if (connectionState.kind === "setup-required") {
     return (
       <EmptyState
-        icon={<FolderInput className="size-6" />}
-        title={t("hub.havePackFile")}
-        description={t("hub.havePackFileBody")}
-        footnote={t("hub.hubOfflineFootnote")}
+        icon={<Cloud className="size-7 text-amber-700" />}
+        title={t("hub.connectHubBrowseTitle")}
+        description={t("hub.connectHubBrowseDescription")}
+        footnote={t("hub.localImportAvailable")}
       >
-        <Button size="sm" variant="outline" onClick={onOpenImport}>
-          <FolderInput className="size-4" />
-          {t("hub.import")}
+        <Button onClick={onConfigureHub}>
+          {t("hub.configureHub")}
         </Button>
+      </EmptyState>
+    );
+  }
+
+  if (connectionState.kind === "connection-error") {
+    return (
+      <EmptyState
+        icon={<CloudOff className="size-7 text-destructive" />}
+        title={t("hub.hubUnavailableTitle")}
+        description={connectionState.message}
+        footnote={t("hub.localImportAvailable")}
+      >
+        <div className="flex flex-wrap justify-center gap-2">
+          <Button
+            disabled={retryingConnection}
+            onClick={onRetryConnection}
+          >
+            {retryingConnection && (
+              <LoaderCircle className="size-4 animate-spin" />
+            )}
+            {t("hub.retryConnection")}
+          </Button>
+          <Button variant="outline" onClick={onConfigureHub}>
+            {t("hub.openHubSettings")}
+          </Button>
+        </div>
       </EmptyState>
     );
   }

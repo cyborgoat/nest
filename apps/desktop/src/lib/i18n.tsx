@@ -22,6 +22,7 @@ const messages: Record<Locale, MessageTree> = {
       appName: "Nest",
       appSubtitle: "Knowledge workspace",
       hub: "Hub",
+      account: "Account",
       settings: "Settings",
       chat: "Chat",
       collapseLibrary: "Collapse library",
@@ -98,20 +99,25 @@ const messages: Record<Locale, MessageTree> = {
       couldNotOpenFolder: "Could not open folder picker",
       couldNotTestHub: "Could not test Hub",
     },
+    account: {
+      title: "Account",
+      description:
+        "Sign in to publish packs, access restricted knowledge, and manage your Hub profile.",
+    },
     hub: {
       title: "Hub",
-      description:
-        "Install versioned packs from the configured catalog, create one from a local folder, or import a shareable ZIP.",
+      description: "Browse and manage shared knowledge packs.",
       online: "Online",
       offline: "Offline",
-      setupRequired: "Setup required",
-      setupRequiredTitle: "Hub setup required",
-      setupRequiredDescription:
-        "Set the Hub URL before browsing or downloading knowledge packs.",
-      configureHubUrl: "Configure Hub URL in Settings",
-      connectionIssueTitle: "Hub connection issue",
+      configureHub: "Configure Hub",
+      connectHubBrowseTitle: "Connect a Hub to browse packs",
+      connectHubBrowseDescription:
+        "Add your team's Hub URL to browse and download shared packs.",
+      hubUnavailableTitle: "Hub is unavailable",
       retryConnection: "Retry connection",
       openHubSettings: "Open Hub settings",
+      localImportAvailable:
+        "Local import remains available from the header. Packs already in your vault stay available in Installed.",
       accountOptionalTitle: "Account sign-in is optional",
       accountOptionalDescription:
         "Sign in only to publish packs or access restricted knowledge packs.",

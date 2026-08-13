@@ -4,8 +4,8 @@ Your first goal: bring one knowledge pack into Nest and open it.
 
 The **Hub**, **Messages**, and **Chat** buttons are in the upper-right header.
 **Explorer**, **Source Control**, and **Under Review** are in the activity bar
-on the far left; **Settings** is the gear at the bottom of that bar. Hover an
-icon to see its name.
+on the far left; **Account** and **Settings** are the user and gear icons at the
+bottom of that bar. Hover an icon to see its name.
 
 ## 1. Connect Hub (optional)
 
@@ -13,10 +13,10 @@ Skip this if you're only importing a local folder or ZIP.
 
 1. Ask your team for the Hub URL.
 2. Open **Hub** and select **Configure Hub URL in Settings**. Nest opens
-   **Settings → General** at the **Hub URL** field. You can also open Settings
+   **Settings** at the **Hub URL** field. You can also open Settings
    directly with the gear at the bottom-left.
 3. Select **Test connection**.
-4. Sign in under **Settings → Account** if the pack is restricted.
+4. Open **Account** from the bottom-left user icon if the pack is restricted.
 
 ## 2. Add a pack
 

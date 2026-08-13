@@ -5,7 +5,7 @@
 1. 向团队获取 Hub URL。打开 **Hub**，点击 **Configure Hub URL in Settings**
    直接定位到该字段。
 2. 点击 **Test connection**。
-3. 如果知识包受限，请前往 **Settings → Account** 登录。
+3. 如果知识包受限，请点击左下角的 **Account** 用户图标登录。
 
 ## 查找并安装
 

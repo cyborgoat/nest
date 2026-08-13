@@ -15,8 +15,6 @@ import {
   LoaderCircle,
   Network,
   Palette,
-  Settings2,
-  UserRound,
   XCircle,
   type LucideIcon,
 } from "lucide-react";
@@ -38,7 +36,6 @@ import { Label } from "@/components/ui/label";
 import { PanelHeader } from "@/components/ui/panel-header";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Switch } from "@/components/ui/switch";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Tooltip,
   TooltipContent,
@@ -47,8 +44,7 @@ import {
 import { api } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { queryKeys } from "@/lib/query-keys";
-import { useUiStore, type SettingsSection } from "@/stores/ui";
-import { HubAccountSettings } from "./HubAccountSettings";
+import { useUiStore } from "@/stores/ui";
 
 const LEGACY_OPENAI_BASE_URL = "https://api.openai.com/v1";
 const LEGACY_OPENAI_CHAT_MODEL = "gpt-4o-mini";
@@ -124,9 +120,7 @@ const HUB_AUTO_TEST_DELAY_MS = 2000;
 export function SettingsPanel() {
   const { t } = useI18n();
   const queryClient = useQueryClient();
-  const settingsSection = useUiStore((state) => state.settingsSection);
   const settingsTarget = useUiStore((state) => state.settingsTarget);
-  const setSettingsSection = useUiStore((state) => state.setSettingsSection);
   const clearSettingsTarget = useUiStore(
     (state) => state.clearSettingsTarget,
   );
@@ -147,7 +141,7 @@ export function SettingsPanel() {
   const hubBaseUrlRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (settingsSection !== "general" || settingsTarget !== "hub-url") return;
+    if (settingsTarget !== "hub-url") return;
     const frame = window.requestAnimationFrame(() => {
       hubBaseUrlRef.current?.scrollIntoView({
         behavior: "smooth",
@@ -157,7 +151,7 @@ export function SettingsPanel() {
       clearSettingsTarget();
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [clearSettingsTarget, settingsSection, settingsTarget]);
+  }, [clearSettingsTarget, settingsTarget]);
 
   const settingsQuery = useQuery({
     queryKey: queryKeys.settings,
@@ -426,28 +420,7 @@ export function SettingsPanel() {
       />
       <ScrollArea className="min-h-0 flex-1">
         <div className="mx-auto max-w-2xl px-6 py-5">
-          <Tabs
-            value={settingsSection}
-            onValueChange={(value) =>
-              setSettingsSection(value as SettingsSection)
-            }
-            className="space-y-5"
-          >
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="general">
-                <Settings2 className="size-4" />
-                General
-              </TabsTrigger>
-              <TabsTrigger value="account">
-                <UserRound className="size-4" />
-                Account
-              </TabsTrigger>
-            </TabsList>
-            <TabsContent value="account">
-              <HubAccountSettings />
-            </TabsContent>
-            <TabsContent value="general">
-              <SettingsSection>
+          <SettingsSection>
                 <GeneralGroup icon={Cloud} title={t("settings.knowledgeHub")}>
                   <Field
                     label={t("settings.hubBaseUrl")}
@@ -688,9 +661,7 @@ export function SettingsPanel() {
                     </Button>
                   </div>
                 </Field>
-              </SettingsSection>
-            </TabsContent>
-          </Tabs>
+          </SettingsSection>
         </div>
       </ScrollArea>
       <AlertDialog

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useEditorStore } from "./editor";
 import {
+  ACCOUNT_TAB_ID,
   APP_ZOOM_DEFAULT,
   APP_ZOOM_MAX,
   APP_ZOOM_MIN,
@@ -14,27 +15,30 @@ describe("settings navigation", () => {
     useUiStore.setState({
       openMainTabs: [],
       activeMainTabId: null,
-      settingsSection: "general",
       settingsTarget: null,
     });
   });
 
   afterEach(() => vi.restoreAllMocks());
 
-  it("opens account links on the Account settings section", () => {
-    useUiStore.getState().openAccountSettingsTab();
+  it("opens account links on the separate Account page", () => {
+    useUiStore.getState().openAccountTab();
 
     expect(useUiStore.getState()).toMatchObject({
-      activeMainTabId: SETTINGS_TAB_ID,
-      settingsSection: "account",
+      activeMainTabId: ACCOUNT_TAB_ID,
+      openMainTabs: [ACCOUNT_TAB_ID],
     });
   });
 
-  it("keeps the main Settings navigation targeted at General", () => {
-    useUiStore.getState().openAccountSettingsTab();
+  it("opens Settings separately from Account", () => {
+    useUiStore.getState().openAccountTab();
     useUiStore.getState().openSettingsTab();
 
-    expect(useUiStore.getState().settingsSection).toBe("general");
+    expect(useUiStore.getState()).toMatchObject({
+      activeMainTabId: SETTINGS_TAB_ID,
+      openMainTabs: [SETTINGS_TAB_ID],
+      settingsTarget: null,
+    });
   });
 
   it("opens Hub settings links at the Hub URL field", () => {
@@ -42,7 +46,6 @@ describe("settings navigation", () => {
 
     expect(useUiStore.getState()).toMatchObject({
       activeMainTabId: SETTINGS_TAB_ID,
-      settingsSection: "general",
       settingsTarget: "hub-url",
     });
   });

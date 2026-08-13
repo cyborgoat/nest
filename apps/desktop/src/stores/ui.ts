@@ -4,8 +4,8 @@ import { useEditorStore } from "./editor";
 
 export const HUB_TAB_ID = "__hub__";
 export const SETTINGS_TAB_ID = "__settings__";
+export const ACCOUNT_TAB_ID = "__account__";
 export const MESSAGES_TAB_ID = "__messages__";
-export type SettingsSection = "general" | "account";
 export type SettingsTarget = "hub-url";
 export type ActivitySidebarView = "explorer" | "source-control" | "reviews";
 
@@ -49,10 +49,9 @@ type UiState = {
   chatSessionId: string | null;
   /** Browser-style open tabs (session ids) */
   openChatTabs: string[];
-  /** Browser-style open main-content tabs (file paths, or HUB_TAB_ID/SETTINGS_TAB_ID) */
+  /** Browser-style open main-content tabs (file paths or special page IDs). */
   openMainTabs: string[];
   activeMainTabId: string | null;
-  settingsSection: SettingsSection;
   settingsTarget: SettingsTarget | null;
   hubSection: "browse" | "installed";
   requestedPublishMessageId: string | null;
@@ -83,9 +82,8 @@ type UiState = {
   openHubInstalledTab: () => void;
   openSettingsTab: () => void;
   openHubSettingsTab: () => void;
-  openAccountSettingsTab: () => void;
+  openAccountTab: () => void;
   clearSettingsTarget: () => void;
-  setSettingsSection: (section: SettingsSection) => void;
   openMessagesTab: () => void;
   openPublishMessage: (requestId: string) => void;
   clearRequestedPublishMessage: () => void;
@@ -141,10 +139,11 @@ function prunedPreview(previewId: string | null, nextTabs: string[]) {
 const EPHEMERAL_TAB_IDS = new Set([
   HUB_TAB_ID,
   SETTINGS_TAB_ID,
+  ACCOUNT_TAB_ID,
   MESSAGES_TAB_ID,
 ]);
 
-/** Hub/Settings tabs are ephemeral: they only exist while active, and close
+/** Special-page tabs are ephemeral: they only exist while active, and close
  * themselves the moment focus moves to a different tab. */
 function closeEphemeralExcept(tabs: string[], keepId: string) {
   return tabs.filter((id) => !EPHEMERAL_TAB_IDS.has(id) || id === keepId);
@@ -153,9 +152,9 @@ function closeEphemeralExcept(tabs: string[], keepId: string) {
 export const useUiStore = create<UiState>()(
   persist(
     (set, get) => {
-      /** Shared body for the ephemeral (Hub/Settings/Messages) tab-open
+      /** Shared body for ephemeral special-page tab-open
        * actions below: promote/append `tabId` and make it active, merging
-       * any tab-specific extra fields (e.g. which settings section). */
+       * any tab-specific extra fields. */
       const openEphemeralTab = (tabId: string, patch?: Partial<UiState>) => {
         const { openMainTabs } = get();
         const cleaned = closeEphemeralExcept(openMainTabs, tabId);
@@ -176,7 +175,6 @@ export const useUiStore = create<UiState>()(
         openChatTabs: [],
         openMainTabs: [],
         activeMainTabId: null,
-        settingsSection: "general",
         settingsTarget: null,
         hubSection: "browse",
         requestedPublishMessageId: null,
@@ -314,21 +312,17 @@ export const useUiStore = create<UiState>()(
           openEphemeralTab(HUB_TAB_ID, { hubSection: "installed" }),
         openSettingsTab: () =>
           openEphemeralTab(SETTINGS_TAB_ID, {
-            settingsSection: "general",
             settingsTarget: null,
           }),
         openHubSettingsTab: () =>
           openEphemeralTab(SETTINGS_TAB_ID, {
-            settingsSection: "general",
             settingsTarget: "hub-url",
           }),
-        openAccountSettingsTab: () =>
-          openEphemeralTab(SETTINGS_TAB_ID, {
-            settingsSection: "account",
+        openAccountTab: () =>
+          openEphemeralTab(ACCOUNT_TAB_ID, {
             settingsTarget: null,
           }),
         clearSettingsTarget: () => set({ settingsTarget: null }),
-        setSettingsSection: (settingsSection) => set({ settingsSection }),
         openMessagesTab: () => openEphemeralTab(MESSAGES_TAB_ID),
         openPublishMessage: (requestId) =>
           openEphemeralTab(MESSAGES_TAB_ID, {
@@ -355,6 +349,7 @@ export const useUiStore = create<UiState>()(
             (id) =>
               id === HUB_TAB_ID ||
               id === SETTINGS_TAB_ID ||
+              id === ACCOUNT_TAB_ID ||
               id === MESSAGES_TAB_ID ||
               // Diff tabs can legitimately point at paths absent from the
               // tree (deleted files) — their lifecycle is managed by
@@ -377,7 +372,7 @@ export const useUiStore = create<UiState>()(
     {
       name: "nest-ui-chat-tabs",
       partialize: (state) => {
-        // Hub/Settings are ephemeral tabs — never restored on relaunch.
+        // Special pages are ephemeral tabs — never restored on relaunch.
         const openMainTabs = state.openMainTabs.filter(
           (id) => !EPHEMERAL_TAB_IDS.has(id),
         );

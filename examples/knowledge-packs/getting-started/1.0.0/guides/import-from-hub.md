@@ -5,7 +5,7 @@
 1. Ask your team for the Hub URL. Open **Hub**, then select **Configure Hub URL
    in Settings** to jump directly to the field.
 2. Select **Test connection**.
-3. Sign in under **Settings → Account** if the pack is restricted.
+3. Open **Account** from the bottom-left user icon if the pack is restricted.
 
 ## Install a pack
 

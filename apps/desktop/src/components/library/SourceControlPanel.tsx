@@ -553,7 +553,7 @@ export function SourceControlPanel({
   });
   const hubUser = hubAuthQuery.data?.user ?? null;
   const authenticated = hubAuthQuery.data?.authenticated === true;
-  const openAccountSettingsTab = useUiStore((s) => s.openAccountSettingsTab);
+  const openAccountTab = useUiStore((s) => s.openAccountTab);
   const openHubInstalledTab = useUiStore((s) => s.openHubInstalledTab);
   const catalogQuery = useQuery({
     queryKey: queryKeys.catalog,
@@ -573,7 +573,7 @@ export function SourceControlPanel({
 
   const openPublish = (pack: InstalledPack) => {
     if (authenticated) setPublishPack(pack);
-    else openAccountSettingsTab();
+    else openAccountTab();
   };
 
   // Get fresh "under review" state as soon as this view is opened, rather

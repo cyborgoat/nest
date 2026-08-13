@@ -6,14 +6,7 @@ import type {
   PackMergeResolution,
   PackProject,
 } from "@nest/shared";
-import {
-  AlertTriangle,
-  CheckCircle2,
-  CloudOff,
-  FolderInput,
-  Info,
-  LoaderCircle,
-} from "lucide-react";
+import { FolderInput, Info } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { BrowseTab } from "@/components/hub/BrowseTab";
@@ -23,7 +16,6 @@ import {
   LocalPackImportController,
   type LocalPackImportMode,
 } from "@/components/hub/LocalPackImportController";
-import { Badge } from "@/components/ui/badge";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -45,13 +37,12 @@ import { deriveHubDisplayState } from "@/lib/hub-display-state";
 import { packMutationInvalidations, queryKeys } from "@/lib/query-keys";
 import { useI18n } from "@/lib/i18n";
 import { compareSemVer } from "@/lib/semver";
-import { cn } from "@/lib/utils";
 import { useUiStore } from "@/stores/ui";
 
 export function HubPanel() {
   const { t } = useI18n();
   const clearPathsUnder = useUiStore((s) => s.clearPathsUnder);
-  const openAccountSettingsTab = useUiStore((s) => s.openAccountSettingsTab);
+  const openAccountTab = useUiStore((s) => s.openAccountTab);
   const openHubSettingsTab = useUiStore((s) => s.openHubSettingsTab);
   const queryClient = useQueryClient();
   const [importMode, setImportMode] = useState<LocalPackImportMode | null>(null);
@@ -354,129 +345,79 @@ export function HubPanel() {
 
   return (
     <div className="flex h-full flex-col">
-      <PanelHeader
-        title={t("hub.title")}
-        description={t("hub.description")}
-        badges={
-          <>
-            {hubDisplayState.kind === "setup-required" && (
-              <Badge variant="modified">
-                <AlertTriangle className="size-3" />
-                {t("hub.setupRequired")}
-              </Badge>
-            )}
-            {(hubDisplayState.kind === "account-required" ||
-              hubDisplayState.kind === "connected") && (
-              <Badge variant="update">
-                <CheckCircle2 className="size-3" />
-                {t("hub.online")}
-              </Badge>
-            )}
-            {hubDisplayState.kind === "connection-error" && (
-              <Badge variant="destructive">
-                <CloudOff className="size-3" />
-                {t("hub.offline")}
-              </Badge>
-            )}
-          </>
-        }
-        actions={
-          <div className="flex items-center gap-2">
-            <RefreshButton
-              onRefresh={refreshHub}
-              refreshing={
-                hubStatusQuery.isFetching ||
-                packsQuery.isFetching ||
-                installedQuery.isFetching
-              }
-            />
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setImportMode("choose")}
-            >
-              <FolderInput className="size-4" />
-              {t("hub.import")}
-            </Button>
-          </div>
-        }
-      />
-
-      {hubDisplayState.kind === "setup-required" && (
-        <HubStatusNotice
-          tone="warning"
-          icon={<AlertTriangle className="size-4" />}
-          title={t("hub.setupRequiredTitle")}
-          description={t("hub.setupRequiredDescription")}
-        >
-          <Button size="sm" variant="outline" onClick={openHubSettingsTab}>
-            {t("hub.configureHubUrl")}
-          </Button>
-        </HubStatusNotice>
-      )}
-
-      {hubDisplayState.kind === "connection-error" && (
-        <HubStatusNotice
-          tone="error"
-          icon={<CloudOff className="size-4" />}
-          title={t("hub.connectionIssueTitle")}
-          description={hubDisplayState.message}
-        >
-          <Button
-            size="sm"
-            disabled={hubStatusQuery.isFetching}
-            onClick={() => void refreshHub()}
-          >
-            {hubStatusQuery.isFetching && (
-              <LoaderCircle className="size-3.5 animate-spin" />
-            )}
-            {t("hub.retryConnection")}
-          </Button>
-          <Button size="sm" variant="outline" onClick={openHubSettingsTab}>
-            {t("hub.openHubSettings")}
-          </Button>
-        </HubStatusNotice>
-      )}
-
-      {hubDisplayState.kind === "account-required" && (
-        <HubStatusNotice
-          tone="info"
-          icon={<Info className="size-4" />}
-          title={t("hub.accountOptionalTitle")}
-          description={t("hub.accountOptionalDescription")}
-        >
-          <Button size="sm" variant="outline" onClick={openAccountSettingsTab}>
-            {t("hub.signInOrRegister")}
-          </Button>
-        </HubStatusNotice>
-      )}
-
       <Tabs
         value={tab}
         onValueChange={(v) => setTab(v as "browse" | "installed")}
         className="flex min-h-0 flex-1 flex-col"
       >
-        <div className="px-4 pt-3">
-          <TabsList>
-            <TabsTrigger value="browse">{t("hub.browse")}</TabsTrigger>
-            <TabsTrigger value="installed">
-              {t("hub.installedCount", { count: installedCount })}
-            </TabsTrigger>
-          </TabsList>
-        </div>
+        <PanelHeader
+          title={t("hub.title")}
+          description={t("hub.description")}
+          navigation={
+            <TabsList className="h-auto gap-5 rounded-none bg-transparent p-0">
+              <TabsTrigger
+                value="browse"
+                className="rounded-none border-b-2 border-transparent px-0 pt-0 pb-2.5 shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none"
+              >
+                {t("hub.browse")}
+              </TabsTrigger>
+              <TabsTrigger
+                value="installed"
+                className="rounded-none border-b-2 border-transparent px-0 pt-0 pb-2.5 shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none"
+              >
+                {t("hub.installedCount", { count: installedCount })}
+              </TabsTrigger>
+            </TabsList>
+          }
+          actions={
+            <div className="flex items-center gap-2">
+              {(hubDisplayState.kind === "account-required" ||
+                hubDisplayState.kind === "connected") && (
+                <RefreshButton
+                  onRefresh={refreshHub}
+                  refreshing={
+                    hubStatusQuery.isFetching ||
+                    packsQuery.isFetching ||
+                    installedQuery.isFetching
+                  }
+                />
+              )}
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setImportMode("choose")}
+              >
+                <FolderInput className="size-4" />
+                {t("hub.import")}
+              </Button>
+            </div>
+          }
+        />
+
+        {hubDisplayState.kind === "account-required" && (
+          <HubAccountNotice
+            icon={<Info className="size-4" />}
+            title={t("hub.accountOptionalTitle")}
+            description={t("hub.accountOptionalDescription")}
+          >
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={openAccountTab}
+            >
+              {t("hub.signInOrRegister")}
+            </Button>
+          </HubAccountNotice>
+        )}
+
         <TabsContent value="browse" className="min-h-0 flex-1">
           <ScrollArea className="h-full">
-            <div className="p-4">
+            <div className="h-full p-4">
               <BrowseTab
-                hubOffline={
-                  hubDisplayState.kind === "setup-required" ||
-                  hubDisplayState.kind === "connection-error"
-                }
+                connectionState={hubDisplayState}
                 packs={packsQuery.data}
                 filteredPacks={filteredCatalog}
-                packsLoading={
-                  hubDisplayState.kind === "loading" || packsQuery.isLoading
-                }
+                packsLoading={packsQuery.isLoading}
                 packsError={packsQuery.error as Error | null}
                 search={catalogSearch}
                 onSearchChange={setCatalogSearch}
@@ -496,7 +437,9 @@ export function HubPanel() {
                 onExport={(packId, destinationPath) =>
                   exportPack.mutate({ packId, destinationPath })
                 }
-                onOpenImport={() => setImportMode("choose")}
+                onConfigureHub={openHubSettingsTab}
+                onRetryConnection={() => void refreshHub()}
+                retryingConnection={hubStatusQuery.isFetching}
               />
             </div>
           </ScrollArea>
@@ -541,7 +484,7 @@ export function HubPanel() {
                 }
                 authenticated={authQuery.data?.authenticated === true}
                 hubUser={authQuery.data?.user ?? null}
-                onSignIn={openAccountSettingsTab}
+                onSignIn={openAccountTab}
                 onRename={(packId, name) => rename.mutate({ packId, name })}
                 renaming={rename.isPending}
               />
@@ -640,14 +583,12 @@ export function HubPanel() {
   );
 }
 
-function HubStatusNotice({
-  tone,
+function HubAccountNotice({
   icon,
   title,
   description,
   children,
 }: {
-  tone: "warning" | "error" | "info";
   icon: ReactNode;
   title: string;
   description: string;
@@ -655,29 +596,17 @@ function HubStatusNotice({
 }) {
   return (
     <section
-      className={cn(
-        "mx-4 mt-4 flex flex-wrap items-center gap-3 rounded-r-lg border-l-4 px-4 py-3",
-        tone === "warning" && "border-amber-500 bg-amber-500/10",
-        tone === "error" && "border-destructive bg-destructive/10",
-        tone === "info" && "border-info bg-info/10",
-      )}
-      role={tone === "error" ? "alert" : "status"}
+      className="mx-4 mt-3 flex flex-wrap items-center gap-2.5 rounded-r-md border-l-2 border-info bg-info/[0.08] px-3 py-2"
+      role="status"
     >
-      <div
-        className={cn(
-          "grid size-8 shrink-0 place-items-center rounded-full bg-card/70",
-          tone === "warning" && "text-amber-700",
-          tone === "error" && "text-destructive",
-          tone === "info" && "text-info",
-        )}
-      >
+      <div className="grid size-7 shrink-0 place-items-center text-info">
         {icon}
       </div>
       <div className="min-w-0 flex-1">
         <p className="text-sm font-semibold">{title}</p>
         <p className="text-xs text-muted-foreground">{description}</p>
       </div>
-      <div className="flex flex-wrap items-center gap-2">{children}</div>
+      <div className="ml-auto flex flex-wrap items-center gap-2">{children}</div>
     </section>
   );
 }

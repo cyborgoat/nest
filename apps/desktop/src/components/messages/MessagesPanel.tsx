@@ -82,8 +82,8 @@ export function MessagesPanel() {
     null,
   );
   const queryClient = useQueryClient();
-  const openAccountSettingsTab = useUiStore(
-    (state) => state.openAccountSettingsTab,
+  const openAccountTab = useUiStore(
+    (state) => state.openAccountTab,
   );
   const requestedPublishMessageId = useUiStore(
     (state) => state.requestedPublishMessageId,
@@ -249,7 +249,7 @@ export function MessagesPanel() {
           title="Sign in to see Hub messages"
           description="Messages are tied to your optional Nest Hub account. Local knowledge packs remain available without signing in."
         >
-          <Button onClick={openAccountSettingsTab}>
+          <Button onClick={openAccountTab}>
             Open account settings
           </Button>
         </EmptyState>

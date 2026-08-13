@@ -116,7 +116,7 @@ export function LibraryTree({
   const queryClient = useQueryClient();
   const clearPathsUnder = useUiStore((s) => s.clearPathsUnder);
   const openFileTab = useUiStore((s) => s.openFileTab);
-  const openAccountSettingsTab = useUiStore((s) => s.openAccountSettingsTab);
+  const openAccountTab = useUiStore((s) => s.openAccountTab);
   const setEditing = useEditorStore((s) => s.setEditing);
   const setDirty = useEditorStore((s) => s.setDirty);
   const { startTransfer, conflictDialog, applying: transferPending } =
@@ -699,7 +699,7 @@ export function LibraryTree({
                         setActive.mutate({ packId, active });
                       }}
                       authenticated={authenticated}
-                      onSignIn={openAccountSettingsTab}
+                      onSignIn={openAccountTab}
                       onExport={handleExport}
                       exportPending={exportPack.isPending}
                       onUninstallPack={(packId) =>
@@ -733,7 +733,7 @@ export function LibraryTree({
                         setActive.mutate({ packId, active });
                       }}
                       authenticated={authenticated}
-                      onSignIn={openAccountSettingsTab}
+                      onSignIn={openAccountTab}
                       onExport={handleExport}
                       exportPending={exportPack.isPending}
                       onUninstallPack={(packId) =>

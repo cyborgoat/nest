@@ -3,6 +3,7 @@ import {
   GitBranch,
   PackageSearch,
   Settings,
+  UserRound,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,6 +14,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
 import {
+  ACCOUNT_TAB_ID,
   SETTINGS_TAB_ID,
   type ActivitySidebarView,
   useUiStore,
@@ -44,6 +46,7 @@ export function ActivityBar({
   const sidebarOpen = useUiStore((s) => s.sidebarOpen);
   const setSidebarOpen = useUiStore((s) => s.setSidebarOpen);
   const openSettingsTab = useUiStore((s) => s.openSettingsTab);
+  const openAccountTab = useUiStore((s) => s.openAccountTab);
 
   return (
     <nav className="flex w-11 shrink-0 flex-col items-center gap-1 border-r border-border bg-sidebar/60 py-2">
@@ -88,6 +91,12 @@ export function ActivityBar({
         );
       })}
       <div className="mt-auto flex flex-col gap-1">
+        <ActivityButton
+          label="Account"
+          active={activeMainTabId === ACCOUNT_TAB_ID}
+          onClick={openAccountTab}
+          icon={<UserRound className="size-4" />}
+        />
         <ActivityButton
           label={t("shell.settings")}
           active={activeMainTabId === SETTINGS_TAB_ID}

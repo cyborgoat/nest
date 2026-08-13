@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { BookOpen, Cloud, PackageOpen } from "lucide-react";
+import { AccountPanel } from "@/components/settings/HubAccountSettings";
 import { HubPanel } from "@/components/hub/HubPanel";
 import { MainTabBar } from "@/components/main/MainTabBar";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
@@ -15,6 +16,7 @@ import { queryKeys } from "@/lib/query-keys";
 import { isImagePath } from "@/lib/vault-paths";
 import { useEditorStore } from "@/stores/editor";
 import {
+  ACCOUNT_TAB_ID,
   HUB_TAB_ID,
   MESSAGES_TAB_ID,
   parseDiffTabId,
@@ -40,6 +42,8 @@ export function MainTabArea() {
   let content;
   if (activeMainTabId === HUB_TAB_ID) {
     content = <HubPanel />;
+  } else if (activeMainTabId === ACCOUNT_TAB_ID) {
+    content = <AccountPanel />;
   } else if (activeMainTabId === SETTINGS_TAB_ID) {
     content = <SettingsPanel />;
   } else if (activeMainTabId === MESSAGES_TAB_ID) {
