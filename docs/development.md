@@ -26,7 +26,7 @@ npm run tauri dev
 
 The desktop app can start without the Hub service and will still include a bundled first-run `getting-started` pack.
 
-The Hub service listens on `PORT` (from `.env`, typically `8787`). Configure the desktop app's **Settings → Hub URL** to the address you want it to use, for example `http://127.0.0.1:8787` for local development.
+The Hub service listens on `PORT` (from `.env`, typically `8787`). Configure the desktop app's **Settings → General → Hub URL** to the address you want it to use, for example `http://127.0.0.1:8787` for local development. Settings is the gear at the bottom of the far-left activity bar. When no URL is configured, the Hub page's **Configure Hub URL in Settings** action opens Settings and focuses that field automatically.
 
 ## Environment
 

@@ -6,6 +6,7 @@ export const HUB_TAB_ID = "__hub__";
 export const SETTINGS_TAB_ID = "__settings__";
 export const MESSAGES_TAB_ID = "__messages__";
 export type SettingsSection = "general" | "account";
+export type SettingsTarget = "hub-url";
 export type ActivitySidebarView = "explorer" | "source-control" | "reviews";
 
 /** Content-view zoom (Ctrl+Scroll-wheel / Ctrl-Cmd+Plus/Minus/0) — scoped to
@@ -53,6 +54,7 @@ type UiState = {
   openMainTabs: string[];
   activeMainTabId: string | null;
   settingsSection: SettingsSection;
+  settingsTarget: SettingsTarget | null;
   hubSection: "browse" | "installed";
   requestedPublishMessageId: string | null;
   /** VS Code-style "preview" tab: at most one, replaced (not appended) by the
@@ -81,7 +83,9 @@ type UiState = {
   openHubTab: () => void;
   openHubInstalledTab: () => void;
   openSettingsTab: () => void;
+  openHubSettingsTab: () => void;
   openAccountSettingsTab: () => void;
+  clearSettingsTarget: () => void;
   setSettingsSection: (section: SettingsSection) => void;
   openMessagesTab: () => void;
   openPublishMessage: (requestId: string) => void;
@@ -174,6 +178,7 @@ export const useUiStore = create<UiState>()(
         openMainTabs: [],
         activeMainTabId: null,
         settingsSection: "general",
+        settingsTarget: null,
         hubSection: "browse",
         requestedPublishMessageId: null,
         previewMainTabId: null,
@@ -309,9 +314,21 @@ export const useUiStore = create<UiState>()(
         openHubInstalledTab: () =>
           openEphemeralTab(HUB_TAB_ID, { hubSection: "installed" }),
         openSettingsTab: () =>
-          openEphemeralTab(SETTINGS_TAB_ID, { settingsSection: "general" }),
+          openEphemeralTab(SETTINGS_TAB_ID, {
+            settingsSection: "general",
+            settingsTarget: null,
+          }),
+        openHubSettingsTab: () =>
+          openEphemeralTab(SETTINGS_TAB_ID, {
+            settingsSection: "general",
+            settingsTarget: "hub-url",
+          }),
         openAccountSettingsTab: () =>
-          openEphemeralTab(SETTINGS_TAB_ID, { settingsSection: "account" }),
+          openEphemeralTab(SETTINGS_TAB_ID, {
+            settingsSection: "account",
+            settingsTarget: null,
+          }),
+        clearSettingsTarget: () => set({ settingsTarget: null }),
         setSettingsSection: (settingsSection) => set({ settingsSection }),
         openMessagesTab: () => openEphemeralTab(MESSAGES_TAB_ID),
         openPublishMessage: (requestId) =>

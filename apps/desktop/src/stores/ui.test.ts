@@ -15,6 +15,7 @@ describe("settings navigation", () => {
       openMainTabs: [],
       activeMainTabId: null,
       settingsSection: "general",
+      settingsTarget: null,
     });
   });
 
@@ -34,6 +35,16 @@ describe("settings navigation", () => {
     useUiStore.getState().openSettingsTab();
 
     expect(useUiStore.getState().settingsSection).toBe("general");
+  });
+
+  it("opens Hub settings links at the Hub URL field", () => {
+    useUiStore.getState().openHubSettingsTab();
+
+    expect(useUiStore.getState()).toMatchObject({
+      activeMainTabId: SETTINGS_TAB_ID,
+      settingsSection: "general",
+      settingsTarget: "hub-url",
+    });
   });
 });
 

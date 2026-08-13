@@ -104,9 +104,18 @@ const messages: Record<Locale, MessageTree> = {
         "Install versioned packs from the configured catalog, create one from a local folder, or import a shareable ZIP.",
       online: "Online",
       offline: "Offline",
-      offlineToastTitle: "Hub offline",
-      offlineToastDescription:
-        "Catalog unavailable. You can still create or import a local pack.",
+      setupRequired: "Setup required",
+      setupRequiredTitle: "Hub setup required",
+      setupRequiredDescription:
+        "Set the Hub URL before browsing or downloading knowledge packs.",
+      configureHubUrl: "Configure Hub URL in Settings",
+      connectionIssueTitle: "Hub connection issue",
+      retryConnection: "Retry connection",
+      openHubSettings: "Open Hub settings",
+      accountOptionalTitle: "Account sign-in is optional",
+      accountOptionalDescription:
+        "Sign in only to publish packs or access restricted knowledge packs.",
+      signInOrRegister: "Sign in or register",
       import: "Import",
       browse: "Browse",
       installed: "Installed",

@@ -4,9 +4,7 @@ import {
   ArrowDownCircle,
   ArrowUpCircle,
   CloudDownload,
-  CloudOff,
   FolderInput,
-  Globe,
   Package,
   Search,
 } from "lucide-react";
@@ -80,35 +78,15 @@ export function BrowseTab({
   if (hubOffline) {
     return (
       <EmptyState
-        variant="dashed"
-        icon={<CloudOff className="size-6" />}
-        title={t("hub.connectHub")}
+        icon={<FolderInput className="size-6" />}
+        title={t("hub.havePackFile")}
+        description={t("hub.havePackFileBody")}
         footnote={t("hub.hubOfflineFootnote")}
       >
-        <div className="mx-auto grid max-w-lg gap-3 text-left sm:grid-cols-2">
-          <div className="space-y-1.5 rounded-md border border-border bg-card p-3">
-            <div className="flex items-center gap-1.5 text-sm font-medium">
-              <Globe className="size-4 text-primary" />
-              {t("hub.browseRegistry")}
-            </div>
-            <p className="text-sm text-muted-foreground">
-              {t("hub.browseRegistryBody")}
-            </p>
-          </div>
-          <div className="space-y-1.5 rounded-md border border-border bg-card p-3">
-            <div className="flex items-center gap-1.5 text-sm font-medium">
-              <FolderInput className="size-4 text-accent" />
-              {t("hub.havePackFile")}
-            </div>
-            <p className="text-sm text-muted-foreground">
-              {t("hub.havePackFileBody")}
-            </p>
-            <Button size="sm" variant="outline" onClick={onOpenImport}>
-              <FolderInput className="size-4" />
-              {t("hub.import")}
-            </Button>
-          </div>
-        </div>
+        <Button size="sm" variant="outline" onClick={onOpenImport}>
+          <FolderInput className="size-4" />
+          {t("hub.import")}
+        </Button>
       </EmptyState>
     );
   }

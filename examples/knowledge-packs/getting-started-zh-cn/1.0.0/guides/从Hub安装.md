@@ -2,7 +2,8 @@
 
 ## 连接 Hub
 
-1. 点击顶部栏右上角 **Settings**，填写团队提供的 **Hub URL**。
+1. 向团队获取 Hub URL。打开 **Hub**，点击 **Configure Hub URL in Settings**
+   直接定位到该字段。
 2. 点击 **Test connection**。
 3. 如果知识包受限，请前往 **Settings → Account** 登录。
 
@@ -20,4 +21,5 @@ Nest 每个知识包 ID 只安装一个版本。安装更高版本会更新知�
 时，选择 **Sync patch**。Nest 会自动合并无冲突的本地修改；存在冲突时，可逐个文件
 选择 **Local** 或 **Approved Hub**。
 
-Hub 离线后已安装知识包仍可阅读；更新需要有效连接。
+Hub 离线后已安装知识包仍可阅读；更新需要有效连接。如果已配置的 Hub
+无法连接，可在红色提示中点击 **Retry connection** 或 **Open Hub settings**。

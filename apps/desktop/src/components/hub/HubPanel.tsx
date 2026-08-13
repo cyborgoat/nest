@@ -6,8 +6,15 @@ import type {
   PackMergeResolution,
   PackProject,
 } from "@nest/shared";
-import { CloudOff, FolderInput, Info } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  CloudOff,
+  FolderInput,
+  Info,
+  LoaderCircle,
+} from "lucide-react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { BrowseTab } from "@/components/hub/BrowseTab";
 import { InstalledTab } from "@/components/hub/InstalledTab";
@@ -34,15 +41,18 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
 import { appErrorMessage } from "@/lib/errors";
+import { deriveHubDisplayState } from "@/lib/hub-display-state";
 import { packMutationInvalidations, queryKeys } from "@/lib/query-keys";
 import { useI18n } from "@/lib/i18n";
 import { compareSemVer } from "@/lib/semver";
+import { cn } from "@/lib/utils";
 import { useUiStore } from "@/stores/ui";
 
 export function HubPanel() {
   const { t } = useI18n();
   const clearPathsUnder = useUiStore((s) => s.clearPathsUnder);
   const openAccountSettingsTab = useUiStore((s) => s.openAccountSettingsTab);
+  const openHubSettingsTab = useUiStore((s) => s.openHubSettingsTab);
   const queryClient = useQueryClient();
   const [importMode, setImportMode] = useState<LocalPackImportMode | null>(null);
   const [catalogSearch, setCatalogSearch] = useState("");
@@ -77,27 +87,24 @@ export function HubPanel() {
     retry: 1,
   });
 
+  const settingsQuery = useQuery({
+    queryKey: queryKeys.settings,
+    queryFn: api.settingsGet,
+  });
   const hubOnline = hubStatusQuery.data?.online === true;
-  const hubOffline = hubStatusQuery.data?.online === false;
-  const wasOnlineRef = useRef<boolean | null>(null);
-
-  useEffect(() => {
-    if (hubStatusQuery.data == null) return;
-    const online = hubStatusQuery.data.online;
-    const prev = wasOnlineRef.current;
-    wasOnlineRef.current = online;
-    // Toast on first known offline, or when connection drops.
-    if (!online && prev !== false) {
-      toast.warning(t("hub.offlineToastTitle"), {
-        description:
-          hubStatusQuery.data.message || t("hub.offlineToastDescription"),
-      });
-    }
-  }, [hubStatusQuery.data, t]);
 
   const authQuery = useQuery({
     queryKey: queryKeys.hubAuth,
     queryFn: api.hubAuthState,
+  });
+
+  const hubDisplayState = deriveHubDisplayState({
+    hubBaseUrl: settingsQuery.data?.hub_base_url ?? null,
+    online: hubStatusQuery.data?.online ?? null,
+    authenticated: authQuery.isLoading
+      ? null
+      : authQuery.data?.authenticated === true,
+    connectionMessage: hubStatusQuery.data?.message,
   });
 
   const packsQuery = useQuery({
@@ -352,8 +359,20 @@ export function HubPanel() {
         description={t("hub.description")}
         badges={
           <>
-            {hubOnline && <Badge variant="accent">{t("hub.online")}</Badge>}
-            {hubOffline && (
+            {hubDisplayState.kind === "setup-required" && (
+              <Badge variant="modified">
+                <AlertTriangle className="size-3" />
+                {t("hub.setupRequired")}
+              </Badge>
+            )}
+            {(hubDisplayState.kind === "account-required" ||
+              hubDisplayState.kind === "connected") && (
+              <Badge variant="update">
+                <CheckCircle2 className="size-3" />
+                {t("hub.online")}
+              </Badge>
+            )}
+            {hubDisplayState.kind === "connection-error" && (
               <Badge variant="destructive">
                 <CloudOff className="size-3" />
                 {t("hub.offline")}
@@ -383,24 +402,53 @@ export function HubPanel() {
         }
       />
 
-      {!authQuery.isLoading && !authQuery.data?.authenticated && (
-        <div className="mx-4 mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-primary/20 bg-primary/5 px-4 py-3">
-          <div className="grid size-8 shrink-0 place-items-center rounded-full bg-primary/10 text-primary">
-            <Info className="size-4" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-medium">
-              Nest works locally without an account
-            </p>
-            <p className="text-xs text-muted-foreground">
-              Create an account or sign in only when you want to publish a pack
-              or access restricted knowledge packs.
-            </p>
-          </div>
-          <Button size="sm" variant="outline" onClick={openAccountSettingsTab}>
-            Sign in or register
+      {hubDisplayState.kind === "setup-required" && (
+        <HubStatusNotice
+          tone="warning"
+          icon={<AlertTriangle className="size-4" />}
+          title={t("hub.setupRequiredTitle")}
+          description={t("hub.setupRequiredDescription")}
+        >
+          <Button size="sm" variant="outline" onClick={openHubSettingsTab}>
+            {t("hub.configureHubUrl")}
           </Button>
-        </div>
+        </HubStatusNotice>
+      )}
+
+      {hubDisplayState.kind === "connection-error" && (
+        <HubStatusNotice
+          tone="error"
+          icon={<CloudOff className="size-4" />}
+          title={t("hub.connectionIssueTitle")}
+          description={hubDisplayState.message}
+        >
+          <Button
+            size="sm"
+            disabled={hubStatusQuery.isFetching}
+            onClick={() => void refreshHub()}
+          >
+            {hubStatusQuery.isFetching && (
+              <LoaderCircle className="size-3.5 animate-spin" />
+            )}
+            {t("hub.retryConnection")}
+          </Button>
+          <Button size="sm" variant="outline" onClick={openHubSettingsTab}>
+            {t("hub.openHubSettings")}
+          </Button>
+        </HubStatusNotice>
+      )}
+
+      {hubDisplayState.kind === "account-required" && (
+        <HubStatusNotice
+          tone="info"
+          icon={<Info className="size-4" />}
+          title={t("hub.accountOptionalTitle")}
+          description={t("hub.accountOptionalDescription")}
+        >
+          <Button size="sm" variant="outline" onClick={openAccountSettingsTab}>
+            {t("hub.signInOrRegister")}
+          </Button>
+        </HubStatusNotice>
       )}
 
       <Tabs
@@ -420,10 +468,15 @@ export function HubPanel() {
           <ScrollArea className="h-full">
             <div className="p-4">
               <BrowseTab
-                hubOffline={hubOffline}
+                hubOffline={
+                  hubDisplayState.kind === "setup-required" ||
+                  hubDisplayState.kind === "connection-error"
+                }
                 packs={packsQuery.data}
                 filteredPacks={filteredCatalog}
-                packsLoading={packsQuery.isLoading}
+                packsLoading={
+                  hubDisplayState.kind === "loading" || packsQuery.isLoading
+                }
                 packsError={packsQuery.error as Error | null}
                 search={catalogSearch}
                 onSearchChange={setCatalogSearch}
@@ -584,5 +637,47 @@ export function HubPanel() {
         </AlertDialogContent>
       </AlertDialog>
     </div>
+  );
+}
+
+function HubStatusNotice({
+  tone,
+  icon,
+  title,
+  description,
+  children,
+}: {
+  tone: "warning" | "error" | "info";
+  icon: ReactNode;
+  title: string;
+  description: string;
+  children: ReactNode;
+}) {
+  return (
+    <section
+      className={cn(
+        "mx-4 mt-4 flex flex-wrap items-center gap-3 rounded-r-lg border-l-4 px-4 py-3",
+        tone === "warning" && "border-amber-500 bg-amber-500/10",
+        tone === "error" && "border-destructive bg-destructive/10",
+        tone === "info" && "border-info bg-info/10",
+      )}
+      role={tone === "error" ? "alert" : "status"}
+    >
+      <div
+        className={cn(
+          "grid size-8 shrink-0 place-items-center rounded-full bg-card/70",
+          tone === "warning" && "text-amber-700",
+          tone === "error" && "text-destructive",
+          tone === "info" && "text-info",
+        )}
+      >
+        {icon}
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-semibold">{title}</p>
+        <p className="text-xs text-muted-foreground">{description}</p>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">{children}</div>
+    </section>
   );
 }

@@ -6,10 +6,10 @@ knowledge packs. Installed packs live on your computer; an optional team
 
 ## Where to find the main controls
 
-- **Hub**, **Messages**, **Settings**, and **Chat** are in the upper-right
-  corner of the app header.
+- **Hub**, **Messages**, and **Chat** are in the upper-right app header.
 - The activity bar on the far left contains **Explorer**, **Source Control**,
-  and **Under Review**. Hover an icon to see its name.
+  and **Under Review**. **Settings** is the gear at the bottom of this bar.
+  Hover an icon to see its name.
 - Use **Explorer** to open packs and files, **Source Control** to review and
   publish changes, and **Under Review** to see pending publish requests.
 

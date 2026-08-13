@@ -51,17 +51,18 @@ flowchart TB
 
 ## Hub connectivity
 
-The desktop app uses the configured Hub URL from Settings. The Hub service listens on `HOST`/`PORT` from its `.env`; the desktop setting supplies the full base URL.
+The desktop app uses the Hub URL configured under **Settings → General**. Settings is opened with the gear anchored at the bottom of the far-left activity bar; Hub, Messages, and Chat remain in the top header. The Hub service listens on `HOST`/`PORT` from its `.env`; the desktop setting supplies the full base URL.
 
 Authentication is optional. Public catalog and download behavior stays anonymous; the desktop stores an authenticated refresh credential in the operating-system credential store only when a user signs in to publish or access restricted packs. Previously downloaded restricted content remains ordinary local vault content offline.
 
-Hub sign-in and registration live in **Settings** so browsing local and public content never looks gated. The top-level **Messages** page shows durable publish-submitted, approved, and rejected notices as a compact list with unread and deletion controls; it polls every 30 seconds while signed in and also has a manual refresh button, as does the Hub tab. The browser administration console keeps pending reviews separate from cursor-paginated approval/rejection history. Each request has a routed, GitHub-style source review that compares against a base release frozen at submission and retains derived text/image diffs after the staging ZIP is removed.
+Hub sign-in and registration live under **Settings → Account** so browsing local and public content never looks gated. The Hub page shows this optional account prompt only after establishing a connection. The top-level **Messages** page shows durable publish-submitted, approved, and rejected notices as a compact list with unread and deletion controls; it polls every 30 seconds while signed in and also has a manual refresh button, as does the Hub tab. The browser administration console keeps pending reviews separate from cursor-paginated approval/rejection history. Each request has a routed, GitHub-style source review that compares against a base release frozen at submission and retains derived text/image diffs after the staging ZIP is removed.
 
 The Hub has three authorization levels: regular users, admins, and one environment-managed superuser. Admins and the superuser share registry review and pack-management permissions. Admins may promote users and delete regular accounts; the superuser may also delete admins. The adopted superuser identity is persistently locked against profile, password, role, and deletion changes.
 
 - Catalog and download use a **PyPI-style versioned registry** (`GET /packs`, `GET /packs/:id/:version/download`). See [pack-registry.md](pack-registry.md).
 - The Hub panel has two tabs: **Browse** (remote registry: search + download) and **Installed** (everything in the local vault, with origin badges and upgrade/remove actions).
-- If the Hub service is unreachable, the Hub panel shows an **Offline** status and Browse offers a connect/import empty state. The Installed tab and local **Import** (zip) still work.
+- Hub status is prioritized into one persistent callout: amber **Setup required** when the URL is missing, red **Hub connection issue** with Retry and anchored Settings actions when a configured service is unreachable, or blue optional account guidance after connecting. The header uses green Online, amber Setup required, and red Offline badges.
+- The Hub URL actions open **Settings → General** and scroll to/focus the URL field. When offline, Browse offers only the still-available local Import path; the Installed tab and local Import continue to work.
 - Example-pack folders under `examples/knowledge-packs` are `{id}/{semver}/` trees served by the **Hub process** only — the desktop does not fall back to them when offline.
 
 On first launch, desktop seeds a local bundled `getting-started` pack into the vault. This does not require Hub connectivity.
@@ -69,6 +70,7 @@ On first launch, desktop seeds a local bundled `getting-started` pack into the v
 ## Vault and indexing
 
 - Packs install into the configured **knowledge directory** (default `{app_data}/vault/<pack-id>/`; upgrade replaces the tree).
+- The **Local index** status and manual sync action appear at the bottom of **Settings → General**, after Network.
 - Installed-pack state records whether content was created/imported locally, downloaded from the registry, bundled with Nest, or predates origin tracking. Local and editable registry packs can be published.
 - The Hub credits the submitter of a pack's first approved publication as its author and initially adds that account as a maintainer. Public catalog metadata exposes author and maintainer names; administrators can later edit the credited author and maintainer list independently.
 - Publish review state is persisted separately from the installed version. Pending review locks every in-app content/metadata mutation until the request is approved, rejected, or cancelled by its original submitter. Approval becomes `approved_awaiting_merge`; the desktop downloads the exact released artifact as the new source-control baseline only after the user chooses **Merge with remote**.

@@ -125,7 +125,11 @@ export function SettingsPanel() {
   const { t } = useI18n();
   const queryClient = useQueryClient();
   const settingsSection = useUiStore((state) => state.settingsSection);
+  const settingsTarget = useUiStore((state) => state.settingsTarget);
   const setSettingsSection = useUiStore((state) => state.setSettingsSection);
+  const clearSettingsTarget = useUiStore(
+    (state) => state.clearSettingsTarget,
+  );
   const clearPathsUnder = useUiStore((state) => state.clearPathsUnder);
   const [form, setForm] = useState<AppSettings>(EMPTY);
   const [fontSizeDraft, setFontSizeDraft] = useState(
@@ -140,6 +144,20 @@ export function SettingsPanel() {
   >(null);
   const hydrated = useRef(false);
   const lastSavedKey = useRef("");
+  const hubBaseUrlRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (settingsSection !== "general" || settingsTarget !== "hub-url") return;
+    const frame = window.requestAnimationFrame(() => {
+      hubBaseUrlRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+      hubBaseUrlRef.current?.focus({ preventScroll: true });
+      clearSettingsTarget();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [clearSettingsTarget, settingsSection, settingsTarget]);
 
   const settingsQuery = useQuery({
     queryKey: queryKeys.settings,
@@ -436,6 +454,7 @@ export function SettingsPanel() {
                     description={t("settings.hubBaseUrlDescription")}
                   >
                     <Input
+                      ref={hubBaseUrlRef}
                       value={form.hub_base_url}
                       onChange={(e) => update("hub_base_url", e.target.value)}
                       placeholder="http://127.0.0.1:8787"
@@ -513,39 +532,6 @@ export function SettingsPanel() {
                           {t("settings.resetToDefault")}
                         </Button>
                       )}
-                    </div>
-                  </Field>
-                  <Field
-                    label={t("settings.localIndex")}
-                    description={t("settings.localIndexDescription")}
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className="text-xs text-muted-foreground">
-                        {indexQuery.data?.indexed_files ?? 0}{" "}
-                        {t("settings.indexFiles")} ·{" "}
-                        {indexQuery.data?.indexed_chunks ?? 0}{" "}
-                        {t("settings.indexChunks")}
-                        {indexQuery.data?.message
-                          ? ` — ${indexQuery.data.message}`
-                          : ""}
-                      </p>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        disabled={
-                          syncIndex.isPending || indexQuery.data?.is_indexing
-                        }
-                        onClick={() => syncIndex.mutate()}
-                      >
-                        {(syncIndex.isPending ||
-                          indexQuery.data?.is_indexing) && (
-                          <LoaderCircle className="size-3.5 animate-spin" />
-                        )}
-                        {syncIndex.isPending || indexQuery.data?.is_indexing
-                          ? t("settings.syncing")
-                          : t("settings.syncIndexNow")}
-                      </Button>
                     </div>
                   </Field>
                 </GeneralGroup>
@@ -670,6 +656,38 @@ export function SettingsPanel() {
                     />
                   </Field>
                 </GeneralGroup>
+                <Field
+                  label={t("settings.localIndex")}
+                  description={t("settings.localIndexDescription")}
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-xs text-muted-foreground">
+                      {indexQuery.data?.indexed_files ?? 0}{" "}
+                      {t("settings.indexFiles")} ·{" "}
+                      {indexQuery.data?.indexed_chunks ?? 0}{" "}
+                      {t("settings.indexChunks")}
+                      {indexQuery.data?.message
+                        ? ` — ${indexQuery.data.message}`
+                        : ""}
+                    </p>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={
+                        syncIndex.isPending || indexQuery.data?.is_indexing
+                      }
+                      onClick={() => syncIndex.mutate()}
+                    >
+                      {(syncIndex.isPending || indexQuery.data?.is_indexing) && (
+                        <LoaderCircle className="size-3.5 animate-spin" />
+                      )}
+                      {syncIndex.isPending || indexQuery.data?.is_indexing
+                        ? t("settings.syncing")
+                        : t("settings.syncIndexNow")}
+                    </Button>
+                  </div>
+                </Field>
               </SettingsSection>
             </TabsContent>
           </Tabs>

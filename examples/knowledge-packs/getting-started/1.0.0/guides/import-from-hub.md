@@ -2,7 +2,8 @@
 
 ## Connect Hub
 
-1. Ask your team for the Hub URL and enter it in **Settings**.
+1. Ask your team for the Hub URL. Open **Hub**, then select **Configure Hub URL
+   in Settings** to jump directly to the field.
 2. Select **Test connection**.
 3. Sign in under **Settings → Account** if the pack is restricted.
 
@@ -22,4 +23,5 @@ appears, select **Sync patch**. Nest merges non-conflicting local work and asks
 you to choose the local or approved version for any conflicting file.
 
 Installed packs stay readable if Hub goes offline; updates need a working
-connection.
+connection. If a configured Hub cannot connect, use **Retry connection** or
+**Open Hub settings** in the red connection notice.

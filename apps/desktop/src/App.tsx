@@ -1,6 +1,6 @@
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { PackProject, TreeNode } from "@nest/shared";
-import { Bell, Cloud, MessageSquare, Settings2 } from "lucide-react";
+import { Bell, Cloud, MessageSquare } from "lucide-react";
 import { useEffect, useMemo, useRef, type ReactNode } from "react";
 import { toast } from "sonner";
 import { usePanelRef } from "react-resizable-panels";
@@ -34,7 +34,6 @@ import { useMainContentHotkeys } from "@/hooks/use-main-content-hotkeys";
 import {
   HUB_TAB_ID,
   MESSAGES_TAB_ID,
-  SETTINGS_TAB_ID,
   useUiStore,
 } from "@/stores/ui";
 
@@ -57,7 +56,6 @@ export default function App() {
   const activeMainTabId = useUiStore((s) => s.activeMainTabId);
   const openHubTab = useUiStore((s) => s.openHubTab);
   const openHubInstalledTab = useUiStore((s) => s.openHubInstalledTab);
-  const openSettingsTab = useUiStore((s) => s.openSettingsTab);
   const openMessagesTab = useUiStore((s) => s.openMessagesTab);
   const pruneMainFileTabs = useUiStore((s) => s.pruneMainFileTabs);
   const sidebarOpen = useUiStore((s) => s.sidebarOpen);
@@ -330,12 +328,6 @@ export default function App() {
               icon={<Bell className="size-4" />}
               label="Messages"
               dot={(messageCountQuery.data?.count ?? 0) > 0}
-            />
-            <NavButton
-              active={activeMainTabId === SETTINGS_TAB_ID}
-              onClick={openSettingsTab}
-              icon={<Settings2 className="size-4" />}
-              label={shell.settings}
             />
             <Separator orientation="vertical" className="mx-1 h-6" />
             <NavButton

@@ -6,9 +6,9 @@ Nest generates it when you import a folder.
 
 ## Main areas
 
-The upper-right app header contains **Hub**, **Messages**, **Settings**, and
-**Chat**. The activity bar on the far left contains **Explorer**, **Source
-Control**, and **Under Review**.
+The upper-right app header contains **Hub**, **Messages**, and **Chat**. The
+activity bar on the far left contains **Explorer**, **Source Control**, and
+**Under Review**, with the **Settings** gear anchored at the bottom.
 
 - **Explorer** browses installed packs and opens Markdown files.
 - **Source Control** shows new, modified, and deleted files before publishing.
