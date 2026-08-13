@@ -6,7 +6,7 @@ export const HUB_TAB_ID = "__hub__";
 export const SETTINGS_TAB_ID = "__settings__";
 export const ACCOUNT_TAB_ID = "__account__";
 export const MESSAGES_TAB_ID = "__messages__";
-export type SettingsTarget = "hub-url";
+type SettingsTarget = "hub-url";
 export type ActivitySidebarView = "explorer" | "source-control" | "reviews";
 
 /** Whole-app webview zoom. Session-only: deliberately excluded from

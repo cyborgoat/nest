@@ -21,6 +21,9 @@ export const queryKeys = {
   chatSessions: ["chat-sessions"] as const,
   chatMessages: (session_id: string) =>
     ["chat-messages", session_id] as const,
+  chatFileChange: (changeId: string) => ["chat-file-change", changeId] as const,
+  pendingChatFileChange: (path: string) => ["pending-chat-file-change", path] as const,
+  allPendingChatFileChanges: ["pending-chat-file-change"] as const,
   allChatMessages: ["chat-messages"] as const,
   file: (path: string) => ["file", path] as const,
   allFiles: ["file"] as const,

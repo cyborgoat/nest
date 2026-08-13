@@ -10,6 +10,14 @@ pub enum ChatStreamEvent {
     Reading {
         path: String,
     },
+    FileEditing {
+        path: String,
+        operation: String,
+    },
+    FileStaged {
+        path: String,
+        operation: String,
+    },
     /// Retrieval finished; waiting on / streaming the model reply.
     Generating,
     Citations {

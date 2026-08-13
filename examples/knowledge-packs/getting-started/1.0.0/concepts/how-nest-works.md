@@ -8,14 +8,17 @@ Nest generates it when you import a folder.
 
 The upper-right app header contains **Hub**, **Messages**, and **Chat**. The
 activity bar on the far left contains **Explorer**, **Source Control**, and
-**Under Review**, with the **Settings** gear anchored at the bottom.
+**Under Review**, with **Account** and **Settings** anchored at the bottom.
 
 - **Explorer** browses installed packs and opens Markdown files.
 - **Source Control** shows new, modified, and deleted files before publishing.
 - **Hub** discovers, installs, updates, imports, exports, and publishes packs.
 - **Messages** records publishing submissions, approvals, and rejections.
-- **Chat** answers questions using active packs and optional `@` references.
-- **Settings** configures Hub, your account, storage, and the Chat model.
+- **Chat** answers questions or creates reviewable Markdown proposals using
+  active packs and optional `@` references.
+- **Account** manages Hub sign-in, profile, and password.
+- **Settings** configures Hub connectivity, storage, appearance, and the Chat
+  model.
 
 ## Local-first
 

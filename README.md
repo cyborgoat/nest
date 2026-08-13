@@ -1,6 +1,6 @@
 # Nest
 
-Local-first desktop knowledge workspace. Browse immutable Markdown knowledge packs and ask questions with retrieval-augmented chat over an OpenAI-compatible LLM.
+Local-first desktop knowledge workspace. Read and edit Markdown knowledge packs, and use retrieval-augmented chat through an OpenAI-compatible LLM.
 
 Nest ships with a bundled default knowledge pack (`getting-started`) on first launch so users can learn the app immediately, even before connecting to a remote Hub.
 
@@ -36,6 +36,7 @@ npm run tauri dev
 4. In **Library**, keep packs **Active** for chat retrieval (use **+/−** to deactivate). Inactive packs stay browsable under a collapsible section.
 5. In **Chat**, ask questions over all active packs, or `@`-mention files/folders under active packs to narrow focus.
 6. Chat supports **multiple sessions**: tabs for open chats, History for pin/archive/rename/delete. Session titles are generated after the first reply when still untitled.
+7. Choose **Ask** for read-only answers or **Agent** for permissioned Markdown proposals. Agent previews pending content immediately; review its unified inline diff in the Markdown editor, then **Approve** to write and index it or **Reject** to discard it. Unresolved proposals remain the effective workspace for follow-up Agent turns.
 
 ### Markdown support in the app
 
@@ -77,7 +78,7 @@ Desktop installers (macOS `.dmg` for Apple Silicon + Intel, Windows `.msi`/`.exe
 
 - Markdown-only knowledge
 - Local vault + SQLite FTS **and** FastEmbed vector RAG via [Rig](https://github.com/0xPlaygrounds/rig) (`rig-fastembed` + `rig-sqlite`); the embedding model ships bundled in the binary, so retrieval works fully offline with no first-run download
-- Chat performs local hybrid retrieval before one Rig streaming completion; completions go to your OpenAI-compatible LLM
+- Ask performs local hybrid retrieval before one Rig streaming completion. Agent adds permissioned Markdown tools and a reviewable pending-workspace overlay; completions go to your OpenAI-compatible LLM.
 - Active packs define the default RAG domain; `@` focus paths narrow retrieval and directly load bounded Markdown content (including folders) while indexing catches up
 - Desktop use remains login-free; an optional Hub account is used only for publishing and restricted packs.
 - Registered authors submit local packs and new versions for administrator review.

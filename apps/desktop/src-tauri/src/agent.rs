@@ -1,5 +1,6 @@
 //! Rig agent: eager local retrieval + one OpenAI-compatible streaming turn.
 
+use crate::agent_tools::AgentToolContext;
 use crate::db::{self, AppSettings, Citation};
 use crate::error::{AppError, AppResult};
 use crate::llm::ChatStreamEvent;
@@ -38,6 +39,7 @@ pub struct AgentChatResult {
     pub citations: Vec<Citation>,
     pub thinking: Option<String>,
     pub thinking_seconds: Option<f64>,
+    pub file_changes: Vec<db::NewChatFileChange>,
 }
 
 pub struct AgentChatRequest {
@@ -50,6 +52,8 @@ pub struct AgentChatRequest {
     pub focus_paths: Vec<String>,
     pub stream_event: String,
     pub prior_history: Vec<Message>,
+    pub mode: String,
+    pub protected_paths: Vec<String>,
 }
 
 #[derive(Default)]
@@ -103,6 +107,8 @@ pub async fn run_agent_chat(request: AgentChatRequest) -> AppResult<AgentChatRes
         focus_paths,
         stream_event,
         prior_history,
+        mode,
+        protected_paths,
     } = request;
     if settings.llm_api_key.trim().is_empty() {
         return Err(AppError::msg("API key not configured"));
@@ -153,7 +159,7 @@ pub async fn run_agent_chat(request: AgentChatRequest) -> AppResult<AgentChatRes
         result = build_focus_context_bounded(vault_root, valid_focus_paths, FOCUS_CONTEXT_TIMEOUT) => result?,
         _ = cancel_rx.changed() => return Err(AppError::msg("cancelled")),
     };
-    let agent_query = if focus_context.text.is_empty() {
+    let mut agent_query = if focus_context.text.is_empty() {
         query.clone()
     } else {
         format!(
@@ -161,6 +167,43 @@ pub async fn run_agent_chat(request: AgentChatRequest) -> AppResult<AgentChatRes
             focus_context.text
         )
     };
+    if mode == "agent" {
+        let active_roots = active_packs
+            .iter()
+            .map(|pack| pack.local_path.as_str())
+            .collect::<Vec<_>>();
+        let pending = {
+            let conn = state.db.lock();
+            db::list_pending_chat_file_changes(&conn)?
+        };
+        let mut remaining = MAX_FOCUS_CHARS_TOTAL;
+        let mut pending_context = String::new();
+        for change in pending.into_iter().filter(|change| {
+            active_roots
+                .iter()
+                .any(|root| Path::new(&change.path).starts_with(root))
+        }) {
+            if remaining == 0 {
+                break;
+            }
+            let content = change
+                .new_content
+                .as_deref()
+                .unwrap_or("[This file is pending deletion.]");
+            let bounded = truncate_chars(content, remaining.min(MAX_FOCUS_CHARS_PER_FILE));
+            pending_context.push_str(&format!(
+                "\n\n### {} (pending Agent proposal)\n{}",
+                change.path, bounded
+            ));
+            remaining = remaining.saturating_sub(bounded.chars().count());
+        }
+        if !pending_context.is_empty() {
+            agent_query.push_str(
+                "\n\n---\nPending Agent workspace (authoritative over retrieved/indexed versions):",
+            );
+            agent_query.push_str(&pending_context);
+        }
+    }
 
     let openai = openai::Client::builder()
         .api_key(settings.llm_api_key.clone())
@@ -196,7 +239,10 @@ pub async fn run_agent_chat(request: AgentChatRequest) -> AppResult<AgentChatRes
     crate::nest_debug!("agent", "eager_retrieval hits={}", eager.len());
     let focus_count = focus_context.citations.len();
     let citations = merge_citations(focus_context.citations, eager);
-    let preamble = agent_preamble_with_retrieval(&citations, focus_count > 0, &active_packs);
+    let mut preamble = agent_preamble_with_retrieval(&citations, focus_count > 0, &active_packs);
+    if mode == "agent" {
+        preamble.push_str("\n\nYou are in Agent mode. You may use the provided tools to inspect and edit Markdown files in active editable packs when that helps fulfill the request. Pending Agent proposals are the current effective workspace and are authoritative over older retrieved/indexed passages. Read a file before replacing it, preserve unrelated content, and use paths exactly as returned by the tools. Tool edits are staged until your final response succeeds. Briefly summarize any edits in the final response. Do not claim a file was changed unless a write tool succeeded.");
+    }
     let reading_paths = citations
         .iter()
         .map(|citation| citation.file_path.clone())
@@ -209,10 +255,27 @@ pub async fn run_agent_chat(request: AgentChatRequest) -> AppResult<AgentChatRes
         },
     );
 
-    let agent = openai
-        .agent(&settings.chat_model)
-        .preamble(&preamble)
-        .build();
+    let tool_context = (mode == "agent").then(|| {
+        AgentToolContext::new(
+            state.clone(),
+            app.clone(),
+            stream_event.clone(),
+            protected_paths,
+        )
+    });
+    let builder = openai.agent(&settings.chat_model).preamble(&preamble);
+    let agent = if let Some(context) = &tool_context {
+        builder
+            .default_max_turns(12)
+            .tool(context.list_tool())
+            .tool(context.read_tool())
+            .tool(context.replace_tool())
+            .tool(context.create_tool())
+            .tool(context.delete_tool())
+            .build()
+    } else {
+        builder.build()
+    };
 
     let _ = app.emit(&stream_event, ChatStreamEvent::Generating);
 
@@ -224,6 +287,7 @@ pub async fn run_agent_chat(request: AgentChatRequest) -> AppResult<AgentChatRes
     // `rig::agent::hook` docs.
     let mut stream = agent
         .stream_chat(agent_query, prior_history)
+        .tool_concurrency(1)
         .add_hook(CancelHook {
             cancel_rx: cancel_rx.clone(),
         })
@@ -357,11 +421,17 @@ pub async fn run_agent_chat(request: AgentChatRequest) -> AppResult<AgentChatRes
         citations.len()
     );
 
+    let file_changes = match tool_context {
+        Some(context) => context.proposals()?,
+        None => Vec::new(),
+    };
+
     Ok(AgentChatResult {
         answer: full,
         citations,
         thinking: (!thinking.trim().is_empty()).then_some(thinking),
         thinking_seconds: thinking_started.map(|start| start.elapsed().as_secs_f64()),
+        file_changes,
     })
 }
 

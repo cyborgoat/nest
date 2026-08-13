@@ -1,7 +1,7 @@
 {
   "id": "getting-started",
   "name": "Getting Started",
-  "description": "A practical guide to finding, importing, reading, and publishing knowledge packs in Nest, with editing and Chat covered as optional next steps.",
+  "description": "A practical guide to finding, importing, reading, editing, and publishing knowledge packs in Nest, including Ask and reviewable Agent proposals.",
   "version": "1.0.0",
   "path": "getting-started"
 }

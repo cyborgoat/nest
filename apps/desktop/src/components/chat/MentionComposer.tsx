@@ -1,4 +1,5 @@
-import { ArrowUp, FileText, Folder, Square, X } from "lucide-react";
+import { ArrowUp, ChevronDown, ChevronsLeftRight, FileText, Folder, MessageCircle, Square, X } from "lucide-react";
+import type { ChatMode } from "@nest/shared";
 import {
   useEffect,
   useMemo,
@@ -23,6 +24,8 @@ type Props = {
   onSend: (text: string, focusPaths: string[]) => void;
   onStop?: () => void;
   canSend: boolean;
+  mode: ChatMode;
+  onModeChange: (mode: ChatMode) => void;
 };
 
 export function MentionComposer({
@@ -31,6 +34,8 @@ export function MentionComposer({
   onSend,
   onStop,
   canSend,
+  mode,
+  onModeChange,
 }: Props) {
   const [text, setText] = useState("");
   const [refs, setRefs] = useState<MentionRef[]>([]);
@@ -223,7 +228,7 @@ export function MentionComposer({
             ref={textareaRef}
             value={text}
             disabled={isGenerating}
-            placeholder="Ask anything…"
+            placeholder={mode === "agent" ? "Describe a change…" : "Ask anything…"}
             rows={2}
             className="relative block w-full resize-none bg-transparent pr-8 text-sm leading-5 text-transparent caret-foreground outline-none selection:bg-primary/20 selection:text-foreground placeholder:text-muted-foreground"
             onChange={(e) => {
@@ -250,11 +255,27 @@ export function MentionComposer({
             onKeyDown={onKeyDown}
           />
         </div>
+        <label className="absolute bottom-2 left-2">
+          <span className="sr-only">Chat mode</span>
+          <span className="pointer-events-none absolute inset-y-0 left-2 flex items-center">
+            {mode === "agent" ? <ChevronsLeftRight className="size-2.5" /> : <MessageCircle className="size-2.5" />}
+          </span>
+          <select
+            value={mode}
+            disabled={isGenerating}
+            onChange={(event) => onModeChange(event.target.value as ChatMode)}
+            className="h-6 appearance-none rounded-md border border-border bg-background py-0.5 pl-5 pr-5 text-[10px] font-medium outline-none transition-colors hover:bg-muted focus:ring-1 focus:ring-primary/25 disabled:opacity-50"
+          >
+            <option value="ask">Ask</option>
+            <option value="agent">Agent</option>
+          </select>
+          <ChevronDown className="pointer-events-none absolute right-1.5 top-1.5 size-3 text-muted-foreground" />
+        </label>
         {isGenerating ? (
           <Button
             size="icon-sm"
             variant="secondary"
-            className="absolute right-2 bottom-2 opacity-100"
+            className="absolute right-2 bottom-2 size-6 opacity-100"
             disabled={false}
             onClick={onStop}
             aria-label="Stop generation"
@@ -265,13 +286,13 @@ export function MentionComposer({
         ) : (
           <Button
             size="icon-sm"
-            className="absolute right-2 bottom-2"
+            className="absolute right-2 bottom-2 size-6"
             disabled={!hasContent || !canSend || isGenerating}
             onClick={trySend}
             aria-label="Send"
             title="Send"
           >
-            <ArrowUp className="size-3.5" />
+            <ArrowUp className="size-2.5" />
           </Button>
         )}
       </div>

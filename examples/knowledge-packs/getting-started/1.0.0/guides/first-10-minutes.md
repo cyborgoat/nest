@@ -43,7 +43,10 @@ packs stay available even when Hub is offline.
 
 See [Exporting, publishing, and messages](publishing-and-messages.md).
 
-## Optional: ask Chat
+## Optional: use Chat
 
 Chat answers questions using installed packs. Configure a model provider in
-**Settings**, then see [Chat and `@` references](chat-and-references.md).
+**Settings**, then choose **Ask** for read-only help or **Agent** for proposed
+Markdown edits. Agent changes stay pending until you review the inline diff and
+select **Approve** in the editor; **Reject** leaves the file unchanged. See
+[Chat and `@` references](chat-and-references.md).

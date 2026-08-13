@@ -122,6 +122,8 @@ pub struct ChatSession {
     pub archived: bool,
     /// `placeholder` | `llm` | `manual`
     pub title_source: String,
+    /// `ask` | `agent`
+    pub mode: String,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -138,7 +140,44 @@ pub struct ChatMessage {
     pub citations: Option<Vec<Citation>>,
     pub thinking: Option<String>,
     pub thinking_seconds: Option<f64>,
+    #[serde(default)]
+    pub file_changes: Vec<ChatFileChangeSummary>,
     pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatFileChangeSummary {
+    pub id: String,
+    pub path: String,
+    pub operation: String,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatFileChangeDetail {
+    pub id: String,
+    pub path: String,
+    pub operation: String,
+    pub status: String,
+    pub old_content: Option<String>,
+    pub new_content: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewChatFileChange {
+    pub path: String,
+    pub operation: String,
+    pub old_content: Option<String>,
+    pub new_content: Option<String>,
+}
+
+pub struct NewChatMessage<'a> {
+    pub role: &'a str,
+    pub content: &'a str,
+    pub citations: Option<&'a [Citation]>,
+    pub thinking: Option<&'a str>,
+    pub thinking_seconds: Option<f64>,
+    pub file_changes: &'a [NewChatFileChange],
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -243,6 +282,7 @@ fn migrate(conn: &Connection) -> AppResult<()> {
             pinned INTEGER NOT NULL DEFAULT 0,
             archived INTEGER NOT NULL DEFAULT 0,
             title_source TEXT NOT NULL DEFAULT 'placeholder',
+            mode TEXT NOT NULL DEFAULT 'ask',
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         );
@@ -257,6 +297,17 @@ fn migrate(conn: &Connection) -> AppResult<()> {
             thinking_seconds REAL,
             created_at TEXT NOT NULL,
             FOREIGN KEY(session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS chat_file_changes (
+            id TEXT PRIMARY KEY,
+            message_id TEXT NOT NULL,
+            path TEXT NOT NULL,
+            operation TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            old_content TEXT,
+            new_content TEXT,
+            FOREIGN KEY(message_id) REFERENCES chat_messages(id) ON DELETE CASCADE
         );
 
         CREATE TABLE IF NOT EXISTS sync_state (
@@ -281,6 +332,7 @@ fn migrate(conn: &Connection) -> AppResult<()> {
         "#,
     )?;
     ensure_chat_session_columns(conn)?;
+    ensure_chat_file_change_columns(conn)?;
     ensure_message_thinking_columns(conn)?;
     ensure_sync_state_active_column(conn)?;
     ensure_sync_state_origin_column(conn)?;
@@ -288,6 +340,16 @@ fn migrate(conn: &Connection) -> AppResult<()> {
     ensure_sync_state_description_column(conn)?;
     ensure_sync_state_pending_columns(conn)?;
     ensure_sync_state_patch_columns(conn)?;
+    Ok(())
+}
+
+fn ensure_chat_file_change_columns(conn: &Connection) -> AppResult<()> {
+    if !table_has_column(conn, "chat_file_changes", "status")? {
+        conn.execute(
+            "ALTER TABLE chat_file_changes ADD COLUMN status TEXT NOT NULL DEFAULT 'approved'",
+            [],
+        )?;
+    }
     Ok(())
 }
 
@@ -442,6 +504,12 @@ fn ensure_chat_session_columns(conn: &Connection) -> AppResult<()> {
             [],
         )?;
     }
+    if !table_has_column(conn, "chat_sessions", "mode")? {
+        conn.execute(
+            "ALTER TABLE chat_sessions ADD COLUMN mode TEXT NOT NULL DEFAULT 'ask'",
+            [],
+        )?;
+    }
     Ok(())
 }
 
@@ -452,8 +520,9 @@ fn map_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChatSession> {
         pinned: row.get::<_, i64>(2)? != 0,
         archived: row.get::<_, i64>(3)? != 0,
         title_source: row.get(4)?,
-        created_at: row.get(5)?,
-        updated_at: row.get(6)?,
+        mode: row.get(5)?,
+        created_at: row.get(6)?,
+        updated_at: row.get(7)?,
     })
 }
 
@@ -800,8 +869,8 @@ pub fn create_session(conn: &Connection, title: &str) -> AppResult<ChatSession> 
     let id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
     conn.execute(
-        "INSERT INTO chat_sessions (id, title, pinned, archived, title_source, created_at, updated_at)
-         VALUES (?1, ?2, 0, 0, ?3, ?4, ?5)",
+        "INSERT INTO chat_sessions (id, title, pinned, archived, title_source, mode, created_at, updated_at)
+         VALUES (?1, ?2, 0, 0, ?3, 'ask', ?4, ?5)",
         params![id, title, TITLE_SOURCE_PLACEHOLDER, now, now],
     )?;
     Ok(ChatSession {
@@ -810,6 +879,7 @@ pub fn create_session(conn: &Connection, title: &str) -> AppResult<ChatSession> 
         pinned: false,
         archived: false,
         title_source: TITLE_SOURCE_PLACEHOLDER.to_string(),
+        mode: "ask".to_string(),
         created_at: now.clone(),
         updated_at: now,
     })
@@ -817,7 +887,7 @@ pub fn create_session(conn: &Connection, title: &str) -> AppResult<ChatSession> 
 
 pub fn get_or_create_initial_session(conn: &Connection) -> AppResult<ChatSession> {
     let mut stmt = conn.prepare(
-        "SELECT id, title, pinned, archived, title_source, created_at, updated_at
+        "SELECT id, title, pinned, archived, title_source, mode, created_at, updated_at
          FROM chat_sessions
          WHERE archived = 0
          ORDER BY pinned DESC, updated_at DESC
@@ -834,7 +904,7 @@ pub fn get_or_create_initial_session(conn: &Connection) -> AppResult<ChatSession
 
 pub fn get_session(conn: &Connection, session_id: &str) -> AppResult<Option<ChatSession>> {
     let mut stmt = conn.prepare(
-        "SELECT id, title, pinned, archived, title_source, created_at, updated_at
+        "SELECT id, title, pinned, archived, title_source, mode, created_at, updated_at
          FROM chat_sessions WHERE id = ?1",
     )?;
     let mut rows = stmt.query(params![session_id])?;
@@ -847,7 +917,7 @@ pub fn get_session(conn: &Connection, session_id: &str) -> AppResult<Option<Chat
 
 pub fn list_sessions(conn: &Connection) -> AppResult<Vec<ChatSession>> {
     let mut stmt = conn.prepare(
-        "SELECT id, title, pinned, archived, title_source, created_at, updated_at
+        "SELECT id, title, pinned, archived, title_source, mode, created_at, updated_at
          FROM chat_sessions
          ORDER BY pinned DESC, updated_at DESC",
     )?;
@@ -861,6 +931,7 @@ pub struct ChatSessionUpdate {
     pub pinned: Option<bool>,
     pub archived: Option<bool>,
     pub title_source: Option<String>,
+    pub mode: Option<String>,
 }
 
 pub fn update_session(
@@ -884,19 +955,26 @@ pub fn update_session(
     if let Some(archived) = update.archived {
         current.archived = archived;
     }
+    if let Some(mode) = update.mode {
+        if mode != "ask" && mode != "agent" {
+            return Err(crate::error::AppError::msg("Invalid chat mode"));
+        }
+        current.mode = mode;
+    }
 
     let now = Utc::now().to_rfc3339();
     current.updated_at = now.clone();
 
     conn.execute(
         "UPDATE chat_sessions
-         SET title = ?1, pinned = ?2, archived = ?3, title_source = ?4, updated_at = ?5
-         WHERE id = ?6",
+         SET title = ?1, pinned = ?2, archived = ?3, title_source = ?4, mode = ?5, updated_at = ?6
+         WHERE id = ?7",
         params![
             current.title,
             if current.pinned { 1 } else { 0 },
             if current.archived { 1 } else { 0 },
             current.title_source,
+            current.mode,
             now,
             session_id,
         ],
@@ -939,36 +1017,68 @@ pub fn set_session_title_llm(
 }
 
 pub fn add_message(
-    conn: &Connection,
+    conn: &mut Connection,
     session_id: &str,
-    role: &str,
-    content: &str,
-    citations: Option<&[Citation]>,
-    thinking: Option<&str>,
-    thinking_seconds: Option<f64>,
+    message: NewChatMessage<'_>,
 ) -> AppResult<ChatMessage> {
     let id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
-    let citations_json = citations
+    let citations_json = message
+        .citations
         .map(serde_json::to_string)
         .transpose()?
         .unwrap_or_default();
-    conn.execute(
+    let tx = conn.transaction()?;
+    tx.execute(
         "INSERT INTO chat_messages (id, session_id, role, content, citations_json, thinking, thinking_seconds, created_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-        params![id, session_id, role, content, citations_json, thinking, thinking_seconds, now],
+        params![id, session_id, message.role, message.content, citations_json, message.thinking, message.thinking_seconds, now],
     )?;
-    conn.execute(
+    let mut summaries = Vec::with_capacity(message.file_changes.len());
+    for change in message.file_changes {
+        let change_id = Uuid::new_v4().to_string();
+        tx.execute(
+            "UPDATE chat_file_changes SET status = 'rejected' WHERE path = ?1 AND status = 'pending'",
+            params![change.path],
+        )?;
+        // A follow-up Agent turn may intentionally restore the original disk
+        // state (for example, deleting a still-pending creation). Supersede
+        // the earlier proposal above, but do not create another no-op review.
+        if change.old_content == change.new_content {
+            continue;
+        }
+        tx.execute(
+            "INSERT INTO chat_file_changes (id, message_id, path, operation, old_content, new_content)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                change_id,
+                id,
+                change.path,
+                change.operation,
+                change.old_content,
+                change.new_content,
+            ],
+        )?;
+        summaries.push(ChatFileChangeSummary {
+            id: change_id,
+            path: change.path.clone(),
+            operation: change.operation.clone(),
+            status: "pending".into(),
+        });
+    }
+    tx.execute(
         "UPDATE chat_sessions SET updated_at = ?1 WHERE id = ?2",
         params![now, session_id],
     )?;
+    tx.commit()?;
     Ok(ChatMessage {
         id,
-        role: role.to_string(),
-        content: content.to_string(),
-        citations: citations.map(|c| c.to_vec()),
-        thinking: thinking.map(str::to_string),
-        thinking_seconds,
+        role: message.role.to_string(),
+        content: message.content.to_string(),
+        citations: message.citations.map(|c| c.to_vec()),
+        thinking: message.thinking.map(str::to_string),
+        thinking_seconds: message.thinking_seconds,
+        file_changes: summaries,
         created_at: now,
     })
 }
@@ -992,10 +1102,115 @@ pub fn list_messages(conn: &Connection, session_id: &str) -> AppResult<Vec<ChatM
             citations,
             thinking: row.get(4)?,
             thinking_seconds: row.get(5)?,
+            file_changes: Vec::new(),
             created_at: row.get(6)?,
         })
     })?;
-    Ok(rows.filter_map(|r| r.ok()).collect())
+    let mut messages = rows.collect::<Result<Vec<_>, _>>()?;
+    drop(stmt);
+    for message in &mut messages {
+        message.file_changes = list_file_change_summaries(conn, &message.id)?;
+    }
+    Ok(messages)
+}
+
+fn list_file_change_summaries(
+    conn: &Connection,
+    message_id: &str,
+) -> AppResult<Vec<ChatFileChangeSummary>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, path, operation, status FROM chat_file_changes WHERE message_id = ?1 ORDER BY path",
+    )?;
+    let rows = stmt.query_map(params![message_id], |row| {
+        Ok(ChatFileChangeSummary {
+            id: row.get(0)?,
+            path: row.get(1)?,
+            operation: row.get(2)?,
+            status: row.get(3)?,
+        })
+    })?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
+pub fn get_chat_file_change(conn: &Connection, change_id: &str) -> AppResult<ChatFileChangeDetail> {
+    conn.query_row(
+        "SELECT id, path, operation, status, old_content, new_content FROM chat_file_changes WHERE id = ?1",
+        params![change_id],
+        |row| {
+            Ok(ChatFileChangeDetail {
+                id: row.get(0)?,
+                path: row.get(1)?,
+                operation: row.get(2)?,
+                status: row.get(3)?,
+                old_content: row.get(4)?,
+                new_content: row.get(5)?,
+            })
+        },
+    )
+    .map_err(|_| crate::error::AppError::msg("Chat file change not found"))
+}
+
+pub fn get_pending_chat_file_change_for_path(
+    conn: &Connection,
+    path: &str,
+) -> AppResult<Option<ChatFileChangeDetail>> {
+    conn.query_row(
+        "SELECT id, path, operation, status, old_content, new_content
+         FROM chat_file_changes
+         WHERE path = ?1 AND status = 'pending'
+         ORDER BY rowid DESC LIMIT 1",
+        params![path],
+        |row| {
+            Ok(ChatFileChangeDetail {
+                id: row.get(0)?,
+                path: row.get(1)?,
+                operation: row.get(2)?,
+                status: row.get(3)?,
+                old_content: row.get(4)?,
+                new_content: row.get(5)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(Into::into)
+}
+
+pub fn list_pending_chat_file_changes(conn: &Connection) -> AppResult<Vec<ChatFileChangeDetail>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, path, operation, status, old_content, new_content
+         FROM chat_file_changes WHERE status = 'pending' ORDER BY rowid",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(ChatFileChangeDetail {
+            id: row.get(0)?,
+            path: row.get(1)?,
+            operation: row.get(2)?,
+            status: row.get(3)?,
+            old_content: row.get(4)?,
+            new_content: row.get(5)?,
+        })
+    })?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
+pub fn set_chat_file_change_status(
+    conn: &Connection,
+    change_id: &str,
+    status: &str,
+) -> AppResult<()> {
+    if status != "approved" && status != "rejected" {
+        return Err(crate::error::AppError::msg("Invalid file-change status"));
+    }
+    let changed = conn.execute(
+        "UPDATE chat_file_changes SET status = ?1 WHERE id = ?2 AND status = 'pending'",
+        params![status, change_id],
+    )?;
+    if changed == 0 {
+        return Err(crate::error::AppError::msg(
+            "File change is no longer pending",
+        ));
+    }
+    Ok(())
 }
 
 /// Parameters for `upsert_sync_state` — grouped into a struct since the
@@ -1432,6 +1647,98 @@ mod sync_state_tests {
             .query_row("SELECT COUNT(*) FROM chat_sessions", [], |row| row.get(0))
             .unwrap();
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn chat_mode_and_file_changes_round_trip() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        let session = create_session(&conn, "Agent work").unwrap();
+        let updated = update_session(
+            &conn,
+            &session.id,
+            ChatSessionUpdate {
+                mode: Some("agent".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(updated.mode, "agent");
+
+        let message = add_message(
+            &mut conn,
+            &session.id,
+            NewChatMessage {
+                role: "assistant",
+                content: "Updated the guide.",
+                citations: None,
+                thinking: None,
+                thinking_seconds: None,
+                file_changes: &[NewChatFileChange {
+                    path: "sample/guide.md".into(),
+                    operation: "modified".into(),
+                    old_content: Some("before".into()),
+                    new_content: Some("after".into()),
+                }],
+            },
+        )
+        .unwrap();
+        assert_eq!(message.file_changes.len(), 1);
+        let detail = get_chat_file_change(&conn, &message.file_changes[0].id).unwrap();
+        assert_eq!(detail.path, "sample/guide.md");
+        assert_eq!(detail.status, "pending");
+        assert_eq!(detail.old_content.as_deref(), Some("before"));
+        assert_eq!(detail.new_content.as_deref(), Some("after"));
+        assert!(
+            get_pending_chat_file_change_for_path(&conn, "sample/guide.md")
+                .unwrap()
+                .is_some()
+        );
+        set_chat_file_change_status(&conn, &detail.id, "approved").unwrap();
+        assert!(
+            get_pending_chat_file_change_for_path(&conn, "sample/guide.md")
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn no_op_follow_up_clears_the_prior_pending_proposal() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        let session = create_session(&conn, "Agent work").unwrap();
+        let proposed = [NewChatFileChange {
+            path: "sample/new.md".into(),
+            operation: "created".into(),
+            old_content: None,
+            new_content: Some("draft".into()),
+        }];
+        let reverted = [NewChatFileChange {
+            path: "sample/new.md".into(),
+            operation: "modified".into(),
+            old_content: None,
+            new_content: None,
+        }];
+        for changes in [&proposed[..], &reverted[..]] {
+            add_message(
+                &mut conn,
+                &session.id,
+                NewChatMessage {
+                    role: "assistant",
+                    content: "Done.",
+                    citations: None,
+                    thinking: None,
+                    thinking_seconds: None,
+                    file_changes: changes,
+                },
+            )
+            .unwrap();
+        }
+        assert!(
+            get_pending_chat_file_change_for_path(&conn, "sample/new.md")
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]

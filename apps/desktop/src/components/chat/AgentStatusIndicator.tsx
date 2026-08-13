@@ -1,14 +1,18 @@
-import { FileText, Loader2 } from "lucide-react";
+import { FileCheck2, FilePenLine, FileText, Loader2 } from "lucide-react";
 import { TextShimmer } from "@/components/motion-primitives/text-shimmer";
 import { fileName } from "@/lib/vault-paths";
 
 export type AgentActivity =
   | { kind: "reading"; path: string }
   | { kind: "generating" }
+  | { kind: "editing"; path: string }
+  | { kind: "staged"; path: string }
   | null;
 
 function labelFor(activity: NonNullable<AgentActivity>): string {
   if (activity.kind === "generating") return "Generating response…";
+  if (activity.kind === "editing") return `Editing ${fileName(activity.path)}…`;
+  if (activity.kind === "staged") return `Staged ${fileName(activity.path)}`;
   return `Reading ${fileName(activity.path)}…`;
 }
 
@@ -21,8 +25,8 @@ export function AgentStatusIndicator({ activity }: { activity: AgentActivity }) 
     <div className="mb-2 flex items-center gap-2">
       {!isGenerating && (
         <>
-          <Loader2 className="size-3.5 shrink-0 animate-spin text-primary" />
-          <FileText className="size-3.5 shrink-0 text-accent" />
+          {activity.kind === "staged" ? <FileCheck2 className="size-3.5 shrink-0 text-success" /> : <Loader2 className="size-3.5 shrink-0 animate-spin text-primary" />}
+          {activity.kind === "reading" ? <FileText className="size-3.5 shrink-0 text-accent" /> : activity.kind === "editing" ? <FilePenLine className="size-3.5 shrink-0 text-warning" /> : null}
         </>
       )}
       <TextShimmer

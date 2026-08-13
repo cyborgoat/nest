@@ -1,16 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { ChatMessage, ChatSession, Citation } from "@nest/shared";
+import type { ChatMessage, ChatMode, ChatSession, Citation } from "@nest/shared";
 import {
   MessageScroller,
   useMessageScroller,
 } from "@shadcn/react/message-scroller";
-import { AlertCircle, ChevronDown, Lightbulb, X } from "lucide-react";
+import { AlertCircle, Check, ChevronDown, FilePenLine, Lightbulb, Loader2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   AgentStatusIndicator,
   type AgentActivity,
 } from "@/components/chat/AgentStatusIndicator";
 import { ChatSessionBar } from "@/components/chat/ChatSessionBar";
+import { ChatFileChanges } from "@/components/chat/ChatFileChanges";
 import { MentionComposer, type MentionRef } from "@/components/chat/MentionComposer";
 import { renderWithMentions } from "@/components/chat/mention-pill";
 import { collectMentionCandidates } from "@/lib/tree-mentions";
@@ -31,6 +32,7 @@ import { appErrorMessage } from "@/lib/errors";
 import { queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
 import { useUiStore } from "@/stores/ui";
+import { useEditorStore } from "@/stores/editor";
 
 const bubble =
   "min-w-0 max-w-full overflow-hidden break-words [overflow-wrap:anywhere]";
@@ -42,11 +44,14 @@ export function ChatPanel() {
   const openChatTab = useUiStore((s) => s.openChatTab);
   const pruneChatTabs = useUiStore((s) => s.pruneChatTabs);
   const queryClient = useQueryClient();
+  const setAgentRunActive = useEditorStore((s) => s.setAgentRunActive);
+  const setEditing = useEditorStore((s) => s.setEditing);
 
   const [pendingUser, setPendingUser] = useState<string | null>(null);
   const [streaming, setStreaming] = useState("");
   const [streamThinking, setStreamThinking] = useState("");
   const [agentActivity, setAgentActivity] = useState<AgentActivity>(null);
+  const [liveFileActivities, setLiveFileActivities] = useState<Array<{ path: string; operation: string; staged: boolean }>>([]);
   const [isSending, setIsSending] = useState(false);
   // Session the in-flight mutation actually belongs to, captured at send time.
   // Distinct from `sessionId` (the currently *viewed* tab) so switching tabs
@@ -136,6 +141,16 @@ export function ChatPanel() {
   });
 
   const sessions: ChatSession[] = sessionsQuery.data ?? [];
+  const mode: ChatMode = sessions.find((session) => session.id === sessionId)?.mode ?? "ask";
+
+  const changeMode = (nextMode: ChatMode) => {
+    if (!sessionId || isSending || nextMode === mode) return;
+    void api.chatUpdateSession(sessionId, { mode: nextMode }).then((updated) => {
+      queryClient.setQueryData<ChatSession[]>(queryKeys.chatSessions, (current) =>
+        current?.map((session) => session.id === updated.id ? updated : session),
+      );
+    }).catch((error: unknown) => setStatusMessage(appErrorMessage(error, "Could not change chat mode")));
+  };
 
   // Called when navigating away from the current tab (new chat, switch, close).
   // Only clears streaming artifacts when nothing is in flight — an in-flight
@@ -148,6 +163,7 @@ export function ChatPanel() {
       setPendingUser(null);
       clearStream();
       setAgentActivity(null);
+      setLiveFileActivities([]);
     }
   };
 
@@ -229,10 +245,14 @@ export function ChatPanel() {
       sessionId: targetSessionId,
       query,
       focusPaths,
+      mode,
+      protectedPaths,
     }: {
       sessionId: string;
       query: string;
       focusPaths: string[];
+      mode: ChatMode;
+      protectedPaths: string[];
     }) => {
       const eventName = `chat-stream-${Date.now()}`;
 
@@ -241,6 +261,18 @@ export function ChatPanel() {
         (event: ChatStreamEvent) => {
           if (event.type === "reading") {
             setAgentActivity({ kind: "reading", path: event.path });
+          } else if (event.type === "file_editing") {
+            setAgentActivity({ kind: "editing", path: event.path });
+            setLiveFileActivities((current) => [
+              ...current.filter((item) => item.path !== event.path),
+              { path: event.path, operation: event.operation, staged: false },
+            ]);
+          } else if (event.type === "file_staged") {
+            setAgentActivity({ kind: "staged", path: event.path });
+            setLiveFileActivities((current) => [
+              ...current.filter((item) => item.path !== event.path),
+              { path: event.path, operation: event.operation, staged: true },
+            ]);
           } else if (event.type === "generating") {
             setAgentActivity({ kind: "generating" });
           } else if (event.type === "token") {
@@ -258,12 +290,12 @@ export function ChatPanel() {
       );
 
       try {
-        return await api.chatSend(targetSessionId, query, focusPaths, eventName);
+        return await api.chatSend(targetSessionId, query, focusPaths, eventName, mode, protectedPaths);
       } finally {
         unlisten();
       }
     },
-    onMutate: ({ sessionId: targetSessionId, query }) => {
+    onMutate: ({ sessionId: targetSessionId, query, mode }) => {
       setChatError(null);
       setPendingUser(query);
       setPendingSessionId(targetSessionId);
@@ -271,6 +303,8 @@ export function ChatPanel() {
       setIsStopping(false);
       clearStream();
       setAgentActivity({ kind: "generating" });
+      setLiveFileActivities([]);
+      if (mode === "agent") setAgentRunActive(true);
     },
     onSuccess: (assistantMsg, vars) => {
       flushStream();
@@ -297,14 +331,18 @@ export function ChatPanel() {
       });
       setPendingUser(null);
       setAgentActivity(null);
+      setLiveFileActivities([]);
       setIsSending(false);
       setIsStopping(false);
       setPendingSessionId(null);
+      setAgentRunActive(false);
       clearStream();
       if (vars.sessionId === sessionId) {
         setCompletedTurn((current) => current + 1);
       }
       void queryClient.invalidateQueries({ queryKey: queryKeys.chatSessions });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.allFiles });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.allPendingChatFileChanges });
     },
     onError: (error: unknown, vars) => {
       const message = appErrorMessage(error, "Chat request failed");
@@ -314,7 +352,9 @@ export function ChatPanel() {
         clearStream();
         setPendingUser(null);
         setAgentActivity(null);
+        setLiveFileActivities([]);
         setPendingSessionId(null);
+        setAgentRunActive(false);
         void queryClient.invalidateQueries({
           queryKey: queryKeys.chatMessages(vars.sessionId),
         });
@@ -327,7 +367,9 @@ export function ChatPanel() {
       clearStream();
       setPendingUser(null);
       setAgentActivity(null);
+      setLiveFileActivities([]);
       setPendingSessionId(null);
+      setAgentRunActive(false);
     },
   });
 
@@ -375,6 +417,10 @@ export function ChatPanel() {
                     </div>
                   )}
                   <MarkdownBody className={bubble}>{msg.content}</MarkdownBody>
+                  {msg.file_changes && <ChatFileChanges changes={msg.file_changes} onReview={(path) => {
+                    openFileTab(path, { preview: false });
+                    setEditing(path, true);
+                  }} />}
                   {msg.citations && msg.citations.length > 0 && (
                     <References
                       citations={msg.citations}
@@ -402,6 +448,9 @@ export function ChatPanel() {
               className="min-w-0"
             >
               <AssistantBubble>
+                {liveFileActivities.length > 0 && (
+                  <LiveFileActivities activities={liveFileActivities} />
+                )}
                 {streaming ? (
                   <>
                     {agentActivity?.kind === "reading" && (
@@ -470,8 +519,16 @@ export function ChatPanel() {
           canSend={!!sessionId && !isSending}
           onSend={(query, focusPaths) => {
             if (!sessionId) return;
-            send.mutate({ sessionId, query, focusPaths });
+            send.mutate({
+              sessionId,
+              query,
+              focusPaths,
+              mode,
+              protectedPaths: Array.from(useEditorStore.getState().editingPaths),
+            });
           }}
+          mode={mode}
+          onModeChange={changeMode}
           onStop={() => {
             if (isStopping) return;
             setIsStopping(true);
@@ -483,6 +540,21 @@ export function ChatPanel() {
           }}
         />
       </div>
+    </div>
+  );
+}
+
+function LiveFileActivities({ activities }: { activities: Array<{ path: string; operation: string; staged: boolean }> }) {
+  return (
+    <div className="mb-3 space-y-1 rounded-md bg-muted/45 p-2 text-xs">
+      {activities.map((activity) => (
+        <div key={activity.path} className="flex min-w-0 items-center gap-2">
+          {activity.staged ? <Check className="size-3.5 shrink-0 text-success" /> : <Loader2 className="size-3.5 shrink-0 animate-spin text-primary" />}
+          <FilePenLine className="size-3.5 shrink-0 text-muted-foreground" />
+          <span className="min-w-0 flex-1 truncate font-mono">{activity.path}</span>
+          <span className="shrink-0 capitalize text-muted-foreground">{activity.staged ? "staged" : activity.operation}</span>
+        </div>
+      ))}
     </div>
   );
 }

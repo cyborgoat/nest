@@ -1,4 +1,5 @@
 mod agent;
+mod agent_tools;
 mod chat_history;
 mod commands;
 mod db;
@@ -74,6 +75,9 @@ pub fn run() {
             commands::chat_update_session,
             commands::chat_delete_session,
             commands::chat_list_messages,
+            commands::chat_get_file_change,
+            commands::chat_get_pending_file_change,
+            commands::chat_review_file_change,
             commands::chat_send,
             commands::chat_cancel,
             commands::hub_status,

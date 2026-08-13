@@ -18,6 +18,15 @@ pub fn vault_list_tree(state: State<'_, SharedState>) -> AppResult<Vec<TreeNode>
 
 #[tauri::command]
 pub fn vault_read_file(state: State<'_, SharedState>, path: String) -> AppResult<String> {
+    if let Some(change) = {
+        let conn = state.db.lock();
+        db::get_pending_chat_file_change_for_path(&conn, &path)?
+    } {
+        return Ok(change
+            .new_content
+            .or(change.old_content)
+            .unwrap_or_default());
+    }
     let vault = state.vault_path();
     vault::read_file(&vault, &path)
 }

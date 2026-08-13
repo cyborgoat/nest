@@ -103,3 +103,5 @@ Bundled pack behavior:
 - Not automatically re-seeded after deletion
 
 Library **active** packs are the chat retrieval domain; inactive packs remain browsable. Chat `@` mentions focus files/folders under active packs — see [architecture.md](architecture.md).
+
+Chat **Ask** mode has no write tools. **Agent** mode stages permission-checked Markdown edits as pending proposals. The renderer previews pending content, while the Markdown editor owns the explicit Approve/Reject boundary. When changing the tool protocol, keep the Rust permission and concurrent-change checks authoritative and update the persisted file-change contract and diff UI together; see [chat-sessions.md](chat-sessions.md).

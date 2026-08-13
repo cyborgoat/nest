@@ -432,7 +432,21 @@ export type ChatMessage = {
   citations?: Citation[];
   thinking?: string;
   thinking_seconds?: number;
+  file_changes?: ChatFileChangeSummary[];
   created_at: string;
+};
+
+export type ChatMode = "ask" | "agent";
+export type ChatFileOperation = "created" | "modified" | "deleted";
+export type ChatFileChangeSummary = {
+  id: string;
+  path: string;
+  operation: ChatFileOperation;
+  status: "pending" | "approved" | "rejected";
+};
+export type ChatFileChangeDetail = ChatFileChangeSummary & {
+  old_content: string | null;
+  new_content: string | null;
 };
 
 export type ChatSessionTitleSource = "placeholder" | "llm" | "manual";
@@ -443,6 +457,7 @@ export type ChatSession = {
   pinned: boolean;
   archived: boolean;
   title_source: ChatSessionTitleSource;
+  mode: ChatMode;
   created_at: string;
   updated_at: string;
 };

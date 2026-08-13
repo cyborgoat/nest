@@ -1,6 +1,6 @@
 import type { TreeNode } from "@nest/shared";
 import { useQuery } from "@tanstack/react-query";
-import { FileText, Folder, Lock, Pencil } from "lucide-react";
+import { FileDiff, FileText, Folder, Lock, Pencil } from "lucide-react";
 import { motion } from "motion/react";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
@@ -102,6 +102,10 @@ function BreadcrumbMenuItems({
 }
 
 export function MarkdownViewer({ path }: { path: string }) {
+  const pendingChangeQuery = useQuery({
+    queryKey: queryKeys.pendingChatFileChange(path),
+    queryFn: () => api.chatGetPendingFileChange(path),
+  });
   const { data, isLoading, error } = useQuery({
     queryKey: queryKeys.file(path),
     queryFn: () => api.vaultReadFile(path),
@@ -293,6 +297,17 @@ export function MarkdownViewer({ path }: { path: string }) {
           </BreadcrumbList>
         </Breadcrumb>
       </PanelHeader>
+      {pendingChangeQuery.data && (
+        <button
+          type="button"
+          onClick={() => setEditing(path, true)}
+          className="flex items-center gap-2 bg-info/10 px-4 py-2 text-left text-xs text-info hover:bg-info/15"
+        >
+          <FileDiff className="size-4" />
+          <span className="font-medium">Previewing an Agent proposal.</span>
+          <span className="text-muted-foreground">Open the editor to review, approve, or reject the diff.</span>
+        </button>
+      )}
       <ScrollArea ref={scrollAreaRef} className="min-h-0 flex-1">
         <div className="flex w-full gap-8 px-6 py-5">
           <main className="min-w-0 max-w-3xl flex-1">

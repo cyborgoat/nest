@@ -121,6 +121,10 @@ Results are filtered by the resolved retrieval prefixes. Default top-k is fixed 
 
 Chat passes a bounded multi-turn history, direct `@` focus content, and eagerly retrieved evidence to one Rig streaming completion; completions go to the user’s OpenAI-compatible LLM (Settings). Avoiding a second model-driven retrieval turn keeps reasoning-model streams compatible across OpenAI-style gateways.
 
+Each chat session also stores an **Ask / Agent** mode. Ask builds a tool-free Rig agent, so the model has no file mutation capability. Agent registers sequential Markdown list/read/create/replace/delete tools and permits up to 12 model/tool turns. Writes go into a turn-local overlay: later tool reads see staged content, while the vault remains untouched. After a successful response, the assistant message and pending before/after snapshots are stored transactionally in SQLite. Desktop file reads expose the latest pending content so the Markdown renderer updates immediately. The editor presents the proposal as a unified inline diff (distinct from Source Control's side-by-side layout); only Approve writes it to disk after authorization and concurrent-change checks, then schedules a coalesced index rebuild. Reject leaves disk unchanged.
+
+Pending proposals also layer across Agent turns. The backend overlays pending content for tool reads and listings and appends a bounded pending-workspace section to the model request, explicitly taking precedence over indexed passages that still reflect disk. A replacement proposal keeps the earliest disk baseline, so final approval can detect external changes safely.
+
 ## Markdown rendering
 
 The desktop viewer renders Markdown with:
@@ -147,7 +151,7 @@ Hub accounts, reviews, access grants, audits, and Hub messages live in the Hub's
 ## Streaming chat
 
 1. Frontend listens to a Tauri event channel (`chat-stream-*`).
-2. Backend emits reading / generating / token / done / error events.
+2. Backend emits reading / file-editing / file-staged / generating / token / done / error events.
 3. Token text is buffered and flushed **once per animation frame** so React does not re-render on every token.
 4. On success, the assistant message is seeded into the React Query cache, then the stream buffer is cleared (no per-word motion trees).
 

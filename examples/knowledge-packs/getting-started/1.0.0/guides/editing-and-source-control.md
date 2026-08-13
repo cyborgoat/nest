@@ -23,6 +23,15 @@ flowchart LR
 An amber dot on the Source Control icon means you have local changes. Open a
 changed file from Source Control to compare it with the synced baseline.
 
+## Review Agent proposals
+
+Agent proposals use a separate review path from Source Control. The rendered
+Markdown previews the pending proposal immediately. Choose **Review in editor**
+from Chat (or open the proposal banner) to see one unified inline diff with old
+and new line numbers. **Approve** writes the proposal and adds the resulting
+local change to Source Control; **Reject** discards it. If you continue chatting
+first, Agent builds follow-up work on the unresolved proposed version.
+
 ## Discard
 
 Discard restores a modified or deleted file, or removes a new one — undoing

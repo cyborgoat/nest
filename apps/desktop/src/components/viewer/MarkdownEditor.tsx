@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { Eye, Redo2, Save, Undo2, X } from "lucide-react";
+import { diffLines } from "diff";
+import { Check, Eye, FileDiff, Redo2, Save, Undo2, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useVaultTransfer } from "@/components/library/VaultTransferController";
@@ -26,6 +27,7 @@ import {
 } from "@/lib/editor-history";
 import { canEditPack, packEditBlockReason } from "@/lib/pack-permissions";
 import { fileMutationInvalidations, queryKeys } from "@/lib/query-keys";
+import { cn } from "@/lib/utils";
 import {
   fileName,
   markdownForVaultDrop,
@@ -106,6 +108,10 @@ function renderSourceHighlight(markdown: string) {
 }
 
 export function MarkdownEditor({ path }: { path: string }) {
+  const pendingChangeQuery = useQuery({
+    queryKey: queryKeys.pendingChatFileChange(path),
+    queryFn: () => api.chatGetPendingFileChange(path),
+  });
   const fileQuery = useQuery({
     queryKey: queryKeys.file(path),
     queryFn: () => api.vaultReadFile(path),
@@ -169,6 +175,27 @@ export function MarkdownEditor({ path }: { path: string }) {
       toast.success("Saved");
     },
     onError: (e) => toast.error("Could not save", { description: appErrorMessage(e) }),
+  });
+
+  const reviewAgentChange = useMutation({
+    mutationFn: (approve: boolean) => {
+      if (!pendingChangeQuery.data) throw new Error("No pending Agent change");
+      return api.chatReviewFileChange(pendingChangeQuery.data.id, approve);
+    },
+    onSuccess: (_void, approve) => {
+      const change = pendingChangeQuery.data;
+      void queryClient.invalidateQueries({ queryKey: queryKeys.pendingChatFileChange(path) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.file(path) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.allChatMessages });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.tree });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.index });
+      if (change && ((approve && change.new_content == null) || (!approve && change.old_content == null))) {
+        clearPathsUnder(path);
+      }
+      setEditing(path, false);
+      toast.success(approve ? "Agent change approved" : "Agent change rejected");
+    },
+    onError: (error) => toast.error("Could not review Agent change", { description: appErrorMessage(error) }),
   });
 
   // `save` is a new object every render (useMutation) and `dirty` changes on
@@ -304,6 +331,16 @@ export function MarkdownEditor({ path }: { path: string }) {
     : false;
   const canDropImportRef = useRef(canDropImport);
   canDropImportRef.current = canDropImport;
+  const installedPackRef = useRef(installedPack);
+  installedPackRef.current = installedPack;
+  const hubUserRef = useRef(hubAuthQuery.data?.user ?? null);
+  hubUserRef.current = hubAuthQuery.data?.user ?? null;
+  const clearPathsUnderRef = useRef(clearPathsUnder);
+  clearPathsUnderRef.current = clearPathsUnder;
+  const setEditingRef = useRef(setEditing);
+  setEditingRef.current = setEditing;
+  const setDirtyRef = useRef(setDirty);
+  setDirtyRef.current = setDirty;
 
   useEffect(() => {
     let cancelled = false;
@@ -318,10 +355,10 @@ export function MarkdownEditor({ path }: { path: string }) {
         if (paths.length === 0) return;
         if (!canDropImportRef.current) {
           toast.error("Cannot import here", {
-            description: installedPack
+            description: installedPackRef.current
               ? packEditBlockReason(
-                  installedPack,
-                  hubAuthQuery.data?.user ?? null,
+                  installedPackRef.current,
+                  hubUserRef.current,
                 )
               : "You don't have edit access to this pack.",
           });
@@ -337,9 +374,9 @@ export function MarkdownEditor({ path }: { path: string }) {
               void queryClient.invalidateQueries({ queryKey: key });
             }
             for (const replaced of result.replaced_paths) {
-              clearPathsUnder(replaced);
-              setEditing(replaced, false);
-              setDirty(replaced, false);
+              clearPathsUnderRef.current(replaced);
+              setEditingRef.current(replaced, false);
+              setDirtyRef.current(replaced, false);
             }
             if (!result.replaced_paths.includes(pathRef.current)) {
               const snippets = result.written_files
@@ -371,7 +408,16 @@ export function MarkdownEditor({ path }: { path: string }) {
       <PanelHeader
         size="compact"
         actions={
-          <>
+          pendingChangeQuery.data ? (
+            <>
+              <Button size="sm" variant="outline" className="h-7" disabled={reviewAgentChange.isPending} onClick={() => reviewAgentChange.mutate(false)}>
+                <X className="size-3.5" /> Reject
+              </Button>
+              <Button size="sm" className="h-7" disabled={reviewAgentChange.isPending} onClick={() => reviewAgentChange.mutate(true)}>
+                <Check className="size-3.5" /> {reviewAgentChange.isPending ? "Applying…" : "Approve"}
+              </Button>
+            </>
+          ) : <>
             <Button
               size="icon-sm"
               variant="ghost"
@@ -444,7 +490,13 @@ export function MarkdownEditor({ path }: { path: string }) {
           {fileName(path)}
         </span>
       </PanelHeader>
-      <ScrollArea className="markdown-editor-scroll min-h-0 flex-1">
+      {pendingChangeQuery.data ? (
+        <AgentProposalDiff
+          oldContent={pendingChangeQuery.data.old_content ?? ""}
+          newContent={pendingChangeQuery.data.new_content ?? ""}
+          operation={pendingChangeQuery.data.operation}
+        />
+      ) : <ScrollArea className="markdown-editor-scroll min-h-0 flex-1">
         <div className="markdown-editor-layout max-w-3xl px-6 py-5">
           {markdown === null ? (
             fileQuery.isLoading ? (
@@ -475,7 +527,7 @@ export function MarkdownEditor({ path }: { path: string }) {
             </div>
           )}
         </div>
-      </ScrollArea>
+      </ScrollArea>}
       <DiscardChangesDialog
         open={cancelOpen}
         onOpenChange={setCancelOpen}
@@ -493,4 +545,68 @@ export function MarkdownEditor({ path }: { path: string }) {
       {conflictDialog}
     </div>
   );
+}
+
+function AgentProposalDiff({ oldContent, newContent, operation }: { oldContent: string; newContent: string; operation: string }) {
+  const rows = buildInlineDiffRows(oldContent, newContent);
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex items-center gap-2 bg-info/10 px-4 py-2 text-xs text-info">
+        <FileDiff className="size-4" />
+        <span className="font-medium">Agent proposal · {operation}</span>
+        <span className="text-muted-foreground">Review the diff, then approve or reject it.</span>
+      </div>
+      <ScrollArea className="min-h-0 flex-1">
+        <div className="min-w-[36rem] font-mono text-xs leading-5">
+          <div className="sticky top-0 z-10 flex items-center gap-4 border-b border-border bg-background px-3 py-1.5 font-sans text-[11px] font-medium text-muted-foreground">
+            <span><span className="mr-1 text-destructive">−</span>Current</span>
+            <span><span className="mr-1 text-success">+</span>Agent proposal</span>
+          </div>
+          {rows.map((row, index) => (
+            <div
+              key={index}
+              className={cn(
+                "grid min-h-5 grid-cols-[3rem_3rem_1.5rem_minmax(0,1fr)]",
+                row.kind === "removed" && "bg-destructive/10 text-destructive",
+                row.kind === "added" && "bg-success/10 text-success",
+              )}
+            >
+              <span className="select-none border-r border-border/50 px-2 text-right text-muted-foreground/60">{row.oldLine ?? ""}</span>
+              <span className="select-none border-r border-border/50 px-2 text-right text-muted-foreground/60">{row.newLine ?? ""}</span>
+              <span className="select-none text-center font-semibold">{row.kind === "removed" ? "−" : row.kind === "added" ? "+" : ""}</span>
+              <pre className="min-w-0 whitespace-pre-wrap break-all pr-3">{row.text || " "}</pre>
+            </div>
+          ))}
+        </div>
+      </ScrollArea>
+    </div>
+  );
+}
+
+type InlineDiffRow = {
+  kind: "context" | "added" | "removed";
+  oldLine: number | null;
+  newLine: number | null;
+  text: string;
+};
+
+function buildInlineDiffRows(oldContent: string, newContent: string): InlineDiffRow[] {
+  let oldLine = 1;
+  let newLine = 1;
+  const rows: InlineDiffRow[] = [];
+
+  for (const change of diffLines(oldContent, newContent)) {
+    const lines = change.value.split("\n");
+    if (lines[lines.length - 1] === "") lines.pop();
+    for (const text of lines) {
+      if (change.removed) {
+        rows.push({ kind: "removed", oldLine: oldLine++, newLine: null, text });
+      } else if (change.added) {
+        rows.push({ kind: "added", oldLine: null, newLine: newLine++, text });
+      } else {
+        rows.push({ kind: "context", oldLine: oldLine++, newLine: newLine++, text });
+      }
+    }
+  }
+  return rows;
 }

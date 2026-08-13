@@ -9,14 +9,19 @@ import { create } from "zustand";
 type EditorUiState = {
   editingPaths: Set<string>;
   dirtyPaths: Set<string>;
+  agentRunActive: boolean;
   setEditing: (path: string, editing: boolean) => void;
   setDirty: (path: string, dirty: boolean) => void;
+  setAgentRunActive: (active: boolean) => void;
 };
 
 export const useEditorStore = create<EditorUiState>((set, get) => ({
   editingPaths: new Set(),
   dirtyPaths: new Set(),
+  agentRunActive: false,
+  setAgentRunActive: (agentRunActive) => set({ agentRunActive }),
   setEditing: (path, editing) => {
+    if (editing && get().agentRunActive) return;
     if (get().editingPaths.has(path) === editing) return;
     set((state) => {
       const next = new Set(state.editingPaths);

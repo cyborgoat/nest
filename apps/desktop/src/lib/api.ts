@@ -3,6 +3,8 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   AppSettings,
   ChatMessage,
+  ChatFileChangeDetail,
+  ChatMode,
   ChatSession,
   DiffPair,
   FileStatus,
@@ -114,7 +116,7 @@ export const api = {
   chatListSessions: () => invoke<ChatSession[]>("chat_list_sessions"),
   chatUpdateSession: (
     sessionId: string,
-    patch: { title?: string; pinned?: boolean; archived?: boolean },
+    patch: { title?: string; pinned?: boolean; archived?: boolean; mode?: ChatMode },
   ) => invoke<ChatSession>("chat_update_session", { sessionId, patch }),
   chatDeleteSession: (sessionId: string) =>
     invoke<void>("chat_delete_session", { sessionId }),
@@ -125,13 +127,25 @@ export const api = {
     query: string,
     focusPaths: string[],
     streamEvent: string,
+    mode: ChatMode,
+    protectedPaths: string[],
   ) =>
     invoke<ChatMessage>("chat_send", {
-      sessionId,
-      query,
-      focusPaths,
-      streamEvent,
+      request: {
+        sessionId,
+        query,
+        focusPaths,
+        streamEvent,
+        mode,
+        protectedPaths,
+      },
     }),
+  chatGetFileChange: (changeId: string) =>
+    invoke<ChatFileChangeDetail>("chat_get_file_change", { changeId }),
+  chatGetPendingFileChange: (path: string) =>
+    invoke<ChatFileChangeDetail | null>("chat_get_pending_file_change", { path }),
+  chatReviewFileChange: (changeId: string, approve: boolean) =>
+    invoke<void>("chat_review_file_change", { changeId, approve }),
   chatCancel: () => invoke<void>("chat_cancel"),
 
   hubListPacks: () => invoke<PackProject[]>("hub_list_packs"),
@@ -299,6 +313,8 @@ export const api = {
 
 export type ChatStreamEvent =
   | { type: "reading"; path: string }
+  | { type: "file_editing"; path: string; operation: string }
+  | { type: "file_staged"; path: string; operation: string }
   | { type: "generating" }
   | { type: "citations"; citations: import("@nest/shared").Citation[] }
   | { type: "thinking"; content: string }
