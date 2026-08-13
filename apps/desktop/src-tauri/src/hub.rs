@@ -1020,9 +1020,9 @@ pub fn folder_pack_defaults(source: &Path) -> AppResult<FolderPackDefaults> {
 /// folders) and would fail `pack_has_markdown`'s installed-pack filter, so a
 /// seed file isn't optional here.
 ///
-/// A local pack's id/folder is a registry-safe slug derived from its display
-/// name. The display name keeps the user's capitalization and spacing while
-/// the stable path is immediately valid for a future Hub publish.
+/// A local pack's id/folder is a registry-safe, case-preserving slug derived
+/// from its display name. The stable path is immediately valid for a future
+/// Hub publish.
 pub fn create_empty_pack(submitted: PackMeta, vault_root: &Path) -> AppResult<PackMeta> {
     let id = slugify_pack_id(&submitted.name);
     let pack = normalize_pack_meta(PackMeta {
@@ -1431,7 +1431,7 @@ pub fn slugify_pack_id(value: &str) -> String {
     let mut previous_dash = false;
     for ch in value.trim().chars() {
         if ch.is_alphanumeric() {
-            slug.extend(ch.to_lowercase());
+            slug.push(ch);
             previous_dash = false;
         } else if !previous_dash && !slug.is_empty() {
             slug.push('-');
@@ -1506,7 +1506,8 @@ pub fn update_pack_version(pack_root: &Path, version: &str) -> AppResult<PackMet
 
 /// Renames a local pack. Its display name remains user-facing while its id and
 /// folder move together as a registry-safe slug. Calling this with the same
-/// display name also migrates legacy local packs whose id used spaces/casing.
+/// display name also migrates legacy local packs whose id used spaces or other
+/// unsupported separators.
 pub fn rename_pack_folder(
     vault_root: &Path,
     old_local_path: &str,
@@ -1693,14 +1694,14 @@ mod local_pack_tests {
 
         let inspected = inspect_local_pack(&zip_path, &vault).unwrap();
         assert!(inspected.needs_metadata);
-        assert_eq!(inspected.metadata.id, "team-notes");
+        assert_eq!(inspected.metadata.id, "Team-Notes");
         assert_eq!(inspected.metadata.name, "Team Notes");
         assert_eq!(inspected.metadata.version, "1.0.0");
 
         let created = create_pack_from_zip(&zip_path, inspected.metadata, &vault, false).unwrap();
-        assert_eq!(created.id, "team-notes");
-        assert!(vault.join("team-notes/README.md").is_file());
-        assert!(vault.join("team-notes/pack.json").is_file());
+        assert_eq!(created.id, "Team-Notes");
+        assert!(vault.join("Team-Notes/README.md").is_file());
+        assert!(vault.join("Team-Notes/pack.json").is_file());
         let _ = fs::remove_dir_all(root);
     }
 
@@ -1744,12 +1745,12 @@ mod local_pack_tests {
         };
 
         let created = create_empty_pack(metadata, &vault).unwrap();
-        assert_eq!(created.id, "my-new-pack");
+        assert_eq!(created.id, "My-New-Pack");
         assert_eq!(created.name, "My New Pack");
-        assert_eq!(created.path, "my-new-pack");
-        assert!(vault.join("my-new-pack/README.md").is_file());
-        assert!(vault.join("my-new-pack/pack.json").is_file());
-        assert!(dir_has_markdown(&vault.join("my-new-pack")));
+        assert_eq!(created.path, "My-New-Pack");
+        assert!(vault.join("My-New-Pack/README.md").is_file());
+        assert!(vault.join("My-New-Pack/pack.json").is_file());
+        assert!(dir_has_markdown(&vault.join("My-New-Pack")));
         let _ = fs::remove_dir_all(root);
     }
 
@@ -1770,16 +1771,16 @@ mod local_pack_tests {
         )
         .unwrap();
 
-        assert_eq!(created.id, "我的-pack-笔记");
+        assert_eq!(created.id, "我的-Pack-笔记");
         assert_eq!(created.name, "我的 Pack 笔记");
-        assert_eq!(created.path, "我的-pack-笔记");
-        assert!(vault.join("我的-pack-笔记/pack.json").is_file());
+        assert_eq!(created.path, "我的-Pack-笔记");
+        assert!(vault.join("我的-Pack-笔记/pack.json").is_file());
 
         let zip_path = root.join("publish.zip");
         export_pack(&created, &vault, &zip_path).unwrap();
         let file = fs::File::open(zip_path).unwrap();
         let mut archive = ZipArchive::new(file).unwrap();
-        assert!(archive.by_name("我的-pack-笔记/pack.json").is_ok());
+        assert!(archive.by_name("我的-Pack-笔记/pack.json").is_ok());
 
         let _ = fs::remove_dir_all(root);
     }
@@ -1818,7 +1819,7 @@ mod local_pack_tests {
         let updated = update_pack_description(&pack_dir, "A new description").unwrap();
         assert_eq!(updated.description, "A new description");
         assert_eq!(updated.name, "Original Name", "name must never change here");
-        assert_eq!(updated.id, "original-name", "id must never change here");
+        assert_eq!(updated.id, "Original-Name", "id must never change here");
         assert_eq!(updated.version, "0.1.0", "version must never change");
 
         let _ = fs::remove_dir_all(root);
@@ -1880,16 +1881,16 @@ mod local_pack_tests {
         };
         create_empty_pack(metadata, &vault).unwrap();
 
-        let renamed = rename_pack_folder(&vault, "original-name", "New Name").unwrap();
-        assert_eq!(renamed.id, "new-name");
+        let renamed = rename_pack_folder(&vault, "Original-Name", "New Name").unwrap();
+        assert_eq!(renamed.id, "New-Name");
         assert_eq!(renamed.name, "New Name");
-        assert_eq!(renamed.path, "new-name");
+        assert_eq!(renamed.path, "New-Name");
         assert_eq!(
             renamed.description, "Keep me",
             "description is untouched by rename"
         );
-        assert!(!vault.join("original-name").exists());
-        assert!(vault.join("new-name/README.md").is_file());
+        assert!(!vault.join("Original-Name").exists());
+        assert!(vault.join("New-Name/README.md").is_file());
 
         let _ = fs::remove_dir_all(root);
     }
@@ -1972,17 +1973,17 @@ mod local_pack_tests {
         let migrated =
             migrate_local_pack_id_for_publish(&vault, "Legacy Pack", "Legacy Pack", "Legacy Pack")
                 .unwrap();
-        assert_eq!(migrated.id, "legacy-pack");
+        assert_eq!(migrated.id, "Legacy-Pack");
         assert_eq!(migrated.name, "Legacy Pack");
-        assert_eq!(migrated.path, "legacy-pack");
+        assert_eq!(migrated.path, "Legacy-Pack");
         assert!(!legacy_dir.exists());
-        assert!(vault.join("legacy-pack/README.md").is_file());
+        assert!(vault.join("Legacy-Pack/README.md").is_file());
 
         let zip_path = root.join("publish.zip");
         export_pack(&migrated, &vault, &zip_path).unwrap();
         let file = fs::File::open(zip_path).unwrap();
         let mut archive = ZipArchive::new(file).unwrap();
-        assert!(archive.by_name("legacy-pack/pack.json").is_ok());
+        assert!(archive.by_name("Legacy-Pack/pack.json").is_ok());
 
         let _ = fs::remove_dir_all(root);
     }

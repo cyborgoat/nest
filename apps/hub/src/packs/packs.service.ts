@@ -257,7 +257,7 @@ export class PacksService implements OnModuleInit {
         scan.issues.push({
           path: project.name,
           message:
-            'Pack folder name must contain lowercase letters or Unicode letters, numbers, and hyphens.',
+            'Pack folder name must contain letters, numbers, and hyphens.',
         });
         continue;
       }

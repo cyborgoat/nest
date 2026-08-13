@@ -44,8 +44,8 @@ pub struct PackInstallConflict {
     version: String,
 }
 
-fn normalized_pack_name(value: &str) -> String {
-    value.trim().to_lowercase()
+fn normalized_pack_name(value: &str) -> &str {
+    value.trim()
 }
 
 fn local_download_conflict(
@@ -2005,6 +2005,11 @@ mod pack_install_conflict_tests {
         assert_eq!(
             conflict.as_ref().map(|pack| pack.pack_id.as_str()),
             Some("my-local-copy")
+        );
+        assert!(
+            local_download_conflict(&conn, "team-handbook", "team handbook")
+                .unwrap()
+                .is_none()
         );
         assert!(local_download_conflict(&conn, "downloaded", "Downloaded")
             .unwrap()

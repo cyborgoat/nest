@@ -16,7 +16,7 @@ examples/knowledge-packs/     # or REGISTRY_PATH (pack registry root)
 
 Rules:
 
-1. **Project directory = `pack.id`** — lowercase cased letters plus Unicode letters (including Chinese), numbers, and hyphens; stable forever. Rename = new project.
+1. **Project directory = `pack.id`** — case-sensitive letters (including Unicode letters such as Chinese), numbers, and hyphens; casing is preserved and stable forever. Rename = new project.
 2. **Version directory = SemVer** — `1.0.0` (not `v1.0.0`). Normal publishing creates a new version; the reviewed live-patch workflow may atomically replace an existing non-yanked version.
 3. **`pack.json` must match** parent `id` and `version` path segments.
 4. Release contents are discovered from the filesystem and synchronized into Hub's SQLite control catalog (there is no root `packs.json`).

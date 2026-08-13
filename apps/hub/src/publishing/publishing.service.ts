@@ -1121,7 +1121,7 @@ export class PublishingService {
     const version = stringField(metadata.version);
     if (!isValidPackId(id))
       throw new BadRequestException(
-        'Pack ID must use lowercase or Unicode letters, numbers, and hyphens',
+        'Pack ID must use letters, numbers, and hyphens',
       );
     if (!name) throw new BadRequestException('Pack name is required');
     if (!isValidSemVer(version))
