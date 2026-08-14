@@ -1789,7 +1789,7 @@ mod local_pack_tests {
     fn create_empty_pack_rejects_existing_id() {
         let root = test_root("create-empty-conflict");
         let vault = root.join("vault");
-        fs::create_dir_all(vault.join("taken")).unwrap();
+        fs::create_dir_all(vault.join("Taken")).unwrap();
         let metadata = PackMeta {
             id: String::new(),
             name: "Taken".into(),
@@ -1922,9 +1922,9 @@ mod local_pack_tests {
         )
         .unwrap();
 
-        assert!(rename_pack_folder(&vault, "pack-a", "Pack B").is_err());
+        assert!(rename_pack_folder(&vault, "Pack-A", "Pack B").is_err());
         assert!(
-            vault.join("pack-a").exists(),
+            vault.join("Pack-A").exists(),
             "source must survive a rejected rename"
         );
 
