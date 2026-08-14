@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { diffLines } from "diff";
 import { Check, Eye, FileDiff, Redo2, Save, Undo2, X } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { toast } from "sonner";
 import { useVaultTransfer } from "@/components/library/VaultTransferController";
 import { Button } from "@/components/ui/button";
@@ -29,10 +29,10 @@ import { canEditPack, packEditBlockReason } from "@/lib/pack-permissions";
 import { fileMutationInvalidations, queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
 import {
-  fileName,
   markdownForVaultDrop,
   parentDir,
 } from "@/lib/vault-paths";
+import { MarkdownPathBreadcrumb } from "@/components/viewer/MarkdownPathBreadcrumb";
 import { useEditorStore } from "@/stores/editor";
 import { useUiStore } from "@/stores/ui";
 
@@ -79,7 +79,7 @@ function renderSourceLine(line: string) {
 function renderSourceHighlight(markdown: string) {
   let inFence = false;
   let inFrontmatter = false;
-  return markdown.split("\n").map((line, index, lines) => {
+  return markdown.split("\n").map((line, index) => {
     const trimmed = line.trimStart();
     const isFence = /^(```|~~~)/.test(trimmed);
     const isFrontmatterBoundary =
@@ -99,10 +99,12 @@ function renderSourceHighlight(markdown: string) {
     }
 
     return (
-      <span key={index}>
-        {content}
-        {index < lines.length - 1 ? "\n" : null}
-      </span>
+      <div key={index} className="markdown-editor-line">
+        <span className="markdown-editor-gutter">{index + 1}</span>
+        <span className="markdown-editor-line-content">
+          {line.length > 0 ? content : "\u00a0"}
+        </span>
+      </div>
     );
   });
 }
@@ -486,9 +488,7 @@ export function MarkdownEditor({ path }: { path: string }) {
           </>
         }
       >
-        <span className="truncate text-sm text-muted-foreground">
-          {fileName(path)}
-        </span>
+        <MarkdownPathBreadcrumb path={path} />
       </PanelHeader>
       {pendingChangeQuery.data ? (
         <AgentProposalDiff
@@ -497,7 +497,7 @@ export function MarkdownEditor({ path }: { path: string }) {
           operation={pendingChangeQuery.data.operation}
         />
       ) : <ScrollArea className="markdown-editor-scroll min-h-0 flex-1">
-        <div className="markdown-editor-layout w-full px-6 py-5">
+        <div className="markdown-editor-layout w-full py-5 pl-2 pr-6">
           {markdown === null ? (
             fileQuery.isLoading ? (
               <p className="text-muted-foreground">Loading…</p>
@@ -507,10 +507,22 @@ export function MarkdownEditor({ path }: { path: string }) {
               </p>
             ) : null
           ) : (
-            <div className="relative flex flex-1">
+            <div
+              className="relative flex flex-1"
+              style={
+                {
+                  "--markdown-editor-gutter": `${Math.max(
+                    1.75,
+                    String((markdown.match(/\n/g)?.length ?? 0) + 1).length *
+                      0.55 +
+                      0.85,
+                  )}rem`,
+                } as CSSProperties
+              }
+            >
               <pre
                 aria-hidden
-                className="pointer-events-none absolute inset-0 m-0 whitespace-pre-wrap break-words font-sans text-sm leading-relaxed text-foreground markdown-editor-text"
+                className="pointer-events-none absolute inset-0 m-0 font-sans text-sm leading-relaxed text-foreground markdown-editor-text"
               >
                 {renderSourceHighlight(markdown)}
               </pre>
@@ -522,7 +534,7 @@ export function MarkdownEditor({ path }: { path: string }) {
                 onChange={(e) => updateMarkdown(e.target.value)}
                 spellCheck={false}
                 rows={1}
-                className="markdown-editor-surface relative z-10 m-0 block resize-none overflow-hidden border-none bg-transparent p-0 font-sans text-sm leading-relaxed text-transparent caret-foreground outline-none selection:bg-primary/20 selection:text-foreground markdown-editor-text"
+                className="markdown-editor-surface relative z-10 m-0 block resize-none overflow-hidden border-none bg-transparent py-0 pr-0 font-sans text-sm leading-relaxed text-transparent caret-foreground outline-none selection:bg-primary/20 selection:text-foreground markdown-editor-text"
               />
             </div>
           )}

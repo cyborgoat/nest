@@ -30,8 +30,7 @@ type MarkdownBodyProps = {
   headings?: MarkdownHeading[];
 };
 
-const ALERT_TYPES = ["NOTE", "TIP", "IMPORTANT", "WARNING", "CAUTION"] as const;
-type AlertType = (typeof ALERT_TYPES)[number];
+type AlertType = "NOTE" | "TIP" | "IMPORTANT" | "WARNING" | "CAUTION";
 
 const ALERT_LABELS: Record<AlertType, string> = {
   NOTE: "Note",

@@ -247,6 +247,32 @@
   flex: 1 0 auto;
   width: 100%;
   min-height: 60vh;
+  padding-left: var(--markdown-editor-gutter, 1.75rem);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.markdown-editor-line {
+  display: grid;
+  grid-template-columns: var(--markdown-editor-gutter, 1.75rem) minmax(0, 1fr);
+}
+
+.markdown-editor-gutter {
+  user-select: none;
+  text-align: right;
+  padding-right: 0.5rem;
+  color: var(--muted-foreground);
+  opacity: 0.55;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.markdown-editor-line-content {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .markdown-source-marker {

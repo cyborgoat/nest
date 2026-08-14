@@ -1,8 +1,7 @@
-import type { TreeNode } from "@nest/shared";
 import { useQuery } from "@tanstack/react-query";
-import { FileDiff, FileText, Folder, Lock, Pencil } from "lucide-react";
+import { FileDiff, Lock, Pencil } from "lucide-react";
 import { motion } from "motion/react";
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { parseFrontmatter } from "@/lib/frontmatter";
 import {
@@ -19,23 +18,7 @@ import {
   MarkdownTableOfContentsMenu,
 } from "@/components/markdown/MarkdownTableOfContents";
 import { Badge } from "@/components/ui/badge";
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from "@/components/ui/breadcrumb";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { PanelHeader } from "@/components/ui/panel-header";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -43,63 +26,8 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { cn } from "@/lib/utils";
+import { MarkdownPathBreadcrumb } from "@/components/viewer/MarkdownPathBreadcrumb";
 import { useEditorStore } from "@/stores/editor";
-import { useUiStore } from "@/stores/ui";
-
-function childrenAtPath(nodes: TreeNode[], targetPath: string): TreeNode[] {
-  if (!targetPath) return nodes;
-  const segs = targetPath.split("/").filter(Boolean);
-  let current = nodes;
-  for (let i = 0; i < segs.length; i++) {
-    const cumulative = segs.slice(0, i + 1).join("/");
-    const match = current.find((n) => n.path === cumulative);
-    if (!match) return [];
-    current = match.children ?? [];
-  }
-  return current;
-}
-
-function BreadcrumbMenuItems({
-  nodes,
-  activePath,
-  onSelectFile,
-}: {
-  nodes: TreeNode[];
-  activePath: string | null;
-  onSelectFile: (path: string) => void;
-}) {
-  return (
-    <>
-      {nodes.map((node) =>
-        node.kind === "folder" ? (
-          <DropdownMenuSub key={node.path}>
-            <DropdownMenuSubTrigger>
-              <Folder className="size-3.5 shrink-0 text-muted-foreground" />
-              <span className="truncate">{node.name}</span>
-            </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent>
-              <BreadcrumbMenuItems
-                nodes={node.children ?? []}
-                activePath={activePath}
-                onSelectFile={onSelectFile}
-              />
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
-        ) : (
-          <DropdownMenuItem
-            key={node.path}
-            className={cn(node.path === activePath && "bg-muted font-medium")}
-            onSelect={() => onSelectFile(node.path)}
-          >
-            <FileText className="size-3.5 shrink-0 text-muted-foreground" />
-            <span className="truncate">{node.name}</span>
-          </DropdownMenuItem>
-        ),
-      )}
-    </>
-  );
-}
 
 export function MarkdownViewer({ path }: { path: string }) {
   const pendingChangeQuery = useQuery({
@@ -110,11 +38,6 @@ export function MarkdownViewer({ path }: { path: string }) {
     queryKey: queryKeys.file(path),
     queryFn: () => api.vaultReadFile(path),
   });
-  const { data: tree } = useQuery({
-    queryKey: queryKeys.tree,
-    queryFn: api.vaultListTree,
-  });
-  const openFileTab = useUiStore((s) => s.openFileTab);
   const setEditing = useEditorStore((s) => s.setEditing);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const [activeHeadingId, setActiveHeadingId] = useState<string | null>(null);
@@ -250,52 +173,7 @@ export function MarkdownViewer({ path }: { path: string }) {
           </>
         }
       >
-        <Breadcrumb className="min-w-0">
-          <BreadcrumbList className="flex-nowrap">
-            {segments.map((segment, i) => {
-              const isLast = i === segments.length - 1;
-              const folderPath = isLast
-                ? basePath
-                : segments.slice(0, i + 1).join("/");
-              const listing = tree ? childrenAtPath(tree, folderPath) : [];
-              const hasListing = listing.length > 0;
-
-              const label = isLast ? (
-                <BreadcrumbPage className={cn(hasListing && "cursor-pointer")}>
-                  {segment}
-                </BreadcrumbPage>
-              ) : (
-                <span
-                  className={cn("truncate", hasListing && "cursor-pointer hover:text-foreground")}
-                >
-                  {segment}
-                </span>
-              );
-
-              return (
-                <Fragment key={i}>
-                  {i > 0 && <BreadcrumbSeparator />}
-                  <BreadcrumbItem className="min-w-0">
-                    {hasListing ? (
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>{label}</DropdownMenuTrigger>
-                        <DropdownMenuContent align="start">
-                          <BreadcrumbMenuItems
-                            nodes={listing}
-                            activePath={path}
-                            onSelectFile={(p) => openFileTab(p)}
-                          />
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    ) : (
-                      label
-                    )}
-                  </BreadcrumbItem>
-                </Fragment>
-              );
-            })}
-          </BreadcrumbList>
-        </Breadcrumb>
+        <MarkdownPathBreadcrumb path={path} />
       </PanelHeader>
       {pendingChangeQuery.data && (
         <button
@@ -305,7 +183,9 @@ export function MarkdownViewer({ path }: { path: string }) {
         >
           <FileDiff className="size-4" />
           <span className="font-medium">Previewing an Agent proposal.</span>
-          <span className="text-muted-foreground">Open the editor to review, approve, or reject the diff.</span>
+          <span className="text-muted-foreground">
+            Open the editor to review, approve, or reject the diff.
+          </span>
         </button>
       )}
       <ScrollArea ref={scrollAreaRef} className="min-h-0 flex-1">
