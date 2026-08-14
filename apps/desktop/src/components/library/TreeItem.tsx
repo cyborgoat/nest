@@ -24,7 +24,7 @@ import {
   PackagePlus,
   Pencil,
   Plus,
-  CloudUpload,
+  ArrowUp,
   Trash2,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
@@ -896,7 +896,7 @@ function TreeItem({
                   })
                 }
               >
-                <CloudUpload className="size-3.5" />
+                <ArrowUp className="size-3.5" />
                 {canEdit && !authenticated ? "Sign in to publish" : "Publish"}
               </PermissionMenuItem>
               <ContextMenuSeparator />

@@ -1,5 +1,5 @@
 import {
-  CloudUpload,
+  ArrowUp,
   Download,
   MoreHorizontal,
   Pencil,
@@ -78,7 +78,7 @@ export function RemovePackButton({
                   disabled={disabled || publishDisabled}
                   onSelect={() => afterMenuClose(onPublish)}
                 >
-                  <CloudUpload className="size-3.5" />
+                  <ArrowUp className="size-3.5" />
                   {publishLabel ?? "Publish"}
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />

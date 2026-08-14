@@ -1,4 +1,4 @@
-import { CloudUpload, Loader2 } from "lucide-react";
+import { ArrowUp, Loader2 } from "lucide-react";
 import { useLayoutEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -257,7 +257,7 @@ export function PublishPackDialog({
             {publishing ? (
               <Loader2 className="size-4 animate-spin" />
             ) : (
-              <CloudUpload className="size-4" />
+              <ArrowUp className="size-4" />
             )}
             {requestType === "live_patch" ? "Submit live patch" : "Publish"}
           </Button>

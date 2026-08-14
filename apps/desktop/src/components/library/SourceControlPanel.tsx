@@ -1,7 +1,7 @@
 import type { FileStatus, InstalledPack, PackMergePreview } from "@nest/shared";
 import {
   CircleAlert,
-  CloudUpload,
+  ArrowUp,
   FileText,
   GitBranch,
   GitCompare,
@@ -129,7 +129,7 @@ function PackChanges({
       disabled={Boolean(pack.pending_version)}
       onSelect={() => afterMenuClose(openPublish)}
     >
-      <CloudUpload className="size-3.5" />
+      <ArrowUp className="size-3.5" />
       {authenticated ? "Publish" : "Sign in to publish"}
     </ContextMenuItem>
   );
@@ -301,7 +301,7 @@ function PackChanges({
                     )}
                     onClick={openPublish}
                   >
-                    <CloudUpload className="size-3.5" />
+                    <ArrowUp className="size-3.5" />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="right">
@@ -704,7 +704,7 @@ export function SourceControlPanel({
                 disabled={Boolean(pack.pending_version)}
                 onSelect={() => afterMenuClose(() => openPublish(pack))}
               >
-                <CloudUpload className="size-3.5" />
+                <ArrowUp className="size-3.5" />
                 {authenticated ? "Publish" : "Sign in to publish"} “{pack.name}”
               </ContextMenuItem>
             ))
