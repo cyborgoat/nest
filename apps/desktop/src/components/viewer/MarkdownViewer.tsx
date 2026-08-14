@@ -310,7 +310,7 @@ export function MarkdownViewer({ path }: { path: string }) {
       )}
       <ScrollArea ref={scrollAreaRef} className="min-h-0 flex-1">
         <div className="flex w-full gap-8 px-6 py-5">
-          <main className="min-w-0 max-w-3xl flex-1">
+          <main className="min-w-0 flex-1">
             {isLoading && <p className="text-muted-foreground">Loading…</p>}
             {error && (
               <p className="text-destructive">

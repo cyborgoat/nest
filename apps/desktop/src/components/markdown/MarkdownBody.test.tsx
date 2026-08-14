@@ -29,4 +29,18 @@ describe("MarkdownBody", () => {
     );
     expect(html).toContain('<h3 id="中文-标题">中文 标题</h3>');
   });
+
+  it("renders GitHub-style alerts from blockquotes", () => {
+    const html = renderToStaticMarkup(
+      <MarkdownBody>
+        {"> [!NOTE]\n> Useful information that users should know."}
+      </MarkdownBody>,
+    );
+
+    expect(html).toContain("markdown-alert");
+    expect(html).toContain("markdown-alert-note");
+    expect(html).toContain("markdown-alert-title");
+    expect(html).toContain("Note");
+    expect(html).toContain("Useful information that users should know.");
+  });
 });

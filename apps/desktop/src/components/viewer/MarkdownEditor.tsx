@@ -497,7 +497,7 @@ export function MarkdownEditor({ path }: { path: string }) {
           operation={pendingChangeQuery.data.operation}
         />
       ) : <ScrollArea className="markdown-editor-scroll min-h-0 flex-1">
-        <div className="markdown-editor-layout max-w-3xl px-6 py-5">
+        <div className="markdown-editor-layout w-full px-6 py-5">
           {markdown === null ? (
             fileQuery.isLoading ? (
               <p className="text-muted-foreground">Loading…</p>

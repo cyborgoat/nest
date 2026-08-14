@@ -389,7 +389,7 @@ export default function App() {
 
             <ResizablePanel
               id="main"
-              minSize="30%"
+              minSize="20%"
               defaultSize="50%"
               className="bg-card/60"
             >
@@ -416,7 +416,7 @@ export default function App() {
               collapsedSize={0}
               defaultSize={chatOpen ? CHAT_DEFAULT_PX : 0}
               minSize={0}
-              maxSize={640}
+              maxSize="70%"
               className="overflow-hidden bg-panel"
               onResize={(size) => {
                 if (syncingChat.current) return;
