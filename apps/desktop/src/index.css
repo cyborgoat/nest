@@ -443,7 +443,7 @@
 }
 
 .markdown-body hr {
-  @apply my-4 border-border;
+  @apply my-4 border-border/50;
 }
 
 .markdown-body strong {

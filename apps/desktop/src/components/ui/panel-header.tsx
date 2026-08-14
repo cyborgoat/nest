@@ -33,7 +33,7 @@ export function PanelHeader({
     return (
       <div
         className={cn(
-          "flex h-10 shrink-0 items-center justify-between gap-3 border-b border-border px-4",
+          "flex h-10 shrink-0 items-center justify-between gap-3 border-b border-border/50 px-4",
           className,
         )}
       >
@@ -44,7 +44,7 @@ export function PanelHeader({
   }
 
   return (
-    <div className={cn("border-b border-border", className)}>
+    <div className={cn("border-b border-border/50", className)}>
       <div className="flex items-start justify-between gap-3 px-4 py-3">
         <div className="flex min-w-0 items-center gap-3">
           {icon}

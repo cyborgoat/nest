@@ -295,7 +295,7 @@ export default function App() {
   return (
     <I18nProvider locale="en">
       <div className="flex h-full flex-col">
-        <header className="flex items-center justify-between border-b border-border bg-panel/80 px-4 py-2.5 backdrop-blur">
+        <header className="flex items-center justify-between border-b border-border/50 bg-panel/80 px-4 py-2.5 backdrop-blur">
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-3">
               <img
@@ -382,7 +382,7 @@ export default function App() {
               className={cn(
                 "transition-[width,opacity] duration-200 ease-out",
                 libraryVisible
-                  ? "w-px opacity-100"
+                  ? "opacity-100"
                   : "w-0 opacity-0 pointer-events-none",
               )}
             />
@@ -404,7 +404,7 @@ export default function App() {
               className={cn(
                 "transition-[width,opacity] duration-200 ease-out",
                 chatOpen
-                  ? "w-px opacity-100"
+                  ? "opacity-100"
                   : "w-0 opacity-0 pointer-events-none",
               )}
             />
@@ -427,14 +427,14 @@ export default function App() {
                 if (open !== chatOpen) setChatOpen(open);
               }}
             >
-              <aside className="flex h-full flex-col border-l border-border">
+              <aside className="flex h-full flex-col">
                 <ChatPanel />
               </aside>
             </ResizablePanel>
           </ResizablePanelGroup>
         </div>
 
-        <footer className="flex items-center justify-between border-t border-border bg-panel/90 px-4 py-1.5 text-[11px] text-muted-foreground">
+        <footer className="flex items-center justify-between border-t border-border/50 bg-panel/90 px-4 py-1.5 text-[11px] text-muted-foreground">
           <span>
             {shell.index}: {indexQuery.data?.indexed_files ?? 0} {shell.files} /{" "}
             {indexQuery.data?.indexed_chunks ?? 0} {shell.chunks}

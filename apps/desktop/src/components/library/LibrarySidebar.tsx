@@ -18,7 +18,7 @@ export function LibrarySidebar({
   const view = useUiStore((s) => s.activitySidebarView);
 
   return (
-    <aside className="flex h-full min-h-0 min-w-0 flex-col border-r border-border">
+    <aside className="flex h-full min-h-0 min-w-0 flex-col">
       {view === "explorer" ? (
         <ExplorerPanel
           tree={tree}

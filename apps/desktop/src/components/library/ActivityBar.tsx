@@ -49,7 +49,7 @@ export function ActivityBar({
   const openAccountTab = useUiStore((s) => s.openAccountTab);
 
   return (
-    <nav className="flex w-11 shrink-0 flex-col items-center gap-1 border-r border-border bg-sidebar/60 py-2">
+    <nav className="flex w-11 shrink-0 flex-col items-center gap-1 border-r border-border/50 bg-sidebar/60 py-2">
       {ITEMS.map(({ view, icon: Icon, label }) => {
         const isOpenAndActive = sidebarOpen && activeView === view;
         const showDot =

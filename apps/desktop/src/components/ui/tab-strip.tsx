@@ -40,7 +40,7 @@ export function TabStrip({
   };
 
   return (
-    <div className="flex h-10 overflow-hidden items-stretch gap-1 border-b border-border px-1.5">
+    <div className="flex h-10 overflow-hidden items-stretch gap-1 border-b border-border/50 px-1.5">
       <div className="tab-scroll flex h-full min-w-0 flex-1 items-stretch gap-0.5 overflow-x-auto overflow-y-hidden">
         {items.map((item) => {
           const active = item.id === activeId;
