@@ -7,7 +7,7 @@ use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use zip::write::SimpleFileOptions;
-use zip::{ZipArchive, ZipWriter};
+use zip::ZipWriter;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct FolderPackDefaults {
@@ -746,6 +746,7 @@ pub(crate) fn read_required_pack_meta(pack_root: &Path) -> AppResult<PackMeta> {
 #[cfg(test)]
 mod local_pack_tests {
     use super::*;
+    use zip::ZipArchive;
 
     fn test_root(label: &str) -> PathBuf {
         crate::vault::test_temp_dir(label)

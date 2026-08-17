@@ -295,16 +295,14 @@ pub async fn hub_download_pack(
         let approved_dir = staging.join(".approved-patch");
         fs::rename(&staged_pack, &approved_dir)?;
         let merged_dir = staging.join(&pack.path);
-        if let Err(error) = crate::snapshot::build_three_way_merge(
+        crate::snapshot::build_three_way_merge(
             &base_dir,
             &local_dir,
             &approved_dir,
             &merged_dir,
             merge_resolutions.as_deref().unwrap_or_default(),
             merge_preview_token.as_deref(),
-        ) {
-            return Err(error);
-        }
+        )?;
         staged_pack = merged_dir;
         Some(approved_dir)
     } else {
