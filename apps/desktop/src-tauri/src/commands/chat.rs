@@ -1,10 +1,10 @@
 //! Chat session/message CRUD and the streaming `chat_send` command.
 
 use crate::agent;
+use crate::chat_events;
 use crate::db::{self, ChatMessage, ChatSession};
 use crate::error::AppResult;
 use crate::indexing;
-use crate::chat_events;
 use crate::state::SharedState;
 use tauri::AppHandle;
 use tauri::{Emitter, State};

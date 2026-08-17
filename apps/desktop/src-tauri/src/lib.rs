@@ -1,5 +1,6 @@
 mod agent;
 mod agent_tools;
+mod chat_events;
 mod chat_history;
 mod commands;
 mod db;
@@ -11,7 +12,6 @@ mod http;
 mod hub;
 mod indexer;
 mod indexing;
-mod chat_events;
 mod retrieval;
 mod snapshot;
 mod state;

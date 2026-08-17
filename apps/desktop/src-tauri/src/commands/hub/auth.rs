@@ -1,8 +1,6 @@
 //! Hub authentication commands.
 
-use super::{
-    clear_refresh_token, ensure_hub_access, store_refresh_token,
-};
+use super::{clear_refresh_token, ensure_hub_access, store_refresh_token};
 use crate::db;
 use crate::error::{AppError, AppResult};
 use crate::hub;
@@ -140,4 +138,3 @@ pub async fn hub_change_password(
         user: Some(user),
     })
 }
-

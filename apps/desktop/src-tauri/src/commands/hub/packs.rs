@@ -234,9 +234,8 @@ pub async fn hub_download_pack(
         (None, None) => {}
     }
 
-    let staging = hub::StagingDir::create(
-        vault.join(format!(".nest-download-{}", uuid::Uuid::new_v4())),
-    )?;
+    let staging =
+        hub::StagingDir::create(vault.join(format!(".nest-download-{}", uuid::Uuid::new_v4())))?;
     let token = super::ensure_hub_access(state.inner(), &settings, false).await?;
     let downloaded = hub::download_pack_remote(
         &settings.hub_base_url,

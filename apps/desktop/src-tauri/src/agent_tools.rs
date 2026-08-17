@@ -1,8 +1,8 @@
 //! Permissioned, turn-local Markdown tools for Agent chat mode.
 
+use crate::chat_events::ChatStreamEvent;
 use crate::db::{self, InstalledPack, NewChatFileChange};
 use crate::error::{AppError, AppResult};
-use crate::chat_events::ChatStreamEvent;
 use crate::state::SharedState;
 use crate::vault;
 use parking_lot::Mutex;

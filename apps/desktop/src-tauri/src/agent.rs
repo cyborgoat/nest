@@ -1,9 +1,9 @@
 //! Rig agent: eager local retrieval + one OpenAI-compatible streaming turn.
 
 use crate::agent_tools::AgentToolContext;
+use crate::chat_events::ChatStreamEvent;
 use crate::db::{self, AppSettings, Citation};
 use crate::error::{AppError, AppResult};
-use crate::chat_events::ChatStreamEvent;
 use crate::retrieval::{
     self, agent_preamble, format_active_packs_for_prompt, format_citations_for_prompt,
     DEFAULT_TOP_K,

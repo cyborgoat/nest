@@ -171,4 +171,3 @@ async fn ensure_hub_access(
     *state.hub_auth.lock() = Some(refreshed);
     Ok(Some(token))
 }
-

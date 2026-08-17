@@ -1,7 +1,7 @@
 //! Pack working-tree status / diff / discard against the snapshot baseline.
 
-use super::require_installed_pack;
 use super::super::ensure_pack_not_review_locked;
+use super::require_installed_pack;
 use crate::error::{AppError, AppResult};
 use crate::indexing;
 use crate::state::SharedState;

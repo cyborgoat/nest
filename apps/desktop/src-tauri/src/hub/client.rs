@@ -446,7 +446,6 @@ pub struct DownloadedPack {
     pub patch_revision: i64,
 }
 
-
 /// Probe `{hub}/health`. Used for the Hub panel online/offline indicator.
 pub async fn check_hub_status(hub_base_url: &str, proxy_url: &str) -> HubConnectionStatus {
     let base = hub_base_url.trim_end_matches('/').to_string();
@@ -841,7 +840,6 @@ pub async fn mutate_message_remote(
     message_request(hub_base_url, proxy_url, access_token, method, path).await?;
     Ok(())
 }
-
 
 #[cfg(test)]
 mod hub_redirect_tests {

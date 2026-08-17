@@ -984,7 +984,6 @@ pub fn remove_pack(root: &Path, rel_path: &str) -> AppResult<()> {
     Ok(())
 }
 
-
 #[cfg(test)]
 pub(crate) fn test_temp_dir(label: &str) -> PathBuf {
     std::env::temp_dir().join(format!("nest-{label}-{}", uuid::Uuid::new_v4()))
