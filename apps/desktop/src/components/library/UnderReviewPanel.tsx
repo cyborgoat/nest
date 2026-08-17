@@ -8,26 +8,17 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { ConfirmDestructiveDialog } from "@/components/ui/confirm-destructive-dialog";
 import { Badge } from "@/components/ui/badge";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { RefreshButton } from "@/components/ui/refresh-button";
 import { SidebarPaneHeader } from "@/components/ui/sidebar-pane-header";
 import { api } from "@/lib/api";
 import { appErrorMessage } from "@/lib/errors";
+import { refreshAfterPublishReconcile } from "@/lib/hub-query";
 import { pendingPublishVersionLabel } from "@/lib/publish-request-labels";
 import { queryKeys } from "@/lib/query-keys";
-import { cn } from "@/lib/utils";
 
 export function UnderReviewPanel({
   installed,
@@ -78,9 +69,7 @@ export function UnderReviewPanel({
 
   const refresh = async () => {
     try {
-      const packs = await api.hubReconcilePublishRequests();
-      queryClient.setQueryData(queryKeys.installedPacks, packs);
-      await queryClient.invalidateQueries({ queryKey: queryKeys.messages });
+      await refreshAfterPublishReconcile(queryClient);
     } catch (error) {
       toast.error("Could not refresh review status", {
         description: appErrorMessage(error),
@@ -172,37 +161,25 @@ export function UnderReviewPanel({
           })}
         </div>
       )}
-      <AlertDialog
+      <ConfirmDestructiveDialog
         open={Boolean(cancelTarget)}
         onOpenChange={(open) => {
           if (!open && !cancelPublish.isPending) setCancelTarget(null);
         }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Cancel publish request?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This removes {cancelTarget?.name ?? "the pack"} from the review
-              queue and unlocks it for editing. You can submit it again later.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={cancelPublish.isPending}>
-              Keep under review
-            </AlertDialogCancel>
-            <AlertDialogAction
-              className={cn(buttonVariants({ variant: "destructive" }))}
-              disabled={!cancelTarget || cancelPublish.isPending}
-              onClick={() => cancelTarget && cancelPublish.mutate(cancelTarget)}
-            >
-              {cancelPublish.isPending && (
-                <Loader2 className="size-4 animate-spin" />
-              )}
-              Cancel publish
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        title="Cancel publish request?"
+        description={
+          <>
+            This removes {cancelTarget?.name ?? "the pack"} from the review
+            queue and unlocks it for editing. You can submit it again later.
+          </>
+        }
+        cancelLabel="Keep under review"
+        confirmLabel={
+          cancelPublish.isPending ? "Cancelling…" : "Cancel publish"
+        }
+        confirming={cancelPublish.isPending}
+        onConfirm={() => cancelTarget && cancelPublish.mutate(cancelTarget)}
+      />
     </div>
   );
 }

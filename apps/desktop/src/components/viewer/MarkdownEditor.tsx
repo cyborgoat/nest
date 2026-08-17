@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { diffLines } from "diff";
-import { Check, Eye, FileDiff, Redo2, Save, Undo2, X } from "lucide-react";
+import { Check, Eye, Redo2, Save, Undo2, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { toast } from "sonner";
 import { useVaultTransfer } from "@/components/library/VaultTransferController";
@@ -26,6 +26,7 @@ import {
   type EditorHistory,
 } from "@/lib/editor-history";
 import { canEditPack, packEditBlockReason } from "@/lib/pack-permissions";
+import { packRootFromPath } from "@/lib/pack-index";
 import { fileMutationInvalidations, queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
 import {
@@ -33,6 +34,7 @@ import {
   parentDir,
 } from "@/lib/vault-paths";
 import { MarkdownPathBreadcrumb } from "@/components/viewer/MarkdownPathBreadcrumb";
+import { AgentProposalBanner } from "@/components/viewer/AgentProposalBanner";
 import { useEditorStore } from "@/stores/editor";
 import { useUiStore } from "@/stores/ui";
 
@@ -161,7 +163,7 @@ export function MarkdownEditor({ path }: { path: string }) {
   // through the installed-packs registry rather than assuming it (matching
   // how LibraryTree/MarkdownViewer look this up) so this doesn't quietly
   // break if that convention ever doesn't hold.
-  const rootPath = path.split("/")[0] ?? path;
+  const rootPath = packRootFromPath(path);
   const packId =
     installedQuery.data?.find((p) => p.local_path === rootPath)?.pack_id ??
     rootPath;
@@ -563,11 +565,12 @@ function AgentProposalDiff({ oldContent, newContent, operation }: { oldContent: 
   const rows = buildInlineDiffRows(oldContent, newContent);
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex items-center gap-2 bg-info/10 px-4 py-2 text-xs text-info">
-        <FileDiff className="size-4" />
+      <AgentProposalBanner>
         <span className="font-medium">Agent proposal · {operation}</span>
-        <span className="text-muted-foreground">Review the diff, then approve or reject it.</span>
-      </div>
+        <span className="text-muted-foreground">
+          Review the diff, then approve or reject it.
+        </span>
+      </AgentProposalBanner>
       <ScrollArea className="min-h-0 flex-1">
         <div className="min-w-[36rem] font-mono text-xs leading-5">
           <div className="sticky top-0 z-10 flex items-center gap-4 border-b border-border bg-background px-3 py-1.5 font-sans text-[11px] font-medium text-muted-foreground">

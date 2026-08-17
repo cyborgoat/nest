@@ -63,3 +63,17 @@ pub fn validate_proxy_url(value: &str) -> AppResult<()> {
     }
     Ok(())
 }
+
+/// Validate a required Hub / LLM base URL (`http` or `https` with a host).
+/// Callers skip this when the setting is empty (those fields are optional).
+pub fn validate_http_base_url(label: &str, value: &str) -> AppResult<()> {
+    let url = reqwest::Url::parse(value)
+        .map_err(|e| AppError::msg(format!("{label} is invalid: {e}")))?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err(AppError::msg(format!("{label} must use http or https")));
+    }
+    if url.host_str().is_none() {
+        return Err(AppError::msg(format!("{label} must include a host")));
+    }
+    Ok(())
+}

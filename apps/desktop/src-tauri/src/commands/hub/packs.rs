@@ -1,10 +1,6 @@
-//! Hub-registry commands: pack browsing/install, source-control-style
-//! status/diff/discard against the pack snapshot baseline, auth, publish
-//! workflow, and Hub message inbox. The single largest domain (this file
-//! is still large — a further split into per-sub-area files is a
-//! reasonable next step, not attempted in this pass).
+//! Hub pack install, publish, merge, and local pack management commands.
 
-use super::{copy_directory_exact, ensure_pack_not_review_locked};
+use super::super::{copy_directory_exact, ensure_pack_not_review_locked};
 use crate::db::{self, AppSettings, InstalledPack, PackMeta};
 use crate::error::{AppError, AppResult};
 use crate::hub::{self, PackProject};
@@ -16,25 +12,6 @@ use std::fs;
 use std::path::PathBuf;
 use std::path::{Component, Path};
 use tauri::State;
-
-/// Look up an installed pack by id, or fail with a consistent error message.
-/// Shared by every command that needs "the pack, or a clear error" before
-/// doing anything else.
-fn require_installed_pack(conn: &rusqlite::Connection, pack_id: &str) -> AppResult<InstalledPack> {
-    let pack_id = pack_id.trim();
-    db::get_sync_state(conn, pack_id)?
-        .ok_or_else(|| AppError::msg(format!("Pack not installed: {pack_id}")))
-}
-
-fn ensure_existing_pack_not_review_locked(
-    conn: &rusqlite::Connection,
-    pack_id: &str,
-) -> AppResult<()> {
-    if let Some(pack) = db::get_sync_state(conn, pack_id.trim())? {
-        ensure_pack_not_review_locked(&pack)?;
-    }
-    Ok(())
-}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct PackInstallConflict {
@@ -92,101 +69,6 @@ pub fn hub_download_conflict(
     }))
 }
 
-/// Resolve a pack's working directory and its current snapshot directory
-/// (baseline last written at download/sync or approved-release merge time), plus
-/// the pack's vault-relative prefix (its `local_path`).
-///
-/// `snapshot`'s functions work with paths relative to the pack directory
-/// itself, but every path the frontend deals in (`TreeNode.path`,
-/// `vault_write_file`, etc.) is relative to the vault root and therefore
-/// includes this prefix — these commands translate at the boundary so the
-/// pack-relative/vault-relative distinction never leaks past this file.
-fn pack_dirs(
-    state: &SharedState,
-    pack_id: &str,
-) -> AppResult<(std::path::PathBuf, std::path::PathBuf, String)> {
-    let installed = {
-        let conn = state.db.lock();
-        require_installed_pack(&conn, pack_id)?
-    };
-    let pack_dir = state.vault_path().join(&installed.local_path);
-    let snapshot_dir =
-        crate::snapshot::snapshot_root(&state.app_data_dir, &installed.pack_id, &installed.version);
-    Ok((pack_dir, snapshot_dir, installed.local_path))
-}
-
-/// Strip a pack's `local_path/` prefix from a vault-relative path. Errors if
-/// the path isn't actually under that prefix (defends against a stale tab
-/// sending a path that belongs to a different pack).
-fn strip_pack_prefix(local_path: &str, vault_relative: &str) -> AppResult<String> {
-    vault_relative
-        .strip_prefix(local_path)
-        .and_then(|rest| rest.strip_prefix('/'))
-        .map(str::to_string)
-        .ok_or_else(|| AppError::msg(format!("Path is not inside this pack: {vault_relative}")))
-}
-
-#[tauri::command]
-pub fn hub_pack_change_status(
-    state: State<'_, SharedState>,
-    pack_id: String,
-) -> AppResult<Vec<crate::snapshot::FileStatus>> {
-    let (pack_dir, snapshot_dir, local_path) = pack_dirs(&state, &pack_id)?;
-    let mut statuses = crate::snapshot::compute_status(&pack_dir, &snapshot_dir)?;
-    for status in &mut statuses {
-        status.path = format!("{local_path}/{}", status.path);
-    }
-    Ok(statuses)
-}
-
-#[tauri::command]
-pub fn hub_pack_file_diff(
-    state: State<'_, SharedState>,
-    pack_id: String,
-    path: String,
-) -> AppResult<crate::snapshot::DiffPair> {
-    let (pack_dir, snapshot_dir, local_path) = pack_dirs(&state, &pack_id)?;
-    let pack_relative = strip_pack_prefix(&local_path, &path)?;
-    crate::snapshot::read_pair(&pack_dir, &snapshot_dir, &pack_relative)
-}
-
-#[tauri::command]
-pub fn hub_pack_discard_file(
-    state: State<'_, SharedState>,
-    pack_id: String,
-    path: String,
-) -> AppResult<()> {
-    {
-        let conn = state.db.lock();
-        let installed = require_installed_pack(&conn, &pack_id)?;
-        ensure_pack_not_review_locked(&installed)?;
-    }
-    let (pack_dir, snapshot_dir, local_path) = pack_dirs(&state, &pack_id)?;
-    let pack_relative = strip_pack_prefix(&local_path, &path)?;
-    crate::snapshot::discard_file(&pack_dir, &snapshot_dir, &pack_relative)?;
-    indexing::schedule(state.inner())?;
-    Ok(())
-}
-
-/// Revert every changed file in a pack back to its snapshot baseline (or
-/// delete it, for New files) in one go — the bulk counterpart of
-/// `hub_pack_discard_file` for the pack-root "Discard all" action.
-#[tauri::command]
-pub fn hub_pack_discard_all(state: State<'_, SharedState>, pack_id: String) -> AppResult<()> {
-    {
-        let conn = state.db.lock();
-        let installed = require_installed_pack(&conn, &pack_id)?;
-        ensure_pack_not_review_locked(&installed)?;
-    }
-    let (pack_dir, snapshot_dir, _local_path) = pack_dirs(&state, &pack_id)?;
-    let statuses = crate::snapshot::compute_status(&pack_dir, &snapshot_dir)?;
-    for status in &statuses {
-        crate::snapshot::discard_file(&pack_dir, &snapshot_dir, &status.path)?;
-    }
-    indexing::schedule(state.inner())?;
-    Ok(())
-}
-
 #[tauri::command]
 pub async fn hub_status(state: State<'_, SharedState>) -> AppResult<hub::HubConnectionStatus> {
     let settings = {
@@ -210,7 +92,7 @@ pub async fn hub_list_packs(state: State<'_, SharedState>) -> AppResult<Vec<Pack
         let conn = state.db.lock();
         db::get_settings(&conn)?
     };
-    let token = ensure_hub_access(state.inner(), &settings, false).await?;
+    let token = super::ensure_hub_access(state.inner(), &settings, false).await?;
     hub::list_packs_remote(
         &settings.hub_base_url,
         settings.effective_proxy_url(),
@@ -240,20 +122,7 @@ pub fn hub_set_pack_active(
 }
 
 fn pack_has_markdown(vault_root: &std::path::Path, local_path: &str) -> bool {
-    let dir = vault_root.join(local_path);
-    if !dir.is_dir() {
-        return false;
-    }
-    walkdir::WalkDir::new(&dir)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .any(|e| {
-            e.path()
-                .extension()
-                .and_then(|ext| ext.to_str())
-                .map(|ext| ext.eq_ignore_ascii_case("md"))
-                .unwrap_or(false)
-        })
+    hub::dir_has_markdown(&vault_root.join(local_path))
 }
 
 #[tauri::command]
@@ -327,9 +196,9 @@ pub async fn hub_download_pack(
     };
     {
         let conn = state.db.lock();
-        ensure_existing_pack_not_review_locked(&conn, &pack_id)?;
+        super::ensure_existing_pack_not_review_locked(&conn, &pack_id)?;
         if let Some(replaced) = replace_local_pack_id.as_deref() {
-            ensure_existing_pack_not_review_locked(&conn, replaced)?;
+            super::ensure_existing_pack_not_review_locked(&conn, replaced)?;
         }
     }
 
@@ -337,7 +206,7 @@ pub async fn hub_download_pack(
     if sync_patch.unwrap_or(false) {
         let installed = {
             let conn = state.db.lock();
-            require_installed_pack(&conn, &pack_id)?
+            super::require_installed_pack(&conn, &pack_id)?
         };
         if version.as_deref() != Some(installed.version.as_str()) {
             return Err(AppError::msg(
@@ -365,29 +234,22 @@ pub async fn hub_download_pack(
         (None, None) => {}
     }
 
-    let staging = vault.join(format!(".nest-download-{}", uuid::Uuid::new_v4()));
-    fs::create_dir_all(&staging)?;
-    let token = ensure_hub_access(state.inner(), &settings, false).await?;
+    let staging = hub::StagingDir::create(
+        vault.join(format!(".nest-download-{}", uuid::Uuid::new_v4())),
+    )?;
+    let token = super::ensure_hub_access(state.inner(), &settings, false).await?;
     let downloaded = hub::download_pack_remote(
         &settings.hub_base_url,
         settings.effective_proxy_url(),
         &pack_id,
         version.as_deref(),
-        &staging,
+        staging.path(),
         token.as_deref(),
     )
-    .await;
-    let downloaded = match downloaded {
-        Ok(pack) => pack,
-        Err(error) => {
-            let _ = fs::remove_dir_all(&staging);
-            return Err(error);
-        }
-    };
+    .await?;
     let pack = downloaded.pack;
     let patch_revision = downloaded.patch_revision;
     if pack.id != pack_id {
-        let _ = fs::remove_dir_all(&staging);
         return Err(AppError::msg(format!(
             "Downloaded pack id mismatch: expected {pack_id}, found {}",
             pack.id
@@ -399,7 +261,6 @@ pub async fn hub_download_pack(
             Some(Component::Normal(_))
         )
     {
-        let _ = fs::remove_dir_all(&staging);
         return Err(AppError::msg("Downloaded pack has an unsafe local path"));
     }
 
@@ -410,7 +271,6 @@ pub async fn hub_download_pack(
         local_download_conflict(&conn, &pack_id, &pack_name)?
     };
     if current_conflict.as_ref().map(|p| p.pack_id.as_str()) != replace_local_pack_id.as_deref() {
-        let _ = fs::remove_dir_all(&staging);
         return Err(AppError::msg(
             "The local packs changed while downloading. Review the conflict and try again.",
         ));
@@ -418,7 +278,6 @@ pub async fn hub_download_pack(
 
     let mut staged_pack = staging.join(&pack.path);
     if !staged_pack.is_dir() {
-        let _ = fs::remove_dir_all(&staging);
         return Err(AppError::msg(
             "The downloaded archive did not contain the expected pack folder",
         ));
@@ -426,7 +285,7 @@ pub async fn hub_download_pack(
     let approved_snapshot_source = if sync_patch.unwrap_or(false) {
         let installed = {
             let conn = state.db.lock();
-            require_installed_pack(&conn, &pack_id)?
+            super::require_installed_pack(&conn, &pack_id)?
         };
         let local_dir = vault.join(&installed.local_path);
         let base_dir = crate::snapshot::snapshot_root(
@@ -445,7 +304,6 @@ pub async fn hub_download_pack(
             merge_resolutions.as_deref().unwrap_or_default(),
             merge_preview_token.as_deref(),
         ) {
-            let _ = fs::remove_dir_all(&staging);
             return Err(error);
         }
         staged_pack = merged_dir;
@@ -471,7 +329,6 @@ pub async fn hub_download_pack(
                 for (original, saved) in backups.iter().rev() {
                     let _ = fs::rename(saved, original);
                 }
-                let _ = fs::remove_dir_all(&staging);
                 let _ = fs::remove_dir_all(&backup_root);
                 return Err(error.into());
             }
@@ -482,7 +339,6 @@ pub async fn hub_download_pack(
         for (original, saved) in backups.iter().rev() {
             let _ = fs::rename(saved, original);
         }
-        let _ = fs::remove_dir_all(&staging);
         let _ = fs::remove_dir_all(&backup_root);
         return Err(error.into());
     }
@@ -498,7 +354,6 @@ pub async fn hub_download_pack(
             for (original, saved) in backups.iter().rev() {
                 let _ = fs::rename(saved, original);
             }
-            let _ = fs::remove_dir_all(&staging);
             let _ = fs::remove_dir_all(&backup_root);
             return Err(error);
         }
@@ -517,7 +372,6 @@ pub async fn hub_download_pack(
         if had_snapshot {
             let _ = fs::rename(&snapshot_backup, &snapshot_dir);
         }
-        let _ = fs::remove_dir_all(&staging);
         let _ = fs::remove_dir_all(&backup_root);
         return Err(error);
     }
@@ -554,7 +408,6 @@ pub async fn hub_download_pack(
             if had_snapshot {
                 let _ = fs::rename(&snapshot_backup, &snapshot_dir);
             }
-            let _ = fs::remove_dir_all(&staging);
             let _ = fs::remove_dir_all(&backup_root);
             return Err(error);
         }
@@ -565,7 +418,6 @@ pub async fn hub_download_pack(
         }
     }
     indexing::schedule(state.inner())?;
-    let _ = fs::remove_dir_all(&staging);
     let _ = fs::remove_dir_all(&backup_root);
     Ok(installed)
 }
@@ -583,7 +435,7 @@ pub async fn hub_import_local_pack(
     let inspected = hub::inspect_local_pack(&source, &vault)?;
     {
         let conn = state.db.lock();
-        ensure_existing_pack_not_review_locked(&conn, &inspected.metadata.id)?;
+        super::ensure_existing_pack_not_review_locked(&conn, &inspected.metadata.id)?;
     }
     if !overwrite {
         let conn = state.db.lock();
@@ -626,7 +478,7 @@ pub async fn hub_create_pack_from_zip(
 ) -> AppResult<InstalledPack> {
     {
         let conn = state.db.lock();
-        ensure_existing_pack_not_review_locked(&conn, metadata.id.trim())?;
+        super::ensure_existing_pack_not_review_locked(&conn, metadata.id.trim())?;
     }
     if !overwrite {
         let conn = state.db.lock();
@@ -667,7 +519,7 @@ pub async fn hub_create_pack_from_folder(
 ) -> AppResult<InstalledPack> {
     {
         let conn = state.db.lock();
-        ensure_existing_pack_not_review_locked(&conn, metadata.id.trim())?;
+        super::ensure_existing_pack_not_review_locked(&conn, metadata.id.trim())?;
     }
     if !overwrite {
         let conn = state.db.lock();
@@ -714,7 +566,7 @@ pub fn hub_export_pack(
 ) -> AppResult<()> {
     let pack = {
         let conn = state.db.lock();
-        let installed = require_installed_pack(&conn, &pack_id)?;
+        let installed = super::require_installed_pack(&conn, &pack_id)?;
         PackMeta {
             id: installed.pack_id,
             name: installed.name,
@@ -733,184 +585,6 @@ pub fn hub_export_pack(
         destination.set_extension("zip");
     }
     hub::export_pack(&pack, &state.vault_path(), &destination)
-}
-
-/// Persist the Hub refresh token in the local `settings` table — the same
-/// storage and guarantees as everything else in Settings (e.g.
-/// `llm_api_key`), not the OS keychain. Errors are logged rather than
-/// propagated — a failed write shouldn't fail login itself, but it must not
-/// be swallowed silently either, since a silent failure here is
-/// indistinguishable from "never logged in" on the next launch.
-///
-/// This used to go through the OS keychain, but on an ad-hoc-signed build
-/// (no Apple Developer Team ID, `signingIdentity: "-"` in tauri.conf.json)
-/// macOS does not reliably persist Keychain items across process launches —
-/// `SecItemAdd` can report success while the item is unreadable by the very
-/// next launch of the same binary — which made the Hub session silently
-/// fail to survive an app restart.
-fn store_refresh_token(state: &SharedState, refresh_token: &str) {
-    let conn = state.db.lock();
-    match db::set_hub_refresh_token(&conn, Some(refresh_token)) {
-        Ok(()) => crate::nest_debug!("hub", "stored refresh token in settings"),
-        Err(error) => crate::nest_debug!("hub", "failed to store refresh token: {error}"),
-    }
-}
-
-fn clear_refresh_token(state: &SharedState) {
-    let conn = state.db.lock();
-    if let Err(error) = db::set_hub_refresh_token(&conn, None) {
-        crate::nest_debug!("hub", "failed to clear refresh token: {error}");
-    }
-}
-
-fn load_refresh_token(state: &SharedState) -> Option<String> {
-    let conn = state.db.lock();
-    match db::get_hub_refresh_token(&conn) {
-        Ok(Some(token)) => {
-            crate::nest_debug!("hub", "loaded refresh token from settings");
-            Some(token)
-        }
-        Ok(None) => {
-            crate::nest_debug!("hub", "no refresh token in settings");
-            None
-        }
-        Err(error) => {
-            crate::nest_debug!("hub", "failed to read refresh token: {error}");
-            None
-        }
-    }
-}
-
-#[tauri::command]
-pub async fn hub_auth_state(state: State<'_, SharedState>) -> AppResult<hub::AuthState> {
-    let settings = {
-        let conn = state.db.lock();
-        db::get_settings(&conn)?
-    };
-    let _ = ensure_hub_access(state.inner(), &settings, false).await;
-    let auth = state.hub_auth.lock();
-    let user = auth.as_ref().map(|session| session.user.clone());
-    drop(auth);
-    Ok(hub::AuthState {
-        authenticated: user.is_some(),
-        user,
-    })
-}
-
-#[tauri::command]
-pub async fn hub_login(
-    state: State<'_, SharedState>,
-    id: String,
-    password: String,
-) -> AppResult<hub::AuthState> {
-    let settings = {
-        let conn = state.db.lock();
-        db::get_settings(&conn)?
-    };
-    let session = hub::login_remote(
-        &settings.hub_base_url,
-        settings.effective_proxy_url(),
-        id.trim(),
-        &password,
-    )
-    .await?;
-    store_refresh_token(state.inner(), &session.refresh_token);
-    let user = session.user.clone();
-    *state.hub_auth.lock() = Some(session);
-    Ok(hub::AuthState {
-        authenticated: true,
-        user: Some(user),
-    })
-}
-
-#[tauri::command]
-pub async fn hub_register(
-    state: State<'_, SharedState>,
-    id: String,
-    password: String,
-    name: String,
-) -> AppResult<hub::AuthState> {
-    let settings = {
-        let conn = state.db.lock();
-        db::get_settings(&conn)?
-    };
-    let session = hub::register_remote(
-        &settings.hub_base_url,
-        settings.effective_proxy_url(),
-        id.trim(),
-        &password,
-        name.trim(),
-    )
-    .await?;
-    store_refresh_token(state.inner(), &session.refresh_token);
-    let user = session.user.clone();
-    *state.hub_auth.lock() = Some(session);
-    Ok(hub::AuthState {
-        authenticated: true,
-        user: Some(user),
-    })
-}
-
-#[tauri::command]
-pub fn hub_logout(state: State<'_, SharedState>) -> AppResult<()> {
-    state.hub_auth.lock().take();
-    clear_refresh_token(state.inner());
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn hub_update_profile(
-    state: State<'_, SharedState>,
-    name: String,
-) -> AppResult<hub::HubUser> {
-    let settings = {
-        let conn = state.db.lock();
-        db::get_settings(&conn)?
-    };
-    let token = ensure_hub_access(&state, &settings, false)
-        .await?
-        .ok_or_else(|| AppError::msg("Sign in to update your Hub profile"))?;
-    let user = hub::update_profile_remote(
-        &settings.hub_base_url,
-        settings.effective_proxy_url(),
-        &token,
-        name.trim(),
-    )
-    .await?;
-    if let Some(session) = state.hub_auth.lock().as_mut() {
-        session.user = user.clone();
-    }
-    Ok(user)
-}
-
-#[tauri::command]
-pub async fn hub_change_password(
-    state: State<'_, SharedState>,
-    current_password: String,
-    new_password: String,
-) -> AppResult<hub::AuthState> {
-    let settings = {
-        let conn = state.db.lock();
-        db::get_settings(&conn)?
-    };
-    let token = ensure_hub_access(&state, &settings, false)
-        .await?
-        .ok_or_else(|| AppError::msg("Sign in to change your Hub password"))?;
-    let session = hub::change_password_remote(
-        &settings.hub_base_url,
-        settings.effective_proxy_url(),
-        &token,
-        &current_password,
-        &new_password,
-    )
-    .await?;
-    store_refresh_token(state.inner(), &session.refresh_token);
-    let user = session.user.clone();
-    *state.hub_auth.lock() = Some(session);
-    Ok(hub::AuthState {
-        authenticated: true,
-        user: Some(user),
-    })
 }
 
 #[tauri::command]
@@ -1022,12 +696,12 @@ async fn publish_pack(
         let conn = state.db.lock();
         db::get_settings(&conn)?
     };
-    let token = ensure_hub_access(state, &settings, false)
+    let token = super::ensure_hub_access(state, &settings, false)
         .await?
         .ok_or_else(|| AppError::msg("Sign in to publish a knowledge pack"))?;
     let mut installed = {
         let conn = state.db.lock();
-        require_installed_pack(&conn, &pack_id)?
+        super::require_installed_pack(&conn, &pack_id)?
     };
     ensure_pack_publishable(&installed)?;
     let commit_message = operation.commit_message().trim();
@@ -1105,7 +779,7 @@ async fn publish_pack(
     .await;
     let result = match published {
         Err(error) if error.is_unauthorized() => {
-            let token = ensure_hub_access(state, &settings, true)
+            let token = super::ensure_hub_access(state, &settings, true)
                 .await?
                 .ok_or_else(|| AppError::msg("Your Hub session expired. Sign in again."))?;
             publish_operation_remote(
@@ -1162,7 +836,7 @@ pub async fn hub_reconcile_publish_requests(
         let conn = state.db.lock();
         db::get_settings(&conn)?
     };
-    let Some(token) = ensure_hub_access(state.inner(), &settings, false).await? else {
+    let Some(token) = super::ensure_hub_access(state.inner(), &settings, false).await? else {
         let conn = state.db.lock();
         return db::list_sync_state(&conn);
     };
@@ -1190,12 +864,12 @@ pub async fn hub_cancel_publish_request(
         let conn = state.db.lock();
         db::get_settings(&conn)?
     };
-    let token = ensure_hub_access(state.inner(), &settings, false)
+    let token = super::ensure_hub_access(state.inner(), &settings, false)
         .await?
         .ok_or_else(|| AppError::msg("Sign in to cancel a publish request"))?;
     let installed = {
         let conn = state.db.lock();
-        require_installed_pack(&conn, &pack_id)?
+        super::require_installed_pack(&conn, &pack_id)?
     };
     if installed.publish_review_status.as_deref() != Some("pending")
         || installed.pending_request_id.as_deref() != Some(request_id.as_str())
@@ -1223,11 +897,11 @@ pub async fn hub_cancel_publish_request(
         ));
     }
     let conn = state.db.lock();
-    let current = require_installed_pack(&conn, &pack_id)?;
+    let current = super::require_installed_pack(&conn, &pack_id)?;
     if current.pending_request_id.as_deref() == Some(request_id.as_str()) {
         db::clear_pending_publish(&conn, &pack_id)?;
     }
-    require_installed_pack(&conn, &pack_id)
+    super::require_installed_pack(&conn, &pack_id)
 }
 
 /// Best-effort per pack — a transient network error or a lookup this device
@@ -1345,39 +1019,29 @@ async fn preview_remote_merge(
         let conn = state.db.lock();
         (
             db::get_settings(&conn)?,
-            require_installed_pack(&conn, pack_id)?,
+            super::require_installed_pack(&conn, pack_id)?,
         )
     };
-    let token = ensure_hub_access(state, &settings, false).await?;
-    let staging = std::env::temp_dir().join(format!(
+    let token = super::ensure_hub_access(state, &settings, false).await?;
+    let staging = hub::StagingDir::create(std::env::temp_dir().join(format!(
         "nest-merge-preview-{}-{}",
         pack_id,
         uuid::Uuid::new_v4()
-    ));
-    fs::create_dir_all(&staging)?;
+    )))?;
     let downloaded = hub::download_pack_remote(
         &settings.hub_base_url,
         settings.effective_proxy_url(),
         pack_id,
         Some(version),
-        &staging,
+        staging.path(),
         token.as_deref(),
     )
-    .await;
-    let downloaded = match downloaded {
-        Ok(value) => value,
-        Err(error) => {
-            let _ = fs::remove_dir_all(&staging);
-            return Err(error);
-        }
-    };
+    .await?;
     let approved_dir = staging.join(&downloaded.pack.path);
     let local_dir = state.vault_path().join(&installed.local_path);
     let base_dir =
         crate::snapshot::snapshot_root(&state.app_data_dir, &installed.pack_id, &installed.version);
-    let analysis = crate::snapshot::analyze_three_way(&base_dir, &local_dir, &approved_dir);
-    let _ = fs::remove_dir_all(&staging);
-    let analysis = analysis?;
+    let analysis = crate::snapshot::analyze_three_way(&base_dir, &local_dir, &approved_dir)?;
     Ok(PackMergePreview {
         pack_id: pack_id.to_string(),
         version: downloaded.pack.version,
@@ -1399,7 +1063,7 @@ pub async fn hub_preview_approved_merge(
         let conn = state.db.lock();
         db::get_settings(&conn)?
     };
-    let token = ensure_hub_access(state.inner(), &settings, false)
+    let token = super::ensure_hub_access(state.inner(), &settings, false)
         .await?
         .ok_or_else(|| AppError::msg("Sign in to merge an approved knowledge pack"))?;
     let request = hub::get_publish_request_remote(
@@ -1424,7 +1088,7 @@ pub async fn hub_preview_pack_patch(
 ) -> AppResult<PackMergePreview> {
     let installed = {
         let conn = state.db.lock();
-        require_installed_pack(&conn, &pack_id)?
+        super::require_installed_pack(&conn, &pack_id)?
     };
     let preview = preview_remote_merge(state.inner(), &pack_id, &installed.version, None).await?;
     if preview.patch_revision <= installed.patch_revision {
@@ -1448,12 +1112,12 @@ pub async fn hub_merge_approved_pack(
         let conn = state.db.lock();
         db::get_settings(&conn)?
     };
-    let token = ensure_hub_access(state.inner(), &settings, false)
+    let token = super::ensure_hub_access(state.inner(), &settings, false)
         .await?
         .ok_or_else(|| AppError::msg("Sign in to merge an approved knowledge pack"))?;
     let installed = {
         let conn = state.db.lock();
-        require_installed_pack(&conn, &pack_id)?
+        super::require_installed_pack(&conn, &pack_id)?
     };
 
     let request = hub::get_publish_request_remote(
@@ -1485,32 +1149,23 @@ pub async fn hub_merge_approved_pack(
         ));
     }
 
-    let staging = std::env::temp_dir().join(format!(
+    let staging = hub::StagingDir::create(std::env::temp_dir().join(format!(
         "nest-approved-merge-{}-{}",
         pack_id,
         uuid::Uuid::new_v4()
-    ));
-    fs::create_dir_all(&staging)?;
+    )))?;
     let downloaded = hub::download_pack_remote(
         &settings.hub_base_url,
         settings.effective_proxy_url(),
         &pack_id,
         Some(&request.version),
-        &staging,
+        staging.path(),
         Some(&token),
     )
-    .await;
-    let downloaded = match downloaded {
-        Ok(pack) => pack,
-        Err(error) => {
-            let _ = fs::remove_dir_all(&staging);
-            return Err(error);
-        }
-    };
+    .await?;
     let approved = downloaded.pack;
     let patch_revision = downloaded.patch_revision;
     if approved.id != pack_id || approved.version != request.version {
-        let _ = fs::remove_dir_all(&staging);
         return Err(AppError::msg(
             "The downloaded Hub release does not match the approval",
         ));
@@ -1539,7 +1194,6 @@ pub async fn hub_merge_approved_pack(
     fs::rename(&local_dir, &backup_dir)?;
     if let Err(error) = fs::rename(&merged_dir, &local_dir) {
         let _ = fs::rename(&backup_dir, &local_dir);
-        let _ = fs::remove_dir_all(&staging);
         return Err(error.into());
     }
     let snapshot_result = crate::snapshot::write_snapshot(
@@ -1555,7 +1209,6 @@ pub async fn hub_merge_approved_pack(
         if had_snapshot {
             let _ = fs::rename(&snapshot_backup, &snapshot_dir);
         }
-        let _ = fs::remove_dir_all(&staging);
         return Err(error);
     }
 
@@ -1600,7 +1253,6 @@ pub async fn hub_merge_approved_pack(
     if result.is_ok() {
         let _ = indexing::schedule(state.inner());
     }
-    let _ = fs::remove_dir_all(&staging);
     result
 }
 
@@ -1632,7 +1284,7 @@ pub fn hub_update_pack_metadata(
 ) -> AppResult<InstalledPack> {
     let installed = {
         let conn = state.db.lock();
-        require_installed_pack(&conn, &pack_id)?
+        super::require_installed_pack(&conn, &pack_id)?
     };
     ensure_pack_not_review_locked(&installed)?;
     let pack_dir = state.vault_path().join(&installed.local_path);
@@ -1698,7 +1350,7 @@ pub fn hub_rename_pack(
 ) -> AppResult<InstalledPack> {
     let installed = {
         let conn = state.db.lock();
-        require_installed_pack(&conn, &pack_id)?
+        super::require_installed_pack(&conn, &pack_id)?
     };
     ensure_pack_not_review_locked(&installed)?;
     if installed.origin != "local" {
@@ -1710,189 +1362,6 @@ pub fn hub_rename_pack(
     let vault = state.vault_path();
     let updated = hub::rename_pack_folder(&vault, &installed.local_path, &name)?;
     finish_local_pack_identity_change(state.inner(), &installed, updated)
-}
-
-async fn hub_message_context(state: &SharedState) -> AppResult<(AppSettings, String)> {
-    let settings = {
-        let conn = state.db.lock();
-        db::get_settings(&conn)?
-    };
-    let token = ensure_hub_access(state, &settings, false)
-        .await?
-        .ok_or_else(|| AppError::msg("Sign in to view Hub messages"))?;
-    Ok((settings, token))
-}
-
-#[tauri::command]
-pub async fn hub_list_messages(
-    state: State<'_, SharedState>,
-    filter: String,
-    cursor: Option<String>,
-) -> AppResult<hub::HubMessagePage> {
-    let (settings, token) = hub_message_context(state.inner()).await?;
-    hub::list_messages_remote(
-        &settings.hub_base_url,
-        settings.effective_proxy_url(),
-        &token,
-        &filter,
-        cursor.as_deref(),
-    )
-    .await
-}
-
-#[tauri::command]
-pub async fn hub_unread_message_count(
-    state: State<'_, SharedState>,
-) -> AppResult<hub::UnreadCount> {
-    let (settings, token) = hub_message_context(state.inner()).await?;
-    hub::unread_count_remote(
-        &settings.hub_base_url,
-        settings.effective_proxy_url(),
-        &token,
-    )
-    .await
-}
-
-async fn mutate_hub_message(
-    state: &SharedState,
-    method: reqwest::Method,
-    path: &str,
-) -> AppResult<()> {
-    let (settings, token) = hub_message_context(state).await?;
-    hub::mutate_message_remote(
-        &settings.hub_base_url,
-        settings.effective_proxy_url(),
-        &token,
-        method,
-        path,
-    )
-    .await
-}
-
-#[tauri::command]
-pub async fn hub_mark_message_read(
-    state: State<'_, SharedState>,
-    message_id: String,
-) -> AppResult<()> {
-    mutate_hub_message(
-        state.inner(),
-        reqwest::Method::PATCH,
-        &format!("/{}/read", message_id),
-    )
-    .await
-}
-
-#[tauri::command]
-pub async fn hub_mark_all_messages_read(state: State<'_, SharedState>) -> AppResult<()> {
-    mutate_hub_message(state.inner(), reqwest::Method::POST, "/read-all").await
-}
-
-#[tauri::command]
-pub async fn hub_delete_message(
-    state: State<'_, SharedState>,
-    message_id: String,
-) -> AppResult<()> {
-    mutate_hub_message(
-        state.inner(),
-        reqwest::Method::DELETE,
-        &format!("/{}", message_id),
-    )
-    .await
-}
-
-#[tauri::command]
-pub async fn hub_delete_read_messages(state: State<'_, SharedState>) -> AppResult<()> {
-    mutate_hub_message(state.inner(), reqwest::Method::DELETE, "/read").await
-}
-
-async fn ensure_hub_access(
-    state: &SharedState,
-    settings: &AppSettings,
-    force_refresh: bool,
-) -> AppResult<Option<String>> {
-    let _refresh_guard = state.hub_auth_refresh.lock().await;
-    let session = state.hub_auth.lock().clone();
-    let session = match session {
-        Some(session) => session,
-        None => {
-            let Some(refresh) = load_refresh_token(state) else {
-                return Ok(None);
-            };
-            let restored = match hub::refresh_remote(
-                &settings.hub_base_url,
-                settings.effective_proxy_url(),
-                &refresh,
-            )
-            .await
-            {
-                Ok(value) => value,
-                Err(error) => {
-                    // Only a definitive rejection (401: the refresh token is
-                    // actually invalid/expired) should sign the user out.
-                    // Anything else — offline at launch, Hub briefly down,
-                    // a timeout — is transient, and wiping the stored
-                    // refresh token here would silently force a fresh login
-                    // on every relaunch that happens to race the network.
-                    if error.is_unauthorized() {
-                        crate::nest_debug!(
-                            "hub",
-                            "stored refresh token rejected, clearing it: {error}"
-                        );
-                        clear_refresh_token(state);
-                    } else {
-                        crate::nest_debug!(
-                            "hub",
-                            "session restore failed, keeping stored refresh token for retry: {error}"
-                        );
-                    }
-                    return Ok(None);
-                }
-            };
-            // The Hub rotates refresh tokens on every use — the one just
-            // exchanged above is now revoked server-side, so `restored`
-            // carries a brand-new one that must be persisted immediately.
-            // Skipping this meant every cold start silently burned the
-            // stored token without saving its replacement, so only the
-            // *first* relaunch after login ever worked — the next one
-            // presented an already-revoked token and got signed out.
-            store_refresh_token(state, &restored.refresh_token);
-            *state.hub_auth.lock() = Some(restored.clone());
-            restored
-        }
-    };
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    if !force_refresh && session.expires_at_epoch > now + 30 {
-        return Ok(Some(session.access_token));
-    }
-    let refreshed = match hub::refresh_remote(
-        &settings.hub_base_url,
-        settings.effective_proxy_url(),
-        &session.refresh_token,
-    )
-    .await
-    {
-        Ok(value) => value,
-        Err(error) => {
-            *state.hub_auth.lock() = None;
-            if error.is_unauthorized() {
-                crate::nest_debug!("hub", "refresh token rejected, clearing it: {error}");
-                clear_refresh_token(state);
-            } else {
-                crate::nest_debug!(
-                    "hub",
-                    "token refresh failed, keeping stored refresh token for retry: {error}"
-                );
-            }
-            return Ok(None);
-        }
-    };
-    store_refresh_token(state, &refreshed.refresh_token);
-    let token = refreshed.access_token.clone();
-    *state.hub_auth.lock() = Some(refreshed);
-    Ok(Some(token))
 }
 
 #[cfg(test)]
@@ -1940,26 +1409,6 @@ mod publishing_origin_tests {
 
         pack.publish_review_status = Some("approved_awaiting_merge".into());
         assert!(ensure_pack_not_review_locked(&pack).is_ok());
-    }
-}
-
-#[cfg(test)]
-mod pack_prefix_tests {
-    use super::*;
-
-    #[test]
-    fn strips_matching_local_path_prefix() {
-        assert_eq!(
-            strip_pack_prefix("my-pack", "my-pack/docs/a.md").unwrap(),
-            "docs/a.md"
-        );
-    }
-
-    #[test]
-    fn rejects_paths_outside_the_pack() {
-        assert!(strip_pack_prefix("my-pack", "other-pack/docs/a.md").is_err());
-        assert!(strip_pack_prefix("my-pack", "my-pack-extra/a.md").is_err());
-        assert!(strip_pack_prefix("my-pack", "my-pack").is_err());
     }
 }
 

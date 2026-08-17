@@ -29,6 +29,7 @@ import {
   type ChatStreamEvent,
 } from "@/lib/api";
 import { appErrorMessage } from "@/lib/errors";
+import { indexInstalledPacksByLocalPath } from "@/lib/pack-index";
 import { queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
 import { useUiStore } from "@/stores/ui";
@@ -76,7 +77,7 @@ export function ChatPanel() {
   const activePackRoots = useMemo(() => {
     const installed = installedQuery.data ?? [];
     const tree = treeQuery.data ?? [];
-    const byPath = new Map(installed.map((p) => [p.local_path, p]));
+    const byPath = indexInstalledPacksByLocalPath(installed);
     const roots: string[] = [];
     for (const node of tree) {
       if (node.kind !== "folder") continue;

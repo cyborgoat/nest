@@ -7,19 +7,11 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ImportPackDialog } from "@/components/hub/ImportPackDialog";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { ReplacePackDialog } from "@/components/ui/replace-pack-dialog";
 import { api } from "@/lib/api";
 import { appErrorMessage } from "@/lib/errors";
 import { useI18n } from "@/lib/i18n";
+import { indexInstalledPacksById } from "@/lib/pack-index";
 import { packMutationInvalidations } from "@/lib/query-keys";
 
 export type LocalPackImportMode = "choose" | "folder" | "zip";
@@ -46,7 +38,7 @@ export function LocalPackImportController({
     useState<PendingOverwrite | null>(null);
 
   const installedById = useMemo(
-    () => new Map(installed.map((pack) => [pack.pack_id, pack])),
+    () => indexInstalledPacksById(installed),
     [installed],
   );
 
@@ -164,51 +156,39 @@ export function LocalPackImportController({
           }
         }}
       />
-      <AlertDialog
+      <ReplacePackDialog
         open={pendingOverwrite != null}
         onOpenChange={(open) => !open && setPendingOverwrite(null)}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Replace installed knowledge pack?</AlertDialogTitle>
-            <AlertDialogDescription>
-              {pendingOverwrite
-                ? `“${pendingOverwrite.installed.name}” ${pendingOverwrite.installed.version} is already installed. Importing “${pendingOverwrite.metadata.name}” ${pendingOverwrite.metadata.version} will replace it because Nest keeps one installed version per pack.`
-                : "The installed knowledge pack will be replaced."}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={importing}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              disabled={!pendingOverwrite || importing}
-              onClick={(event) => {
-                event.preventDefault();
-                if (!pendingOverwrite) return;
-                if (pendingOverwrite.kind === "zip") {
-                  importLocal.mutate({
-                    sourcePath: pendingOverwrite.sourcePath,
-                    overwrite: true,
-                  });
-                } else if (pendingOverwrite.kind === "zip-create") {
-                  createFromZip.mutate({
-                    sourcePath: pendingOverwrite.sourcePath,
-                    metadata: pendingOverwrite.metadata,
-                    overwrite: true,
-                  });
-                } else {
-                  createFromFolder.mutate({
-                    sourcePath: pendingOverwrite.sourcePath,
-                    metadata: pendingOverwrite.metadata,
-                    overwrite: true,
-                  });
-                }
-              }}
-            >
-              {importing ? "Replacing…" : "Replace pack"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        title="Replace installed knowledge pack?"
+        description={
+          pendingOverwrite
+            ? `“${pendingOverwrite.installed.name}” ${pendingOverwrite.installed.version} is already installed. Importing “${pendingOverwrite.metadata.name}” ${pendingOverwrite.metadata.version} will replace it because Nest keeps one installed version per pack.`
+            : "The installed knowledge pack will be replaced."
+        }
+        confirmLabel={importing ? "Replacing…" : "Replace pack"}
+        confirming={importing}
+        onConfirm={() => {
+          if (!pendingOverwrite) return;
+          if (pendingOverwrite.kind === "zip") {
+            importLocal.mutate({
+              sourcePath: pendingOverwrite.sourcePath,
+              overwrite: true,
+            });
+          } else if (pendingOverwrite.kind === "zip-create") {
+            createFromZip.mutate({
+              sourcePath: pendingOverwrite.sourcePath,
+              metadata: pendingOverwrite.metadata,
+              overwrite: true,
+            });
+          } else {
+            createFromFolder.mutate({
+              sourcePath: pendingOverwrite.sourcePath,
+              metadata: pendingOverwrite.metadata,
+              overwrite: true,
+            });
+          }
+        }}
+      />
     </>
   );
 }

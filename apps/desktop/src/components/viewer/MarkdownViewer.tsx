@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { FileDiff, Lock, Pencil } from "lucide-react";
+import { Lock, Pencil } from "lucide-react";
 import { motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
@@ -27,6 +27,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { MarkdownPathBreadcrumb } from "@/components/viewer/MarkdownPathBreadcrumb";
+import { AgentProposalBanner } from "@/components/viewer/AgentProposalBanner";
 import { useEditorStore } from "@/stores/editor";
 
 export function MarkdownViewer({ path }: { path: string }) {
@@ -176,17 +177,7 @@ export function MarkdownViewer({ path }: { path: string }) {
         <MarkdownPathBreadcrumb path={path} />
       </PanelHeader>
       {pendingChangeQuery.data && (
-        <button
-          type="button"
-          onClick={() => setEditing(path, true)}
-          className="flex items-center gap-2 bg-info/10 px-4 py-2 text-left text-xs text-info hover:bg-info/15"
-        >
-          <FileDiff className="size-4" />
-          <span className="font-medium">Previewing an Agent proposal.</span>
-          <span className="text-muted-foreground">
-            Open the editor to review, approve, or reject the diff.
-          </span>
-        </button>
+        <AgentProposalBanner onClick={() => setEditing(path, true)} />
       )}
       <ScrollArea ref={scrollAreaRef} className="min-h-0 flex-1">
         <div className="flex w-full gap-8 px-6 py-5">

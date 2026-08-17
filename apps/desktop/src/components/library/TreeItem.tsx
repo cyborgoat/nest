@@ -1,5 +1,4 @@
 import type {
-  FileChangeStatus,
   HubUser,
   InstalledPack,
   TreeNode,
@@ -29,15 +28,11 @@ import {
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import {
-  createContext,
   useContext,
   useEffect,
   useRef,
   useMemo,
   useState,
-  type MouseEvent as ReactMouseEvent,
-  type PointerEvent as ReactPointerEvent,
-  type ReactNode,
 } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -91,10 +86,9 @@ import {
   canRenamePack,
   isPackReviewLocked,
 } from "@/lib/pack-permissions";
-import { pendingPublishVersionLabel } from "@/lib/publish-request-labels";
+import { pendingPublishVersionLabel, publishMenuLabel } from "@/lib/publish-request-labels";
 import { fileMutationInvalidations } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
-import type { VaultDragEntry } from "@/lib/tree-drag-drop";
 import {
   ensureImageExtension,
   ensureMdExtension,
@@ -104,54 +98,13 @@ import {
 } from "@/lib/vault-paths";
 import { useEditorStore } from "@/stores/editor";
 import { useUiStore } from "@/stores/ui";
-
-export const DropTargetContext = createContext<{
-  externalDropTargetPath: string | null;
-  internalDropTargetNodePath: string | null;
-  draggingPaths: ReadonlySet<string>;
-  selectedPaths: ReadonlySet<string>;
-  selectEntry: (
-    entry: VaultDragEntry,
-    event: ReactMouseEvent<HTMLElement>,
-  ) => boolean;
-  beginPointerDrag: (
-    entry: VaultDragEntry,
-    event: ReactPointerEvent<HTMLElement>,
-  ) => void;
-  suppressTreeClick: () => boolean;
-  pathExists: (path: string) => boolean;
-}>({
-  externalDropTargetPath: null,
-  internalDropTargetNodePath: null,
-  draggingPaths: new Set(),
-  selectedPaths: new Set(),
-  selectEntry: () => false,
-  beginPointerDrag: () => {},
-  suppressTreeClick: () => false,
-  pathExists: () => false,
-});
-
-export const ExplorerFileStatusContext = createContext<
-  ReadonlyMap<string, FileChangeStatus>
->(new Map());
-
-export type NewEntryKind = "file" | "folder";
-
-export const ExplorerActionsContext = createContext<{
-  canCreateEntry: boolean;
-  onCreatePack: () => void;
-  onImportFolder: () => void;
-  onImportZip: () => void;
-  onCreateEntry: (kind: NewEntryKind, preferredDestination?: string) => void;
-  onOpenVaultFolder: () => void;
-}>({
-  canCreateEntry: false,
-  onCreatePack: () => {},
-  onImportFolder: () => {},
-  onImportZip: () => {},
-  onCreateEntry: () => {},
-  onOpenVaultFolder: () => {},
-});
+import { filterTree } from "@/components/library/filter-tree";
+import { PermissionMenuItem } from "@/components/library/PermissionMenuItem";
+import {
+  DropTargetContext,
+  ExplorerActionsContext,
+  ExplorerFileStatusContext,
+} from "@/components/library/tree-contexts";
 
 export function GeneralExplorerMenuItems({
   preferredDestination,
@@ -212,65 +165,6 @@ export function GeneralExplorerMenuItems({
         Open Vault Folder
       </ContextMenuItem>
     </>
-  );
-}
-
-export function filterTree(nodes: TreeNode[], query: string): TreeNode[] {
-  const q = query.trim().toLowerCase();
-  if (!q) return nodes;
-
-  const walk = (node: TreeNode): TreeNode | null => {
-    const selfMatch =
-      node.name.toLowerCase().includes(q) ||
-      node.path.toLowerCase().includes(q);
-    if (node.kind === "file") {
-      return selfMatch ? node : null;
-    }
-    const kids = (node.children ?? [])
-      .map(walk)
-      .filter((n): n is TreeNode => n != null);
-    if (selfMatch || kids.length > 0) {
-      return { ...node, children: kids.length ? kids : node.children };
-    }
-    return null;
-  };
-
-  return nodes.map(walk).filter((n): n is TreeNode => n != null);
-}
-
-/** A ContextMenuItem that stays visible but disabled — with a hover tooltip
- * explaining why — instead of disappearing, so every row's menu has the same
- * shape regardless of the viewer's permissions. */
-function PermissionMenuItem({
-  disabled,
-  reason,
-  className,
-  onSelect,
-  children,
-}: {
-  disabled: boolean;
-  reason?: string;
-  className?: string;
-  onSelect: () => void;
-  children: ReactNode;
-}) {
-  const item = (
-    <ContextMenuItem
-      disabled={disabled}
-      className={className}
-      onSelect={onSelect}
-    >
-      {children}
-    </ContextMenuItem>
-  );
-  if (!disabled || !reason) return item;
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span className="block">{item}</span>
-      </TooltipTrigger>
-      <TooltipContent side="right">{reason}</TooltipContent>
-    </Tooltip>
   );
 }
 
@@ -897,7 +791,7 @@ function TreeItem({
                 }
               >
                 <ArrowUp className="size-3.5" />
-                {canEdit && !authenticated ? "Sign in to publish" : "Publish"}
+                {publishMenuLabel(Boolean(authenticated))}
               </PermissionMenuItem>
               <ContextMenuSeparator />
               <ContextMenuItem

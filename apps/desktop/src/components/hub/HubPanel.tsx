@@ -1,6 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
-  InstalledPack,
   PackInstallConflict,
   PackMergePreview,
   PackMergeResolution,
@@ -34,6 +33,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
 import { appErrorMessage } from "@/lib/errors";
 import { deriveHubDisplayState } from "@/lib/hub-display-state";
+import { usePackLifecycleMutations } from "@/hooks/use-pack-lifecycle";
+import { indexInstalledPacksById } from "@/lib/pack-index";
 import { packMutationInvalidations, queryKeys } from "@/lib/query-keys";
 import { useI18n } from "@/lib/i18n";
 import { compareSemVer } from "@/lib/semver";
@@ -45,6 +46,7 @@ export function HubPanel() {
   const openAccountTab = useUiStore((s) => s.openAccountTab);
   const openHubSettingsTab = useUiStore((s) => s.openHubSettingsTab);
   const queryClient = useQueryClient();
+  const { exportPack, removePack, renamePack } = usePackLifecycleMutations();
   const [importMode, setImportMode] = useState<LocalPackImportMode | null>(null);
   const [catalogSearch, setCatalogSearch] = useState("");
   const requestedHubSection = useUiStore((s) => s.hubSection);
@@ -110,13 +112,10 @@ export function HubPanel() {
     queryFn: api.hubListInstalled,
   });
 
-  const installedById = useMemo(() => {
-    const map = new Map<string, InstalledPack>();
-    for (const p of installedQuery.data ?? []) {
-      map.set(p.pack_id, p);
-    }
-    return map;
-  }, [installedQuery.data]);
+  const installedById = useMemo(
+    () => indexInstalledPacksById(installedQuery.data ?? []),
+    [installedQuery.data],
+  );
 
   const catalogById = useMemo(() => {
     if (!hubOnline || !packsQuery.data) return null;
@@ -283,64 +282,16 @@ export function HubPanel() {
     });
   };
 
-  const exportPack = useMutation({
-    mutationFn: ({
-      packId,
-      destinationPath,
-    }: {
-      packId: string;
-      destinationPath: string;
-    }) => api.hubExportPack(packId, destinationPath),
-    onSuccess: () => toast.success(t("hub.packExported")),
-    onError: (e) =>
-      toast.error(t("hub.exportFailed"), {
-        description: appErrorMessage(e),
-      }),
-  });
-
-  const remove = useMutation({
-    mutationFn: (packId: string) => api.hubRemovePack(packId),
-    onSuccess: (_status, packId) => {
-      const localPath =
-        installedQuery.data?.find((p) => p.pack_id === packId)?.local_path ??
-        packId;
-      clearPathsUnder(localPath);
-      invalidateAfterPackChange();
-      toast.success(t("hub.packRemoved"));
-    },
-    onError: (e) =>
-      toast.error(t("hub.removeFailed"), {
-        description: appErrorMessage(e),
-      }),
-  });
-
-  const rename = useMutation({
-    mutationFn: ({ packId, name }: { packId: string; name: string }) =>
-      api.hubRenamePack(packId, name),
-    onSuccess: (_data, vars) => {
-      toast.success("Pack renamed");
-      // The old path's files effectively vanished (they now live under the
-      // new folder name) — close any tabs still pointing at them.
-      const oldLocalPath =
-        installedQuery.data?.find((p) => p.pack_id === vars.packId)
-          ?.local_path ?? vars.packId;
-      clearPathsUnder(oldLocalPath);
-      invalidateAfterPackChange();
-    },
-    onError: (error: unknown) =>
-      toast.error(appErrorMessage(error, "Could not rename pack")),
-  });
-
   const busy =
     download.isPending ||
-    remove.isPending ||
+    removePack.isPending ||
     exportPack.isPending ||
     syncPatch.isPending ||
-    rename.isPending;
+    renamePack.isPending;
   const downloadPendingId = download.isPending
     ? download.variables?.packId
     : undefined;
-  const removePendingId = remove.isPending ? remove.variables : undefined;
+  const removePendingId = removePack.isPending ? removePack.variables : undefined;
   const installedCount = installedQuery.data?.length ?? 0;
 
   return (
@@ -433,7 +384,7 @@ export function HubPanel() {
                     ownerId,
                   })
                 }
-                onRemove={(packId) => remove.mutate(packId)}
+                onRemove={(packId) => removePack.mutate(packId)}
                 onExport={(packId, destinationPath) =>
                   exportPack.mutate({ packId, destinationPath })
                 }
@@ -476,7 +427,7 @@ export function HubPanel() {
                     });
                   }
                 }}
-                onRemove={(packId) => remove.mutate(packId)}
+                onRemove={(packId) => removePack.mutate(packId)}
                 onOpenImport={() => setImportMode("choose")}
                 onBrowse={() => setTab("browse")}
                 onExport={(packId, destinationPath) =>
@@ -485,8 +436,10 @@ export function HubPanel() {
                 authenticated={authQuery.data?.authenticated === true}
                 hubUser={authQuery.data?.user ?? null}
                 onSignIn={openAccountTab}
-                onRename={(packId, name) => rename.mutate({ packId, name })}
-                renaming={rename.isPending}
+                onRename={(packId, name) =>
+                  renamePack.mutate({ packId, name })
+                }
+                renaming={renamePack.isPending}
               />
             </div>
           </ScrollArea>

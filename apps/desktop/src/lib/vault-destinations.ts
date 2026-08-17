@@ -1,4 +1,8 @@
 import type { HubUser, InstalledPack, TreeNode } from "@nest/shared";
+import {
+  indexInstalledPacksById,
+  indexInstalledPacksByLocalPath,
+} from "@/lib/pack-index";
 import { canEditPack } from "@/lib/pack-permissions";
 
 export type VaultDestination = {
@@ -12,10 +16,9 @@ export function collectEditableVaultDestinations(
   installed: InstalledPack[],
   hubUser: HubUser | null,
 ): VaultDestination[] {
-  const packsByPath = new Map<string, InstalledPack>();
-  for (const pack of installed) {
-    packsByPath.set(pack.local_path, pack);
-    packsByPath.set(pack.pack_id, pack);
+  const packsByPath = indexInstalledPacksByLocalPath(installed);
+  for (const [id, pack] of indexInstalledPacksById(installed)) {
+    packsByPath.set(id, pack);
   }
 
   const destinations: VaultDestination[] = [];

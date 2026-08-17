@@ -11,7 +11,7 @@ mod http;
 mod hub;
 mod indexer;
 mod indexing;
-mod llm;
+mod chat_events;
 mod retrieval;
 mod snapshot;
 mod state;

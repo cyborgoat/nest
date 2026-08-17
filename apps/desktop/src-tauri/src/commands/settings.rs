@@ -265,10 +265,10 @@ pub async fn settings_set(
         .to_string();
     settings.proxy_url = settings.proxy_url.trim().to_string();
     if !settings.hub_base_url.is_empty() {
-        validate_http_base_url("Hub URL", &settings.hub_base_url)?;
+        crate::http::validate_http_base_url("Hub URL", &settings.hub_base_url)?;
     }
     if !settings.llm_base_url.is_empty() {
-        validate_http_base_url("LLM Base URL", &settings.llm_base_url)?;
+        crate::http::validate_http_base_url("LLM Base URL", &settings.llm_base_url)?;
     }
     if settings.proxy_enabled {
         crate::http::validate_proxy_url(&settings.proxy_url)?;
@@ -296,19 +296,6 @@ pub async fn settings_set(
         db::save_settings(&conn, &settings)?;
     }
 
-    Ok(())
-}
-
-/// Only called with a non-empty value — hub_base_url is optional overall.
-fn validate_http_base_url(label: &str, value: &str) -> AppResult<()> {
-    let url = reqwest::Url::parse(value)
-        .map_err(|e| AppError::msg(format!("{label} is invalid: {e}")))?;
-    if !matches!(url.scheme(), "http" | "https") {
-        return Err(AppError::msg(format!("{label} must use http or https")));
-    }
-    if url.host_str().is_none() {
-        return Err(AppError::msg(format!("{label} must include a host")));
-    }
     Ok(())
 }
 

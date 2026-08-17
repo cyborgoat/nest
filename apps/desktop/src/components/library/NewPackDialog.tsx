@@ -12,13 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-
-const EMPTY: KnowledgePackMeta = {
-  id: "",
-  name: "",
-  description: "",
-  version: "0.1.0",
-};
+import { EMPTY_PACK_META } from "@/lib/empty-pack-meta";
 
 export function NewPackDialog({
   open,
@@ -33,10 +27,10 @@ export function NewPackDialog({
   creating?: boolean;
   error?: string | null;
 }) {
-  const [metadata, setMetadata] = useState<KnowledgePackMeta>(EMPTY);
+  const [metadata, setMetadata] = useState<KnowledgePackMeta>(EMPTY_PACK_META);
 
   useEffect(() => {
-    if (!open) setMetadata(EMPTY);
+    if (!open) setMetadata(EMPTY_PACK_META);
   }, [open]);
 
   const update = <K extends keyof KnowledgePackMeta>(

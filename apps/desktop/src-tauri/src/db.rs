@@ -1278,65 +1278,44 @@ pub fn list_active_pack_roots(conn: &Connection) -> AppResult<Vec<String>> {
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
+const INSTALLED_PACK_SELECT: &str = "SELECT pack_id, name, local_path, version, last_synced, COALESCE(active, 1), COALESCE(origin, 'unknown'), owner_id, COALESCE(description, ''), pending_version, pending_request_id, publish_review_status, publish_review_created_at, COALESCE(patch_revision, 0), pending_request_type, pending_patch_revision, COALESCE(pending_can_cancel, 0), pending_submitter_id, pending_submitter_name
+         FROM sync_state";
+
+fn map_installed_pack(row: &rusqlite::Row<'_>) -> rusqlite::Result<InstalledPack> {
+    Ok(InstalledPack {
+        pack_id: row.get(0)?,
+        name: row.get(1)?,
+        local_path: row.get(2)?,
+        version: row.get(3)?,
+        patch_revision: row.get(13)?,
+        last_synced: row.get(4)?,
+        active: row.get::<_, i64>(5)? != 0,
+        origin: row.get(6)?,
+        owner_id: row.get(7)?,
+        description: row.get(8)?,
+        pending_version: row.get(9)?,
+        pending_request_type: row.get(14)?,
+        pending_patch_revision: row.get(15)?,
+        pending_request_id: row.get(10)?,
+        publish_review_status: row.get(11)?,
+        publish_review_created_at: row.get(12)?,
+        pending_can_cancel: row.get::<_, i64>(16)? != 0,
+        pending_submitter_id: row.get(17)?,
+        pending_submitter_name: row.get(18)?,
+    })
+}
+
 pub fn list_sync_state(conn: &Connection) -> AppResult<Vec<InstalledPack>> {
-    let mut stmt = conn.prepare(
-        "SELECT pack_id, name, local_path, version, last_synced, COALESCE(active, 1), COALESCE(origin, 'unknown'), owner_id, COALESCE(description, ''), pending_version, pending_request_id, publish_review_status, publish_review_created_at, COALESCE(patch_revision, 0), pending_request_type, pending_patch_revision, COALESCE(pending_can_cancel, 0), pending_submitter_id, pending_submitter_name
-         FROM sync_state ORDER BY name",
-    )?;
-    let rows = stmt.query_map([], |row| {
-        Ok(InstalledPack {
-            pack_id: row.get(0)?,
-            name: row.get(1)?,
-            local_path: row.get(2)?,
-            version: row.get(3)?,
-            patch_revision: row.get(13)?,
-            last_synced: row.get(4)?,
-            active: row.get::<_, i64>(5)? != 0,
-            origin: row.get(6)?,
-            owner_id: row.get(7)?,
-            description: row.get(8)?,
-            pending_version: row.get(9)?,
-            pending_request_type: row.get(14)?,
-            pending_patch_revision: row.get(15)?,
-            pending_request_id: row.get(10)?,
-            publish_review_status: row.get(11)?,
-            publish_review_created_at: row.get(12)?,
-            pending_can_cancel: row.get::<_, i64>(16)? != 0,
-            pending_submitter_id: row.get(17)?,
-            pending_submitter_name: row.get(18)?,
-        })
-    })?;
+    let mut stmt = conn.prepare(&format!("{INSTALLED_PACK_SELECT} ORDER BY name"))?;
+    let rows = stmt.query_map([], map_installed_pack)?;
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
 pub fn get_sync_state(conn: &Connection, pack_id: &str) -> AppResult<Option<InstalledPack>> {
     conn.query_row(
-        "SELECT pack_id, name, local_path, version, last_synced, COALESCE(active, 1), COALESCE(origin, 'unknown'), owner_id, COALESCE(description, ''), pending_version, pending_request_id, publish_review_status, publish_review_created_at, COALESCE(patch_revision, 0), pending_request_type, pending_patch_revision, COALESCE(pending_can_cancel, 0), pending_submitter_id, pending_submitter_name
-         FROM sync_state WHERE pack_id = ?1",
+        &format!("{INSTALLED_PACK_SELECT} WHERE pack_id = ?1"),
         params![pack_id],
-        |row| {
-            Ok(InstalledPack {
-                pack_id: row.get(0)?,
-                name: row.get(1)?,
-                local_path: row.get(2)?,
-                version: row.get(3)?,
-                patch_revision: row.get(13)?,
-                last_synced: row.get(4)?,
-                active: row.get::<_, i64>(5)? != 0,
-                origin: row.get(6)?,
-                owner_id: row.get(7)?,
-                description: row.get(8)?,
-                pending_version: row.get(9)?,
-                pending_request_type: row.get(14)?,
-                pending_patch_revision: row.get(15)?,
-                pending_request_id: row.get(10)?,
-                publish_review_status: row.get(11)?,
-                publish_review_created_at: row.get(12)?,
-                pending_can_cancel: row.get::<_, i64>(16)? != 0,
-                pending_submitter_id: row.get(17)?,
-                pending_submitter_name: row.get(18)?,
-            })
-        },
+        map_installed_pack,
     )
     .optional()
     .map_err(Into::into)

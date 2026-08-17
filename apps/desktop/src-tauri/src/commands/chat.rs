@@ -4,7 +4,7 @@ use crate::agent;
 use crate::db::{self, ChatMessage, ChatSession};
 use crate::error::AppResult;
 use crate::indexing;
-use crate::llm;
+use crate::chat_events;
 use crate::state::SharedState;
 use tauri::AppHandle;
 use tauri::{Emitter, State};
@@ -252,7 +252,7 @@ pub async fn chat_send(
             if e.to_string() == "cancelled" {
                 let _ = app.emit(
                     &stream_event,
-                    llm::ChatStreamEvent::Done {
+                    chat_events::ChatStreamEvent::Done {
                         message_id: String::new(),
                     },
                 );
@@ -260,7 +260,7 @@ pub async fn chat_send(
             }
             let _ = app.emit(
                 &stream_event,
-                llm::ChatStreamEvent::Error {
+                chat_events::ChatStreamEvent::Error {
                     message: e.to_string(),
                 },
             );
@@ -296,7 +296,7 @@ pub async fn chat_send(
 
     let _ = app.emit(
         &stream_event,
-        llm::ChatStreamEvent::Done {
+        chat_events::ChatStreamEvent::Done {
             message_id: message.id.clone(),
         },
     );

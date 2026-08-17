@@ -1,4 +1,5 @@
 import type { HubUser, InstalledPack } from "@nest/shared";
+import { formatPendingSubmitter } from "@/lib/publish-request-labels";
 
 /**
  * Whether the current hub user may edit an installed pack's files.
@@ -77,11 +78,7 @@ export function packEditBlockReason(
     if (pack.pending_submitter_id && pack.pending_submitter_id === hubUser?.id) {
       return "Your publish request is under review.";
     }
-    const submitter = pack.pending_submitter_name
-      ? `${pack.pending_submitter_name}${pack.pending_submitter_id ? ` (@${pack.pending_submitter_id})` : ""}`
-      : pack.pending_submitter_id
-        ? `@${pack.pending_submitter_id}`
-        : "Another maintainer";
+    const submitter = formatPendingSubmitter(pack) ?? "Another maintainer";
     return `${submitter} has a pending publish request.`;
   }
   return canEditPack(pack, hubUser)

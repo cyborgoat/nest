@@ -49,6 +49,22 @@ flowchart TB
 | Admin console   | `apps/admin`               | Hub operations UI built separately and served by Hub at `/admin`                |
 | Examples        | `examples/knowledge-packs` | PyPI-style registry `{id}/{semver}/`; see [pack-registry.md](pack-registry.md) |
 
+### Desktop backend layout
+
+Under `apps/desktop/src-tauri/src`:
+
+| Module | Role |
+| ------ | ---- |
+| `hub/` | Hub HTTP client, local pack create/import/export, zip helpers (`StagingDir`) |
+| `commands/hub/` | Thin Tauri commands: auth, messages, source control, install/publish/merge |
+| `vault.rs` | Vault path safety and filesystem mutations |
+| `db.rs` | SQLite settings, sync state, chat persistence, FTS |
+| `agent.rs` / `agent_tools.rs` | Ask/Agent chat completion and tool loop |
+| `chat_events.rs` | Stream event types for the chat channel |
+| `retrieval.rs` / `indexer.rs` / `embeddings.rs` | Hybrid RAG and indexing |
+
+Frontend pack lifecycle (export/remove/rename), publish reconcile refresh, and approved-merge preview live in shared React hooks under `apps/desktop/src/hooks` and `lib/hub-query.ts` so Hub, Explorer, Messages, and Source Control stay consistent.
+
 ## Hub connectivity
 
 The desktop app uses the Hub URL configured under **Settings**. Account and Settings are separate pages opened from the user and gear icons anchored at the bottom of the far-left activity bar; Hub, Messages, and Chat remain in the top header. The Hub service listens on `HOST`/`PORT` from its `.env`; the desktop setting supplies the full base URL.

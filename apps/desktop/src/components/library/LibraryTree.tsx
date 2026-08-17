@@ -40,9 +40,9 @@ import { api } from "@/lib/api";
 import { appErrorMessage } from "@/lib/errors";
 import { useI18n } from "@/lib/i18n";
 import { canEditPack, isPackReviewLocked } from "@/lib/pack-permissions";
+import { usePackLifecycleMutations } from "@/hooks/use-pack-lifecycle";
 import {
   fileMutationInvalidations,
-  packMutationInvalidations,
   queryKeys,
 } from "@/lib/query-keys";
 import {
@@ -63,15 +63,21 @@ import {
   joinPath,
   parentDir,
 } from "@/lib/vault-paths";
+import { filterTree } from "@/components/library/filter-tree";
 import {
   DropTargetContext,
   ExplorerActionsContext,
   ExplorerFileStatusContext,
-  filterTree,
+  type NewEntryKind,
+} from "@/components/library/tree-contexts";
+import {
   GeneralExplorerMenuItems,
   PackSection,
-  type NewEntryKind,
 } from "@/components/library/TreeItem";
+import {
+  indexInstalledPacksById,
+  indexInstalledPacksByLocalPath,
+} from "@/lib/pack-index";
 import { useEditorStore } from "@/stores/editor";
 import { useUiStore } from "@/stores/ui";
 
@@ -119,6 +125,7 @@ export function LibraryTree({
   const openAccountTab = useUiStore((s) => s.openAccountTab);
   const setEditing = useEditorStore((s) => s.setEditing);
   const setDirty = useEditorStore((s) => s.setDirty);
+  const { exportPack, removePack, renamePack } = usePackLifecycleMutations();
   const { startTransfer, conflictDialog, applying: transferPending } =
     useVaultTransfer();
 
@@ -148,10 +155,9 @@ export function LibraryTree({
   const authenticated = hubAuthQuery.data?.authenticated ?? false;
 
   const byPath = useMemo(() => {
-    const map = new Map<string, InstalledPack>();
-    for (const p of installed) {
-      map.set(p.local_path, p);
-      map.set(p.pack_id, p);
+    const map = indexInstalledPacksByLocalPath(installed);
+    for (const [id, pack] of indexInstalledPacksById(installed)) {
+      map.set(id, pack);
     }
     return map;
   }, [installed]);
@@ -542,48 +548,6 @@ export function LibraryTree({
       toast.error("Could not update pack", { description: appErrorMessage(e) }),
   });
 
-  const exportPack = useMutation({
-    mutationFn: ({
-      packId,
-      destinationPath,
-    }: {
-      packId: string;
-      destinationPath: string;
-    }) => api.hubExportPack(packId, destinationPath),
-    onSuccess: () => toast.success(t("hub.packExported")),
-    onError: (e) =>
-      toast.error(t("hub.exportFailed"), { description: appErrorMessage(e) }),
-  });
-
-  const uninstallPack = useMutation({
-    mutationFn: (packId: string) => api.hubRemovePack(packId),
-    onSuccess: (_status, packId) => {
-      const localPath = byPath.get(packId)?.local_path ?? packId;
-      clearPathsUnder(localPath);
-      for (const key of packMutationInvalidations) {
-        void queryClient.invalidateQueries({ queryKey: key });
-      }
-      toast.success(t("hub.packRemoved"));
-    },
-    onError: (e) =>
-      toast.error(t("hub.removeFailed"), { description: appErrorMessage(e) }),
-  });
-
-  const renamePack = useMutation({
-    mutationFn: ({ packId, name }: { packId: string; name: string }) =>
-      api.hubRenamePack(packId, name),
-    onSuccess: (_data, vars) => {
-      toast.success("Pack renamed");
-      const oldLocalPath = byPath.get(vars.packId)?.local_path ?? vars.packId;
-      clearPathsUnder(oldLocalPath);
-      for (const key of packMutationInvalidations) {
-        void queryClient.invalidateQueries({ queryKey: key });
-      }
-    },
-    onError: (error: unknown) =>
-      toast.error(appErrorMessage(error, "Could not rename pack")),
-  });
-
   const handleExport = async (packId: string) => {
     const pack = byPath.get(packId);
     const destination = await save({
@@ -703,9 +667,9 @@ export function LibraryTree({
                       onExport={handleExport}
                       exportPending={exportPack.isPending}
                       onUninstallPack={(packId) =>
-                        uninstallPack.mutate(packId)
+                        removePack.mutate(packId)
                       }
-                      uninstallPending={uninstallPack.isPending}
+                      uninstallPending={removePack.isPending}
                       onRenamePack={(packId, name) =>
                         renamePack.mutate({ packId, name })
                       }
@@ -737,9 +701,9 @@ export function LibraryTree({
                       onExport={handleExport}
                       exportPending={exportPack.isPending}
                       onUninstallPack={(packId) =>
-                        uninstallPack.mutate(packId)
+                        removePack.mutate(packId)
                       }
-                      uninstallPending={uninstallPack.isPending}
+                      uninstallPending={removePack.isPending}
                       onRenamePack={(packId, name) =>
                         renamePack.mutate({ packId, name })
                       }

@@ -28,6 +28,11 @@ import {
 import { appErrorMessage } from "@/lib/errors";
 import { canEditPack, packEditBlockReason } from "@/lib/pack-permissions";
 import {
+  indexInstalledPacksById,
+  indexInstalledPacksByLocalPath,
+  packRootFromPath,
+} from "@/lib/pack-index";
+import {
   fileMutationInvalidations,
   packMutationInvalidations,
   queryKeys,
@@ -64,10 +69,9 @@ export function ExplorerPanel({
   const hubUser = hubAuthQuery.data?.user ?? null;
 
   const byPath = useMemo(() => {
-    const map = new Map<string, InstalledPack>();
-    for (const p of installed) {
-      map.set(p.local_path, p);
-      map.set(p.pack_id, p);
+    const map = indexInstalledPacksByLocalPath(installed);
+    for (const [id, pack] of indexInstalledPacksById(installed)) {
+      map.set(id, pack);
     }
     return map;
   }, [installed]);
@@ -93,7 +97,7 @@ export function ExplorerPanel({
     async (_folder: string, _paths: string[]) => {},
   );
   importIntoFolder.current = async (folder: string, paths: string[]) => {
-    const packRoot = folder.split("/")[0] ?? folder;
+    const packRoot = packRootFromPath(folder);
     const pack = byPath.get(packRoot);
     if (!pack || !canEditPack(pack, hubUser)) {
       toast.error("Cannot import here", {

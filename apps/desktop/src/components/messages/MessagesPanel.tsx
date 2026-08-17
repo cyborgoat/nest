@@ -4,7 +4,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import type { HubMessage, HubMessageKind, PackMergePreview } from "@nest/shared";
+import type { HubMessage, HubMessageKind } from "@nest/shared";
 import {
   Bell,
   Check,
@@ -40,6 +40,8 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
+import { usePreviewApprovedMerge } from "@/hooks/use-preview-approved-merge";
+import { refreshAfterPublishReconcile } from "@/lib/hub-query";
 import { appErrorMessage } from "@/lib/errors";
 import { queryKeys } from "@/lib/query-keys";
 import { useUiStore } from "@/stores/ui";
@@ -106,26 +108,10 @@ export function MessagesPanel() {
     queryFn: api.hubListInstalled,
   });
   const mergeApproved = useMergeApprovedPack();
-  const [mergePreview, setMergePreview] = useState<PackMergePreview | null>(null);
-  const previewMerge = async (message: HubMessage) => {
-    const input = mergeInputFor(message);
-    if (!input) return;
-    try {
-      setMergePreview(await api.hubPreviewApprovedMerge(input.packId, input.requestId));
-    } catch (error) {
-      toast.error("Could not prepare merge", {
-        description: error instanceof Error ? error.message : String(error),
-      });
-    }
-  };
+  const { preview: mergePreview, setPreview: setMergePreview, previewMerge } =
+    usePreviewApprovedMerge();
   const refresh = async () => {
-    const reconciled = await api.hubReconcilePublishRequests();
-    queryClient.setQueryData(queryKeys.installedPacks, reconciled);
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: queryKeys.messages }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.messageCount }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.allPackStatus }),
-    ]);
+    await refreshAfterPublishReconcile(queryClient);
   };
   useEffect(() => {
     if (auth.data?.authenticated) void refresh();
@@ -304,7 +290,11 @@ export function MessagesPanel() {
                       onView={() => setSelectedMessage(message)}
                       onMerge={
                         mergeInputFor(message)
-                          ? () => void previewMerge(message)
+                          ? () => {
+                              const input = mergeInputFor(message);
+                              if (input)
+                                void previewMerge(input.packId, input.requestId);
+                            }
                           : undefined
                       }
                       merging={mergeApproved.isPending}
@@ -331,7 +321,10 @@ export function MessagesPanel() {
         message={selectedMessage}
         onMerge={
           selectedMessage && mergeInputFor(selectedMessage)
-            ? () => void previewMerge(selectedMessage)
+            ? () => {
+                const input = mergeInputFor(selectedMessage);
+                if (input) void previewMerge(input.packId, input.requestId);
+              }
             : undefined
         }
         merging={mergeApproved.isPending}

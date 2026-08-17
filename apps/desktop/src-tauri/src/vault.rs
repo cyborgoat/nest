@@ -984,23 +984,26 @@ pub fn remove_pack(root: &Path, rel_path: &str) -> AppResult<()> {
     Ok(())
 }
 
+
+#[cfg(test)]
+pub(crate) fn test_temp_dir(label: &str) -> PathBuf {
+    std::env::temp_dir().join(format!("nest-{label}-{}", uuid::Uuid::new_v4()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::env;
 
     #[test]
     fn rejects_traversal() {
-        let dir = env::temp_dir().join("nest-vault-test");
-        let _ = fs::remove_dir_all(&dir);
+        let dir = test_temp_dir("vault-test");
         ensure_dir(&dir).unwrap();
         assert!(resolve_vault_path(&dir, "../etc/passwd").is_err());
     }
 
     #[test]
     fn resolve_missing_does_not_create_dirs() {
-        let dir = env::temp_dir().join("nest-vault-resolve-no-mkdir");
-        let _ = fs::remove_dir_all(&dir);
+        let dir = test_temp_dir("vault-resolve-no-mkdir");
         ensure_dir(&dir).unwrap();
         let resolved = resolve_vault_path(&dir, "gone/pack/note.md").unwrap();
         assert_eq!(resolved, dir.join("gone/pack/note.md"));
@@ -1010,8 +1013,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn list_tree_does_not_follow_a_symlink_cycle() {
-        let dir = env::temp_dir().join("nest-vault-symlink-cycle");
-        let _ = fs::remove_dir_all(&dir);
+        let dir = test_temp_dir("vault-symlink-cycle");
         ensure_dir(&dir).unwrap();
         fs::write(dir.join("note.md"), b"hello").unwrap();
         // A symlink back to the vault root: `build_tree` must never follow it
@@ -1025,8 +1027,7 @@ mod tests {
 
     #[test]
     fn list_tree_preserves_and_includes_empty_folders() {
-        let dir = env::temp_dir().join("nest-vault-list-empty-folders");
-        let _ = fs::remove_dir_all(&dir);
+        let dir = test_temp_dir("vault-list-empty-folders");
         let empty = dir.join("demo-pack").join("notes").join("drafts");
         ensure_dir(&empty).unwrap();
 
@@ -1044,8 +1045,7 @@ mod tests {
 
     #[test]
     fn read_image_data_url_encodes_known_image_types() {
-        let dir = env::temp_dir().join("nest-vault-image-ok");
-        let _ = fs::remove_dir_all(&dir);
+        let dir = test_temp_dir("vault-image-ok");
         ensure_dir(&dir).unwrap();
         fs::write(dir.join("pic.png"), [1, 2, 3, 4]).unwrap();
         let url = read_image_data_url(&dir, "pic.png").unwrap();
@@ -1054,8 +1054,7 @@ mod tests {
 
     #[test]
     fn read_image_data_url_rejects_non_image_extensions() {
-        let dir = env::temp_dir().join("nest-vault-image-bad-ext");
-        let _ = fs::remove_dir_all(&dir);
+        let dir = test_temp_dir("vault-image-bad-ext");
         ensure_dir(&dir).unwrap();
         fs::write(dir.join("secret.md"), b"not an image").unwrap();
         assert!(read_image_data_url(&dir, "secret.md").is_err());
@@ -1063,16 +1062,14 @@ mod tests {
 
     #[test]
     fn read_image_data_url_rejects_traversal() {
-        let dir = env::temp_dir().join("nest-vault-image-traversal");
-        let _ = fs::remove_dir_all(&dir);
+        let dir = test_temp_dir("vault-image-traversal");
         ensure_dir(&dir).unwrap();
         assert!(read_image_data_url(&dir, "../etc/passwd.png").is_err());
     }
 
     #[test]
     fn list_tree_includes_markdown_and_images_skips_junk() {
-        let dir = env::temp_dir().join("nest-vault-list-images");
-        let _ = fs::remove_dir_all(&dir);
+        let dir = test_temp_dir("vault-list-images");
         let pack = dir.join("demo-pack");
         ensure_dir(&pack.join("assets")).unwrap();
         fs::write(pack.join("readme.md"), b"# hi").unwrap();
@@ -1104,13 +1101,11 @@ mod tests {
 
     #[test]
     fn import_files_copies_images_with_unique_names() {
-        let dir = env::temp_dir().join("nest-vault-import-files");
-        let _ = fs::remove_dir_all(&dir);
+        let dir = test_temp_dir("vault-import-files");
         let pack = dir.join("pack");
         ensure_dir(&pack).unwrap();
 
-        let src_dir = env::temp_dir().join("nest-vault-import-src");
-        let _ = fs::remove_dir_all(&src_dir);
+        let src_dir = test_temp_dir("vault-import-src");
         ensure_dir(&src_dir).unwrap();
         let src = src_dir.join("photo.png");
         fs::write(&src, [9, 9, 9]).unwrap();
@@ -1138,8 +1133,7 @@ mod tests {
 
     #[test]
     fn write_file_creates_and_overwrites_markdown() {
-        let dir = env::temp_dir().join("nest-vault-write-file");
-        let _ = fs::remove_dir_all(&dir);
+        let dir = test_temp_dir("vault-write-file");
         ensure_dir(&dir).unwrap();
         write_file(&dir, "pack/notes.md", "# Hello").unwrap();
         assert_eq!(
@@ -1155,16 +1149,14 @@ mod tests {
 
     #[test]
     fn write_file_rejects_non_markdown() {
-        let dir = env::temp_dir().join("nest-vault-write-non-md");
-        let _ = fs::remove_dir_all(&dir);
+        let dir = test_temp_dir("vault-write-non-md");
         ensure_dir(&dir).unwrap();
         assert!(write_file(&dir, "pack/notes.txt", "hi").is_err());
     }
 
     #[test]
     fn create_file_fails_if_exists() {
-        let dir = env::temp_dir().join("nest-vault-create-file-exists");
-        let _ = fs::remove_dir_all(&dir);
+        let dir = test_temp_dir("vault-create-file-exists");
         ensure_dir(&dir.join("pack")).unwrap();
         fs::write(dir.join("pack/a.md"), "# A").unwrap();
         assert!(create_file(&dir, "pack/a.md", "# B").is_err());
@@ -1174,8 +1166,7 @@ mod tests {
 
     #[test]
     fn create_folder_fails_over_existing_file() {
-        let dir = env::temp_dir().join("nest-vault-create-folder-conflict");
-        let _ = fs::remove_dir_all(&dir);
+        let dir = test_temp_dir("vault-create-folder-conflict");
         ensure_dir(&dir.join("pack")).unwrap();
         fs::write(dir.join("pack/x"), "not a dir").unwrap();
         assert!(create_folder(&dir, "pack/x").is_err());
@@ -1185,8 +1176,7 @@ mod tests {
 
     #[test]
     fn delete_file_rejects_directories() {
-        let dir = env::temp_dir().join("nest-vault-delete-file-rejects-dir");
-        let _ = fs::remove_dir_all(&dir);
+        let dir = test_temp_dir("vault-delete-file-rejects-dir");
         ensure_dir(&dir.join("pack/sub")).unwrap();
         assert!(delete_file(&dir, "pack/sub").is_err());
         fs::write(dir.join("pack/a.md"), "# A").unwrap();
@@ -1196,8 +1186,7 @@ mod tests {
 
     #[test]
     fn delete_folder_rejects_pack_root() {
-        let dir = env::temp_dir().join("nest-vault-delete-folder-pack-root");
-        let _ = fs::remove_dir_all(&dir);
+        let dir = test_temp_dir("vault-delete-folder-pack-root");
         ensure_dir(&dir.join("pack")).unwrap();
         assert!(delete_folder(&dir, "pack").is_err());
         ensure_dir(&dir.join("pack/sub")).unwrap();
@@ -1207,8 +1196,7 @@ mod tests {
 
     #[test]
     fn rename_entry_rejects_pack_root_and_existing_target() {
-        let dir = env::temp_dir().join("nest-vault-rename-entry");
-        let _ = fs::remove_dir_all(&dir);
+        let dir = test_temp_dir("vault-rename-entry");
         ensure_dir(&dir.join("pack")).unwrap();
         assert!(rename_entry(&dir, "pack", "other").is_err());
         fs::write(dir.join("pack/a.md"), "# A").unwrap();
@@ -1221,8 +1209,7 @@ mod tests {
 
     #[test]
     fn rename_entry_moves_files_and_folders_between_packs() {
-        let dir = env::temp_dir().join("nest-vault-move-between-packs");
-        let _ = fs::remove_dir_all(&dir);
+        let dir = test_temp_dir("vault-move-between-packs");
         ensure_dir(&dir.join("source/docs/nested")).unwrap();
         ensure_dir(&dir.join("destination")).unwrap();
         fs::write(dir.join("source/note.md"), "# Note").unwrap();
@@ -1245,8 +1232,7 @@ mod tests {
 
     #[test]
     fn rename_entry_rejects_folder_descendant_without_creating_directories() {
-        let dir = env::temp_dir().join("nest-vault-move-folder-descendant");
-        let _ = fs::remove_dir_all(&dir);
+        let dir = test_temp_dir("vault-move-folder-descendant");
         ensure_dir(&dir.join("pack/docs")).unwrap();
         fs::write(dir.join("pack/docs/note.md"), "# Note").unwrap();
 
@@ -1257,8 +1243,8 @@ mod tests {
 
     #[test]
     fn copy_dir_recursive_keeps_only_pack_content() {
-        let src = env::temp_dir().join("nest-vault-copy-src");
-        let dst = env::temp_dir().join("nest-vault-copy-dst");
+        let src = test_temp_dir("vault-copy-src");
+        let dst = test_temp_dir("vault-copy-dst");
         let _ = fs::remove_dir_all(&src);
         let _ = fs::remove_dir_all(&dst);
         ensure_dir(&src.join("docs")).unwrap();
@@ -1284,8 +1270,8 @@ mod tests {
 
     #[test]
     fn external_folder_transfer_previews_and_skips_conflicting_files() {
-        let vault = env::temp_dir().join("nest-vault-transfer-copy");
-        let source = env::temp_dir().join("nest-vault-transfer-copy-source");
+        let vault = test_temp_dir("vault-transfer-copy");
+        let source = test_temp_dir("vault-transfer-copy-source");
         let _ = fs::remove_dir_all(&vault);
         let _ = fs::remove_dir_all(&source);
         ensure_dir(&vault.join("pack/docs")).unwrap();
@@ -1328,8 +1314,8 @@ mod tests {
 
     #[test]
     fn external_transfer_replaces_a_destination_type_mismatch() {
-        let vault = env::temp_dir().join("nest-vault-transfer-replace");
-        let source = env::temp_dir().join("nest-vault-transfer-replace-source");
+        let vault = test_temp_dir("vault-transfer-replace");
+        let source = test_temp_dir("vault-transfer-replace-source");
         let _ = fs::remove_dir_all(&vault);
         let _ = fs::remove_dir_all(&source);
         ensure_dir(&vault.join("pack/note.md")).unwrap();
@@ -1353,8 +1339,7 @@ mod tests {
 
     #[test]
     fn internal_batch_move_merges_folders_and_keeps_skipped_sources() {
-        let vault = env::temp_dir().join("nest-vault-transfer-move");
-        let _ = fs::remove_dir_all(&vault);
+        let vault = test_temp_dir("vault-transfer-move");
         ensure_dir(&vault.join("source/docs")).unwrap();
         ensure_dir(&vault.join("destination/docs")).unwrap();
         fs::write(vault.join("source/docs/conflict.md"), "source").unwrap();
@@ -1392,8 +1377,8 @@ mod tests {
 
     #[test]
     fn transfer_preserves_empty_external_folders() {
-        let vault = env::temp_dir().join("nest-vault-transfer-empty");
-        let source = env::temp_dir().join("nest-vault-transfer-empty-source");
+        let vault = test_temp_dir("vault-transfer-empty");
+        let source = test_temp_dir("vault-transfer-empty-source");
         let _ = fs::remove_dir_all(&vault);
         let _ = fs::remove_dir_all(&source);
         ensure_dir(&vault.join("pack")).unwrap();
@@ -1411,9 +1396,9 @@ mod tests {
 
     #[test]
     fn transfer_preview_detects_conflicts_within_the_incoming_batch() {
-        let vault = env::temp_dir().join("nest-vault-transfer-batch-conflict");
-        let first = env::temp_dir().join("nest-vault-transfer-batch-first");
-        let second = env::temp_dir().join("nest-vault-transfer-batch-second");
+        let vault = test_temp_dir("vault-transfer-batch-conflict");
+        let first = test_temp_dir("vault-transfer-batch-first");
+        let second = test_temp_dir("vault-transfer-batch-second");
         let _ = fs::remove_dir_all(&vault);
         let _ = fs::remove_dir_all(&first);
         let _ = fs::remove_dir_all(&second);
@@ -1447,8 +1432,7 @@ mod tests {
 
     #[test]
     fn external_transfer_skips_self_copies_and_normalizes_nested_sources() {
-        let vault = env::temp_dir().join("nest-vault-transfer-self-copy");
-        let _ = fs::remove_dir_all(&vault);
+        let vault = test_temp_dir("vault-transfer-self-copy");
         ensure_dir(&vault.join("pack/docs")).unwrap();
         fs::write(vault.join("pack/docs/note.md"), "keep").unwrap();
 

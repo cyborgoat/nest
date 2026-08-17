@@ -18,6 +18,7 @@ import {
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
+import { EMPTY_PACK_META } from "@/lib/empty-pack-meta";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -31,13 +32,6 @@ type Props = {
   ) => void;
   onCreateFromFolder: (sourcePath: string, metadata: KnowledgePackMeta) => void;
   importing?: boolean;
-};
-
-const EMPTY: KnowledgePackMeta = {
-  id: "",
-  name: "",
-  description: "",
-  version: "1.0.0",
 };
 
 function isZipPath(path: string) {
@@ -55,7 +49,7 @@ export function ImportPackDialog({
   const { t } = useI18n();
   const [mode, setMode] = useState<"choose" | "zip" | "folder">("choose");
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
-  const [metadata, setMetadata] = useState<KnowledgePackMeta>(EMPTY);
+  const [metadata, setMetadata] = useState<KnowledgePackMeta>(EMPTY_PACK_META);
   const [warning, setWarning] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -69,7 +63,7 @@ export function ImportPackDialog({
       directPickerOpened.current = false;
       setMode("choose");
       setSelectedPath(null);
-      setMetadata(EMPTY);
+      setMetadata(EMPTY_PACK_META);
       setWarning(null);
       setError(null);
       setDragging(false);
@@ -284,7 +278,7 @@ export function ImportPackDialog({
                   <Input
                     value={metadata.version}
                     onChange={(e) => update("version", e.target.value)}
-                    placeholder="1.0.0"
+                    placeholder="0.1.0"
                   />
                 </Field>
                 <div className="sm:col-span-2">
@@ -327,7 +321,7 @@ export function ImportPackDialog({
                 <Input
                   value={metadata.version}
                   onChange={(e) => update("version", e.target.value)}
-                  placeholder="1.0.0"
+                  placeholder="0.1.0"
                 />
               </Field>
             </div>

@@ -3,7 +3,7 @@
 use crate::agent_tools::AgentToolContext;
 use crate::db::{self, AppSettings, Citation};
 use crate::error::{AppError, AppResult};
-use crate::llm::ChatStreamEvent;
+use crate::chat_events::ChatStreamEvent;
 use crate::retrieval::{
     self, agent_preamble, format_active_packs_for_prompt, format_citations_for_prompt,
     DEFAULT_TOP_K,

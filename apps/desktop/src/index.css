@@ -45,11 +45,6 @@
   --radius: 0.5rem;
   /* markdown syntax highlighting */
   --syntax-keyword: #52525b;
-  --syntax-string: #64748b;
-  --syntax-number: #71717a;
-  --syntax-comment: #8a8a93;
-  --syntax-title: #27272a;
-  --syntax-variable: #b42318;
   /* markdown source tokens */
   --source-heading: #2563a8;
   --source-emphasis: #be385d;

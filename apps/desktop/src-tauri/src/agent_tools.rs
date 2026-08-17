@@ -2,7 +2,7 @@
 
 use crate::db::{self, InstalledPack, NewChatFileChange};
 use crate::error::{AppError, AppResult};
-use crate::llm::ChatStreamEvent;
+use crate::chat_events::ChatStreamEvent;
 use crate::state::SharedState;
 use crate::vault;
 use parking_lot::Mutex;
@@ -118,12 +118,9 @@ impl AgentToolContext {
         }
         ensure_no_symlink_components(&self.state.vault_path(), path)?;
         let pack = self.installed_pack_for_path(path)?;
-        if pack.publish_review_status.as_deref() == Some("pending") {
-            return Err(AppError::msg(format!(
-                "{} is locked while its publish request is under review",
-                pack.name
-            )));
-        }
+        // Shared review lock with vault/hub file commands; agent additionally
+        // enforces origin/owner below (stricter than vault writes).
+        crate::commands::ensure_pack_not_review_locked(&pack)?;
         let user = self
             .state
             .hub_auth
