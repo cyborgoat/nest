@@ -25,8 +25,9 @@ knowledge packs. Installed packs live on your computer; an optional team
 6. [Import from a ZIP](guides/import-from-zip.md)
 7. [Install from Hub](guides/import-from-hub.md)
 8. [Editing and Source Control](guides/editing-and-source-control.md)
-9. [Chat and `@` references](guides/chat-and-references.md)
-10. [Exporting, publishing, and messages](guides/publishing-and-messages.md)
+9. [Agents](guides/agents.md)
+10. [Chat and `@` references](guides/chat-and-references.md)
+11. [Exporting, publishing, and messages](guides/publishing-and-messages.md)
 
 This pack installs automatically on first launch. You can remove it like any
 other pack — Nest will not reinstall it once you remove it.

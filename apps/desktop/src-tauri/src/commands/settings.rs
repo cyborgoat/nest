@@ -149,6 +149,10 @@ pub fn settings_change_knowledge_dir(
     knowledge_dir: String,
     mode: VaultChangeMode,
 ) -> AppResult<VaultChangeResult> {
+    let _slot = state.inner().begin_operation(
+        crate::state::OperationKind::VaultSwitch,
+        knowledge_dir.trim().to_string(),
+    )?;
     let current = state.vault_path();
     let target = resolve_vault_change_target(state.inner(), &knowledge_dir)?;
     validate_vault_change(&current, &target)?;
@@ -198,12 +202,13 @@ pub fn settings_change_knowledge_dir(
     };
     settings.knowledge_dir = knowledge_dir.trim().to_string();
     settings.resolved_knowledge_dir = target.display().to_string();
+    let general = db::GeneralSettingsUpdate::from(&settings);
     let mut cleanup_failures = Vec::new();
     if let Err(error) = (|| -> AppResult<()> {
         {
             let mut conn = state.db.lock();
             let transaction = conn.transaction()?;
-            db::save_settings(&transaction, &settings)?;
+            db::save_general_settings(&transaction, &general)?;
             if matches!(mode, VaultChangeMode::DeleteAndSeedDefaults) {
                 for pack in &all_installed {
                     db::purge_path_data(&transaction, &pack.local_path)?;
@@ -254,7 +259,7 @@ pub fn settings_change_knowledge_dir(
 #[tauri::command]
 pub async fn settings_set(
     state: State<'_, SharedState>,
-    mut settings: AppSettings,
+    mut settings: db::GeneralSettingsUpdate,
 ) -> AppResult<()> {
     settings.normalize_llm_configuration();
     settings.knowledge_dir = settings.knowledge_dir.trim().to_string();
@@ -289,11 +294,9 @@ pub async fn settings_set(
         ));
     }
 
-    settings.resolved_knowledge_dir = resolved.display().to_string();
-
     {
         let conn = state.db.lock();
-        db::save_settings(&conn, &settings)?;
+        db::save_general_settings(&conn, &settings)?;
     }
 
     Ok(())

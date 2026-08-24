@@ -32,12 +32,22 @@ function Change({ change, onReview }: { change: ChatFileChangeSummary; onReview?
   const rows = detail.data
     ? buildSideBySideRows(detail.data.old_content ?? "", detail.data.new_content ?? "")
     : [];
+  const rebased = detail.data?.rebase_count ? detail.data.rebase_count > 0 : false;
   return (
     <div className="overflow-hidden rounded-md bg-background/80">
       <button type="button" onClick={() => setOpen(!open)} className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-xs hover:bg-muted/60">
         <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-medium", change.operation === "created" ? "bg-success/15 text-success" : change.operation === "deleted" ? "bg-destructive/15 text-destructive" : "bg-info/15 text-info")}>{change.operation}</span>
         <span className="min-w-0 flex-1 truncate font-mono">{change.path}</span>
-        <span className="shrink-0 text-[10px] capitalize text-muted-foreground">{change.status}</span>
+        {rebased && (
+          <span className="shrink-0 rounded bg-warning/15 px-1 py-0.5 text-[10px] font-medium text-warning">Rebased</span>
+        )}
+        {change.status === "conflicted" && (
+          <span className="shrink-0 rounded bg-destructive/15 px-1 py-0.5 text-[10px] font-medium text-destructive">Conflicted</span>
+        )}
+        {change.status === "resolved_external" && (
+          <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-[10px] font-medium text-muted-foreground">Resolved externally</span>
+        )}
+        <span className="shrink-0 text-[10px] capitalize text-muted-foreground">{change.status === "resolved_external" ? "resolved" : change.status}</span>
         <ChevronDown className={cn("size-3.5 transition-transform", open && "rotate-180")} />
       </button>
       {open && (
@@ -54,6 +64,11 @@ function Change({ change, onReview }: { change: ChatFileChangeSummary; onReview?
         <div className="border-t border-border/60 p-1.5 text-right">
           <button type="button" onClick={() => onReview(change.path)} className="rounded-md bg-primary px-2 py-1 text-[11px] font-medium text-primary-foreground hover:bg-primary/90">Review in editor</button>
         </div>
+      )}
+      {change.status === "conflicted" && (
+        <p className="border-t border-border/60 px-2 py-1.5 text-[10px] text-muted-foreground">
+          This file changed externally in an overlapping way. The proposal cannot be approved — reject it or start a new agent turn.
+        </p>
       )}
     </div>
   );

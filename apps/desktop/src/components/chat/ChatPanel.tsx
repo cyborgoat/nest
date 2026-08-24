@@ -1,10 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { ChatMessage, ChatMode, ChatSession, Citation } from "@nest/shared";
+import type { AppSettings, ChatMessage, ChatMode, ChatSession, Citation } from "@nest/shared";
 import {
   MessageScroller,
   useMessageScroller,
 } from "@shadcn/react/message-scroller";
-import { AlertCircle, Check, ChevronDown, FilePenLine, Lightbulb, Loader2, X } from "lucide-react";
+import { AlertCircle, Check, ChevronDown, FilePenLine, Info, Lightbulb, Loader2, LoaderCircle, X, XCircle } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   AgentStatusIndicator,
@@ -15,6 +15,12 @@ import { ChatFileChanges } from "@/components/chat/ChatFileChanges";
 import { MentionComposer, type MentionRef } from "@/components/chat/MentionComposer";
 import { renderWithMentions } from "@/components/chat/mention-pill";
 import { collectMentionCandidates } from "@/lib/tree-mentions";
+import { claudeBackendNotice, claudeComposerGate } from "@/lib/claude-composer";
+import {
+  capsuleFromModelSelection,
+  deriveCapsules,
+  modelSelectionFromCapsule,
+} from "@/lib/chat-selection";
 import { MarkdownBody } from "@/components/markdown/MarkdownBody";
 import {
   Accordion,
@@ -61,6 +67,13 @@ export function ChatPanel() {
   const [chatError, setChatError] = useState<string | null>(null);
   const [isStopping, setIsStopping] = useState(false);
   const [completedTurn, setCompletedTurn] = useState(0);
+  const [pendingDraft, setPendingDraft] = useState<{
+    text: string;
+    refs: MentionRef[];
+  } | null>(null);
+  const composerDraftRef = useRef<{ text: string; refs: MentionRef[] } | null>(
+    null,
+  );
 
   const isGeneratingHere = isSending && pendingSessionId === sessionId;
 
@@ -142,16 +155,219 @@ export function ChatPanel() {
   });
 
   const sessions: ChatSession[] = sessionsQuery.data ?? [];
-  const mode: ChatMode = sessions.find((session) => session.id === sessionId)?.mode ?? "ask";
+  const currentSession = sessions.find((session) => session.id === sessionId);
+  const mode: ChatMode = currentSession?.mode ?? "ask";
+
+  const claudeConnectionQuery = useQuery({
+    queryKey: queryKeys.claudeConnection,
+    queryFn: api.claudeConnectionStatus,
+  });
+  const claudeStatus = claudeConnectionQuery.data?.status ?? null;
+  const descriptorsQuery = useQuery({
+    queryKey: queryKeys.chatBackendDescriptors,
+    queryFn: api.chatBackendDescriptors,
+    refetchInterval: 1000,
+  });
+  const operationQuery = useQuery({
+    queryKey: queryKeys.appOperation,
+    queryFn: api.appOperationStatus,
+    refetchInterval: 500,
+  });
+
+  const activeBackendId: string =
+    currentSession?.backend ?? currentSession?.selected_backend_id ?? "nest";
+
+  const capsules = deriveCapsules({
+    descriptors: descriptorsQuery.data ?? [],
+    activeBackendId,
+    boundBackend: currentSession?.backend ?? null,
+  });
+  const activeModelId = capsuleFromModelSelection(
+    currentSession?.selected_model ?? { kind: "default", value: null },
+  );
+
+  const applySelection = (
+    patch: {
+      backendId?: string;
+      modelKind?: "default" | "explicit";
+      modelValue?: string | null;
+      mode?: ChatMode;
+    },
+    previousState: { text: string; refs: MentionRef[] } | null = null,
+  ) => {
+    if (!sessionId || isSending) return;
+    const revision = currentSession?.selection_revision ?? 0;
+    if (patch.backendId && currentSession?.backend != null) {
+      const draft = previousState ?? null;
+      void api
+        .chatCreateSession("New chat")
+        .then((created) => {
+          const createdRevision = created.selection_revision;
+          return api
+            .chatUpdateSelection(
+              created.id,
+              createdRevision,
+              patch.backendId
+                ? {
+                    backendId: patch.backendId,
+                    modelKind: patch.modelKind,
+                    modelValue: patch.modelValue,
+                    mode: patch.mode,
+                  }
+                : patch,
+            )
+            .then((updated) => {
+              queryClient.setQueryData<ChatSession[]>(
+                queryKeys.chatSessions,
+                (current) => [updated, ...(current ?? [])],
+              );
+              openChatTab(updated.id);
+              if (draft) {
+                setPendingDraft(draft);
+              }
+            });
+        })
+        .catch((e: unknown) =>
+          setStatusMessage(
+            appErrorMessage(e, "Could not start a new chat"),
+          ),
+        );
+      return;
+    }
+    void api
+      .chatUpdateSelection(sessionId, revision, patch)
+      .then((updated) => {
+        queryClient.setQueryData<ChatSession[]>(
+          queryKeys.chatSessions,
+          (current) =>
+            current?.map((session) =>
+              session.id === updated.id ? updated : session,
+            ),
+        );
+      })
+      .catch((e: unknown) => {
+        const message = e instanceof Error ? e.message : String(e);
+        if (message.includes("chat_selection_stale")) {
+          void queryClient.invalidateQueries({
+            queryKey: queryKeys.chatSessions,
+          });
+          setStatusMessage(
+            "Chat selection changed elsewhere. Review and send again.",
+          );
+          return;
+        }
+        setStatusMessage(appErrorMessage(e, "Could not update selection"));
+      });
+  };
 
   const changeMode = (nextMode: ChatMode) => {
-    if (!sessionId || isSending || nextMode === mode) return;
-    void api.chatUpdateSession(sessionId, { mode: nextMode }).then((updated) => {
-      queryClient.setQueryData<ChatSession[]>(queryKeys.chatSessions, (current) =>
-        current?.map((session) => session.id === updated.id ? updated : session),
-      );
-    }).catch((error: unknown) => setStatusMessage(appErrorMessage(error, "Could not change chat mode")));
+    if (isSending || nextMode === mode) return;
+    applySelection({ mode: nextMode });
   };
+
+  const changeBackend = (backendId: string) => {
+    if (backendId === activeBackendId) return;
+    if (currentSession?.backend != null) {
+      applySelection(
+        {
+          backendId,
+          modelKind: "default",
+          modelValue: null,
+        },
+        composerDraftRef.current
+          ? { text: composerDraftRef.current.text, refs: composerDraftRef.current.refs }
+          : null,
+      );
+      return;
+    }
+    applySelection({
+      backendId,
+      modelKind: "default",
+      modelValue: null,
+    });
+  };
+
+  const changeModel = (modelId: string) => {
+    if (modelId === activeModelId) return;
+    const selection = modelSelectionFromCapsule(modelId);
+    applySelection({
+      modelKind: selection.kind,
+      modelValue: selection.value,
+    });
+  };
+
+  const composerGate = claudeComposerGate(
+    currentSession ? { backend: currentSession.backend, backend_status: currentSession.backend_status } : null,
+    claudeStatus,
+  );
+  const activeDescriptor = descriptorsQuery.data?.find(
+    (descriptor) => descriptor.id === activeBackendId,
+  );
+  const descriptorBlocked =
+    activeDescriptor != null &&
+    (activeDescriptor.availability === "unavailable" ||
+      !activeDescriptor.enabled);
+  const activeOperation = operationQuery.data;
+  const composerBlocked: string | null = isSending
+    ? null
+    : activeOperation
+      ? `${activeOperation.kind.replace(/_/g, " ")} is running`
+      : descriptorBlocked
+        ? (activeDescriptor.message ??
+          activeDescriptor.reason_code ??
+          "Selected backend is unavailable")
+        : composerGate.reason;
+  const backendNotice = claudeBackendNotice(
+    currentSession ? { backend: currentSession.backend, backend_status: currentSession.backend_status } : null,
+    claudeStatus,
+  );
+
+  const reconnectClaude = useMutation({
+    mutationFn: () => {
+      const cliPath =
+        claudeConnectionQuery.data?.configured_cli_path ?? "";
+      return api.claudeTestConnection(cliPath);
+    },
+    onSuccess: (report) => {
+      if (report.status === "connected") {
+        const settings = queryClient.getQueryData<AppSettings>(
+          queryKeys.settings,
+        );
+        void api
+          .claudeSaveSettings({
+            enabled: true,
+            cliPath:
+              report.configured_cli_path ||
+              settings?.claude_cli_path ||
+              "",
+            customModels: settings?.claude_custom_models ?? "",
+          })
+          .then(() => {
+            void queryClient.invalidateQueries({
+              queryKey: queryKeys.claudeConnection,
+            });
+            void queryClient.invalidateQueries({
+              queryKey: queryKeys.settings,
+            });
+          })
+          .catch((e: unknown) =>
+            setStatusMessage(
+              appErrorMessage(e, "Could not save the reconnected Claude settings"),
+            ),
+          );
+      } else {
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.claudeConnection,
+        });
+        setStatusMessage(
+          report.message ?? "Claude reconnection failed",
+        );
+      }
+    },
+    onError: (e: unknown) => {
+      setStatusMessage(appErrorMessage(e, "Could not reconnect Claude"));
+    },
+  });
 
   // Called when navigating away from the current tab (new chat, switch, close).
   // Only clears streaming artifacts when nothing is in flight — an in-flight
@@ -244,15 +460,15 @@ export function ChatPanel() {
   const send = useMutation({
     mutationFn: async ({
       sessionId: targetSessionId,
+      expectedRevision,
       query,
       focusPaths,
-      mode,
       protectedPaths,
     }: {
       sessionId: string;
+      expectedRevision: number;
       query: string;
       focusPaths: string[];
-      mode: ChatMode;
       protectedPaths: string[];
     }) => {
       const eventName = `chat-stream-${Date.now()}`;
@@ -262,6 +478,28 @@ export function ChatPanel() {
         (event: ChatStreamEvent) => {
           if (event.type === "reading") {
             setAgentActivity({ kind: "reading", path: event.path });
+          } else if (event.type === "tool_activity") {
+            if (event.done && !event.label) {
+              setLiveFileActivities((current) =>
+                current.map((item) => ({ ...item, staged: true })),
+              );
+              setAgentActivity((prev) =>
+                prev?.kind === "reading" ? prev : { kind: "generating" },
+              );
+              return;
+            }
+            const tool = event.label.replace(/^mcp__nest__/, "");
+            setAgentActivity((prev) =>
+              prev?.kind === "reading" ? prev : { kind: "generating" },
+            );
+            setLiveFileActivities((current) => {
+              const path = event.target ?? event.label;
+              const operation = tool;
+              return [
+                ...current.filter((item) => item.path !== path),
+                { path, operation, staged: event.done ?? false },
+              ];
+            });
           } else if (event.type === "file_editing") {
             setAgentActivity({ kind: "editing", path: event.path });
             setLiveFileActivities((current) => [
@@ -291,12 +529,19 @@ export function ChatPanel() {
       );
 
       try {
-        return await api.chatSend(targetSessionId, query, focusPaths, eventName, mode, protectedPaths);
+        return await api.chatSend(
+          targetSessionId,
+          expectedRevision,
+          query,
+          focusPaths,
+          eventName,
+          protectedPaths,
+        );
       } finally {
         unlisten();
       }
     },
-    onMutate: ({ sessionId: targetSessionId, query, mode }) => {
+    onMutate: ({ sessionId: targetSessionId, query }) => {
       setChatError(null);
       setPendingUser(query);
       setPendingSessionId(targetSessionId);
@@ -347,6 +592,21 @@ export function ChatPanel() {
     },
     onError: (error: unknown, vars) => {
       const message = appErrorMessage(error, "Chat request failed");
+      if (message.includes("chat_selection_stale")) {
+        setIsSending(false);
+        setIsStopping(false);
+        clearStream();
+        setPendingUser(null);
+        setAgentActivity(null);
+        setLiveFileActivities([]);
+        setPendingSessionId(null);
+        setAgentRunActive(false);
+        void queryClient.invalidateQueries({ queryKey: queryKeys.chatSessions });
+        setStatusMessage(
+          "Chat selection changed elsewhere. Review and send again.",
+        );
+        return;
+      }
       if (message.toLowerCase().includes("cancelled")) {
         setIsSending(false);
         setIsStopping(false);
@@ -359,6 +619,7 @@ export function ChatPanel() {
         void queryClient.invalidateQueries({
           queryKey: queryKeys.chatMessages(vars.sessionId),
         });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.chatSessions });
         return;
       }
       setChatError(message);
@@ -371,6 +632,10 @@ export function ChatPanel() {
       setLiveFileActivities([]);
       setPendingSessionId(null);
       setAgentRunActive(false);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.chatSessions });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.claudeConnection,
+      });
     },
   });
 
@@ -409,14 +674,11 @@ export function ChatPanel() {
                 <UserBubble content={msg.content} mentions={mentionByName} />
               ) : (
                 <AssistantBubble>
-                  {msg.thinking && (
-                    <div className="mb-3">
-                      <ThinkingDisclosure
-                        content={msg.thinking}
-                        seconds={msg.thinking_seconds}
-                      />
-                    </div>
-                  )}
+                  <TurnDetails
+                    turnId={msg.turn_id}
+                    thinking={msg.thinking}
+                    thinkingSeconds={msg.thinking_seconds}
+                  />
                   <MarkdownBody className={bubble}>{msg.content}</MarkdownBody>
                   {msg.file_changes && <ChatFileChanges changes={msg.file_changes} onReview={(path) => {
                     openFileTab(path, { preview: false });
@@ -514,22 +776,82 @@ export function ChatPanel() {
       </MessageScroller.Provider>
 
       <div className="shrink-0 px-3 pb-3 pt-4">
+        {composerBlocked && (
+          <div className="mb-2 flex items-center justify-between gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+            <span className="flex min-w-0 items-center gap-1.5">
+              <AlertCircle className="size-3.5 shrink-0" />
+              {composerBlocked}
+            </span>
+            {composerGate.reconnectable && (
+              <button
+                type="button"
+                className="flex shrink-0 items-center gap-1 font-medium text-primary hover:underline disabled:opacity-60"
+                disabled={reconnectClaude.isPending}
+                onClick={() => reconnectClaude.mutate()}
+              >
+                {reconnectClaude.isPending && (
+                  <LoaderCircle className="size-3.5 animate-spin" />
+                )}
+                Reconnect
+              </button>
+            )}
+          </div>
+        )}
+        {!composerBlocked && backendNotice && (
+          <p className="mb-2 flex items-center justify-between gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+            <span className="flex items-center gap-1.5">
+              <Info className="size-3.5 shrink-0" />
+              {backendNotice}
+            </span>
+            <button
+              type="button"
+              className="shrink-0 font-medium text-primary hover:underline"
+              onClick={() => {
+                void api.chatCreateSession().then((session) => {
+                  queryClient.setQueryData<ChatSession[]>(
+                    queryKeys.chatSessions,
+                    (current) => [session, ...(current ?? [])],
+                  );
+                  openChatTab(session.id);
+                }).catch((e: unknown) =>
+                  setStatusMessage(appErrorMessage(e, "Could not start a new chat")),
+                );
+              }}
+            >
+              New chat
+            </button>
+          </p>
+        )}
         <MentionComposer
           candidates={mentionCandidates}
           isGenerating={isGeneratingHere}
-          canSend={!!sessionId && !isSending}
+          controlsDisabled={activeOperation != null}
+          canSend={!!sessionId && !isSending && !composerBlocked}
           onSend={(query, focusPaths) => {
             if (!sessionId) return;
             send.mutate({
               sessionId,
+              expectedRevision: currentSession?.selection_revision ?? 0,
               query,
               focusPaths,
-              mode,
               protectedPaths: Array.from(useEditorStore.getState().editingPaths),
             });
           }}
           mode={mode}
           onModeChange={changeMode}
+          backends={capsules.backends}
+          models={capsules.models}
+          modes={capsules.modes}
+          activeBackendId={activeBackendId}
+          activeModelId={activeModelId}
+          canChangeBackend={capsules.canChangeBackend}
+          onBackendChange={changeBackend}
+          onModelChange={changeModel}
+          draft={pendingDraft}
+          onDraftConsumed={() => setPendingDraft(null)}
+          onDraftChange={(draft) => {
+            composerDraftRef.current = draft;
+          }}
           onStop={() => {
             if (isStopping) return;
             setIsStopping(true);
@@ -545,17 +867,115 @@ export function ChatPanel() {
   );
 }
 
+function TurnDetails({
+  turnId,
+  thinking,
+  thinkingSeconds,
+}: {
+  turnId?: string | null;
+  thinking?: string;
+  thinkingSeconds?: number;
+}) {
+  const [open, setOpen] = useState(false);
+  const activitiesQuery = useQuery({
+    queryKey: ["turn-activities", turnId ?? ""],
+    queryFn: () => api.chatListTurnActivities(turnId!),
+    enabled: !!turnId,
+  });
+  const activities = activitiesQuery.data ?? [];
+  const hasThinking = !!thinking?.trim();
+  if (!hasThinking && activities.length === 0) return null;
+
+  const labelParts: string[] = [];
+  if (hasThinking) {
+    labelParts.push(
+      `Thought for ${(thinkingSeconds ?? 0).toFixed(1)} seconds`,
+    );
+  }
+  if (activities.length > 0) {
+    labelParts.push(
+      `${activities.length} tool ${activities.length === 1 ? "call" : "calls"}`,
+    );
+  }
+
+  return (
+    <div className="mb-3 border-t border-border/60 pt-2">
+      <button
+        type="button"
+        className="flex w-full items-center gap-1.5 text-left text-xs text-muted-foreground hover:text-foreground"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+      >
+        <Lightbulb className="size-3.5" />
+        <span>{labelParts.join(" · ")}</span>
+        <ChevronDown className={cn("ml-auto size-3.5 transition-transform", open && "rotate-180")} />
+      </button>
+      {open && (
+        <div className="mt-2 space-y-2">
+          {activities.length > 0 && (
+            <div className="space-y-1 rounded-md bg-muted/45 px-2 py-1.5 text-xs leading-relaxed">
+              {activities.map((activity) => (
+                <div
+                  key={activity.id}
+                  className="flex min-w-0 items-center gap-2"
+                >
+                  {activity.status === "succeeded" ? (
+                    <Check className="size-3.5 shrink-0 text-success" />
+                  ) : activity.status === "running" ? (
+                    <Loader2 className="size-3.5 shrink-0 animate-spin text-primary" />
+                  ) : (
+                    <XCircle className="size-3.5 shrink-0 text-destructive" />
+                  )}
+                  <span className="shrink-0 font-mono">
+                    {activity.label.replace(/^mcp__nest__/, "")}
+                  </span>
+                  {activity.target && (
+                    <span className="min-w-0 flex-1 truncate font-mono text-muted-foreground">
+                      {activity.target}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+          {hasThinking && (
+            <pre className="max-h-40 overflow-y-auto whitespace-pre-wrap rounded-md bg-background/60 p-2 text-xs leading-relaxed text-muted-foreground">
+              {thinking}
+            </pre>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function LiveFileActivities({ activities }: { activities: Array<{ path: string; operation: string; staged: boolean }> }) {
   return (
     <div className="mb-3 space-y-1 rounded-md bg-muted/45 p-2 text-xs">
-      {activities.map((activity) => (
-        <div key={activity.path} className="flex min-w-0 items-center gap-2">
-          {activity.staged ? <Check className="size-3.5 shrink-0 text-success" /> : <Loader2 className="size-3.5 shrink-0 animate-spin text-primary" />}
-          <FilePenLine className="size-3.5 shrink-0 text-muted-foreground" />
-          <span className="min-w-0 flex-1 truncate font-mono">{activity.path}</span>
-          <span className="shrink-0 capitalize text-muted-foreground">{activity.staged ? "staged" : activity.operation}</span>
-        </div>
-      ))}
+      {activities.map((activity) => {
+        const isToolCall = activity.operation.startsWith("knowledge_");
+        return (
+          <div key={activity.path} className="flex min-w-0 items-center gap-2">
+            {activity.staged ? <Check className="size-3.5 shrink-0 text-success" /> : <Loader2 className="size-3.5 shrink-0 animate-spin text-primary" />}
+            {isToolCall ? (
+              <>
+                <span className="shrink-0 font-mono">{activity.operation}</span>
+                <span className="min-w-0 flex-1 truncate font-mono text-muted-foreground">{activity.path}</span>
+              </>
+            ) : (
+              <>
+                <FilePenLine className="size-3.5 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1 truncate font-mono">{activity.path}</span>
+              </>
+            )}
+            <span className="shrink-0 capitalize text-muted-foreground">
+              {isToolCall
+                ? (activity.staged ? "done" : "running")
+                : (activity.staged ? "staged" : activity.operation)}
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -632,7 +1052,7 @@ function ThinkingDisclosure({
         <ChevronDown className={cn("ml-auto size-3.5 transition-transform", open && "rotate-180")} />
       </button>
       {open && (
-        <pre className="mt-2 h-40 overflow-y-auto whitespace-pre-wrap rounded-md bg-background/60 p-2 text-xs leading-relaxed text-muted-foreground">
+        <pre className="mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap rounded-md bg-background/60 p-2 text-xs leading-relaxed text-muted-foreground">
           {content}
         </pre>
       )}

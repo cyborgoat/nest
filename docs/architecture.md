@@ -43,7 +43,7 @@ flowchart TB
 | Piece           | Path                       | Role                                                                           |
 | --------------- | -------------------------- | ------------------------------------------------------------------------------ |
 | Desktop UI      | `apps/desktop/src`         | Library, Hub, Messages, Settings, Chat                                         |
-| Desktop backend | `apps/desktop/src-tauri`   | Vault I/O, index, RAG, LLM, sessions                                           |
+| Desktop backend | `apps/desktop/src-tauri`   | Vault I/O, index, RAG, LLM, sessions, Claude Agent, loopback MCP               |
 | Shared types    | `packages/shared`          | Canonical snake_case wire contracts shared by the TypeScript applications      |
 | Hub service     | `apps/hub`                 | Accounts, review workflow, access control, pack catalog, and ZIP download       |
 | Admin console   | `apps/admin`               | Hub operations UI built separately and served by Hub at `/admin`                |
@@ -167,8 +167,33 @@ Hub accounts, reviews, access grants, audits, and Hub messages live in the Hub's
 ## Streaming chat
 
 1. Frontend listens to a Tauri event channel (`chat-stream-*`).
-2. Backend emits reading / file-editing / file-staged / generating / token / done / error events.
+2. Backend emits reading / file-editing / file-staged / tool-activity / generating / token / done / error events.
 3. Token text is buffered and flushed **once per animation frame** so React does not re-render on every token.
 4. On success, the assistant message is seeded into the React Query cache, then the stream buffer is cleared (no per-word motion trees).
 
 LLM session titles generate in the background after the first reply so they do not block returning the assistant message.
+
+## Claude Agent backend
+
+Sessions bind immutably to a backend (`nest` or `claude`) on first send; see [Claude Agent](./claude-agent.md) for the user-facing behavior.
+
+```text
+Chat Runtime ─┬─► Nest adapter (agent.rs, Rig)
+              └─► Claude adapter (claude_cli.rs, one process per turn)
+                        │  --mcp-config + --append-system-prompt + --model
+                        ▼
+                loopback MCP server (claude_mcp.rs, port 127.0.0.1:0)
+                        │  bearer credential + active-turn lease
+                        ▼
+                Knowledge Workspace (knowledge_workspace.rs)
+                        │  shared with the Nest adapter — single permission,
+                        │  staging, and limits implementation
+                        ▼
+                Vault + proposals + tool-activity records
+```
+
+- `knowledge_workspace.rs` is the protocol-agnostic core: capability catalog (six `knowledge.*` tools), effective view, staging, and business error codes. The Rig tools (`agent_tools.rs`) and the MCP tools are thin adapters over it.
+- `knowledge_review.rs` owns proposal approval with an atomic claim state machine (`pending → applying → approved/failed`) and rollback.
+- The MCP server binds loopback only, authenticates a per-turn bearer credential, limits request/response size, and disappears when the turn ends. Ask turns pass `--strict-mcp-config` and preauthorize only the three read-only tools; Agent turns preauthorize all six.
+- Tool activity is persisted per turn (`chat_turns`, `chat_tool_activities`) and rendered in history; references come from the knowledge tools actually invoked (D15 rule), never from model-reported paths.
+- Save and connect runs a six-tool probe (`connection_probe.rs`) against a temporary pack to verify the full chain.

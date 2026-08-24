@@ -1,7 +1,7 @@
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { PackProject, TreeNode } from "@nest/shared";
 import { Bell, Cloud, MessageSquare } from "lucide-react";
-import { useEffect, useMemo, useRef, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { usePanelRef } from "react-resizable-panels";
 import { ChatPanel } from "@/components/chat/ChatPanel";
@@ -434,6 +434,8 @@ export default function App() {
           </ResizablePanelGroup>
         </div>
 
+        <WorkspaceHealthBanner />
+
         <footer className="flex items-center justify-between border-t border-border/50 bg-panel/90 px-4 py-1.5 text-[11px] text-muted-foreground">
           <span>
             {shell.index}: {indexQuery.data?.indexed_files ?? 0} {shell.files} /{" "}
@@ -450,6 +452,51 @@ export default function App() {
         <Toaster position="bottom-right" closeButton />
       </div>
     </I18nProvider>
+  );
+}
+
+function WorkspaceHealthBanner() {
+  const [reindexing, setReindexing] = useState(false);
+  const queryClient = useQueryClient();
+  const healthQuery = useQuery({
+    queryKey: queryKeys.workspaceHealth,
+    queryFn: api.workspaceHealth,
+    refetchInterval: 30_000,
+  });
+  const operationQuery = useQuery({
+    queryKey: queryKeys.appOperation,
+    queryFn: api.appOperationStatus,
+    refetchInterval: 500,
+  });
+  const health = healthQuery.data;
+  if (!health?.reindex_required) return null;
+  const runReindex = () => {
+    if (reindexing || operationQuery.data) return;
+    setReindexing(true);
+    void api
+      .workspaceReindex()
+      .then((next) => {
+        queryClient.setQueryData(queryKeys.workspaceHealth, next);
+        void queryClient.invalidateQueries({ queryKey: queryKeys.index });
+      })
+      .catch(() => undefined)
+      .finally(() => setReindexing(false));
+  };
+  return (
+    <div className="flex items-center justify-between gap-3 border-t border-warning/40 bg-warning/10 px-4 py-1.5 text-[11px] text-warning">
+      <span className="min-w-0 truncate">
+        Knowledge index needs a rebuild
+        {health.reason ? ` — ${health.reason}` : ""}
+      </span>
+      <button
+        type="button"
+        disabled={reindexing || operationQuery.data != null}
+        onClick={runReindex}
+        className="shrink-0 rounded-md bg-warning/20 px-2 py-0.5 font-medium hover:bg-warning/30 disabled:opacity-60"
+      >
+        {reindexing ? "Reindexing…" : "Reindex now"}
+      </button>
+    </div>
   );
 }
 

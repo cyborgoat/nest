@@ -2,7 +2,7 @@
 
 ## UX model
 
-- **Tabs** = browser-style open set. A session becomes a tab when created with **+** or opened from History. Closing a tab hides it from the bar only; the conversation remains in History.
+- **Tabs** = browser-style open set. A session becomes a tab when created with **+** or opened from History. Closing a tab hides it from the bar only; the conversation remains in History. Closing the last open tab automatically opens a fresh chat.
 - **History** (clock icon) lists non-archived sessions (pinned first), then an Archived section.
 - Row actions (ellipsis): Pin / Unpin, Archive / Unarchive, Rename, Delete.
 
@@ -12,15 +12,20 @@
 |-------|---------|
 | `pinned` | Sorts to the top of History |
 | `archived` | Moved to the Archived section; closed from tabs when archived |
-| `title_source` | `placeholder` \| `llm` \| `manual` |
+| `title_source` | `placeholder` \| `llm` \| `manual` \| `local` |
 | `mode` | `ask` (read-only answers) \| `agent` (permissioned Markdown tools) |
+| `backend` | Bound execution backend (`nest` \| `claude`), set on first send and immutable |
+| `selected_backend_id`, `selected_model_*` | Provisional agent/model selection before binding |
+| `selection_revision` | Optimistic-concurrency counter for selection updates |
 
-Additive SQLite migrations add these columns on existing DBs.
+Additive SQLite migrations add these columns on existing DBs. Existing sessions migrate to `nest`.
+
+See [Claude Agent](./claude-agent.md) for the Claude backend.
 
 ## Titles
 
 - New chats start as **New chat** (`title_source = placeholder`).
-- After the first successful assistant reply, the app may call the configured chat model to invent a short title (≤ ~6 words) and set `title_source = llm`.
+- After the first successful assistant reply, the app may call the configured chat model to invent a short title (≤ ~6 words) and set `title_source = llm`. Claude-bound chats derive a local title from the first message instead (`title_source = local`).
 - Rename sets `title_source = manual` and stops automatic retitling.
 - Title generation failures leave the placeholder title.
 
@@ -50,6 +55,9 @@ If the user continues in Agent mode before reviewing a proposal, unresolved prop
 | `chat_create_session` | Create session |
 | `chat_list_sessions` | All sessions (UI filters archived) |
 | `chat_update_session` | Rename / pin / archive / select mode |
-| `chat_delete_session` | Hard delete (messages cascade) |
+| `chat_update_selection` | Update agent/model/mode selection (revision-checked) |
+| `chat_delete_session` | Hard delete (messages, turns, and activities cascade) |
 | `chat_send` / `chat_cancel` | Streamed agent chat (`focus_paths` optional) |
+| `chat_list_messages` | Session messages with turn association |
+| `chat_list_turn_activities` | Persisted tool activity for a turn |
 | `chat_get_file_change` | Load one persisted before/after snapshot for the diff UI |

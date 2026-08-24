@@ -13,6 +13,13 @@ export default defineConfig(async () => ({
       "@nest/shared": path.resolve(__dirname, "../../packages/shared/src/index.ts"),
     },
   },
+  test: {
+    environment: "node",
+    environmentMatchGlobs: [
+      ["src/components/settings/ClaudeModelsEditor.test.tsx", "jsdom"],
+      ["src/components/settings/SettingsPanel.render.test.tsx", "jsdom"],
+    ],
+  },
   clearScreen: false,
   server: {
     port: 1420,
