@@ -2,12 +2,21 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   AppSettings,
+  AppOperationStatus,
+  BackendDescriptor,
   ChatMessage,
   ChatFileChangeDetail,
   ChatMode,
   ChatSession,
+  ClaudeConnectionReport,
+  ClaudeDetectionDto,
+  ClaudeModelOption,
+  ToolActivityRow,
+  WorkspaceHealth,
+  ClaudeSettingsRequest,
   DiffPair,
   FileStatus,
+  GeneralSettingsUpdate,
   HubConnectionStatus,
   HubAuthState,
   HubMessagePage,
@@ -103,8 +112,23 @@ export const api = {
       knowledgeDir,
       mode,
     }),
-  settingsSet: (settings: AppSettings) =>
+  settingsSet: (settings: GeneralSettingsUpdate) =>
     invoke<void>("settings_set", { settings }),
+  claudeDetectCli: (cliPath?: string) =>
+    invoke<ClaudeDetectionDto>("claude_detect_cli", { cliPath }),
+  claudeTestConnection: (cliPath: string) =>
+    invoke<ClaudeConnectionReport>("claude_test_connection", { cliPath }),
+  claudeSaveSettings: (request: ClaudeSettingsRequest) =>
+    invoke<ClaudeConnectionReport>("claude_save_settings", { request }),
+  claudeConnectionStatus: () =>
+    invoke<ClaudeConnectionReport>("claude_connection_status"),
+  claudeModelOptions: () =>
+    invoke<ClaudeModelOption[]>("claude_model_options"),
+  workspaceHealth: () =>
+    invoke<WorkspaceHealth>("workspace_health"),
+  workspaceReindex: () => invoke<WorkspaceHealth>("workspace_reindex"),
+  appOperationStatus: () =>
+    invoke<AppOperationStatus | null>("app_operation_status"),
 
   indexStatus: () => invoke<IndexStatus>("index_status"),
   indexRebuild: () => invoke<IndexStatus>("index_rebuild"),
@@ -114,6 +138,8 @@ export const api = {
   chatGetOrCreateInitialSession: () =>
     invoke<ChatSession>("chat_get_or_create_initial_session"),
   chatListSessions: () => invoke<ChatSession[]>("chat_list_sessions"),
+  chatBackendDescriptors: () =>
+    invoke<BackendDescriptor[]>("chat_backend_descriptors"),
   chatUpdateSession: (
     sessionId: string,
     patch: { title?: string; pinned?: boolean; archived?: boolean; mode?: ChatMode },
@@ -122,23 +148,40 @@ export const api = {
     invoke<void>("chat_delete_session", { sessionId }),
   chatListMessages: (sessionId: string) =>
     invoke<ChatMessage[]>("chat_list_messages", { sessionId }),
+  chatListTurnActivities: (turnId: string) =>
+    invoke<ToolActivityRow[]>("chat_list_turn_activities", { turnId }),
   chatSend: (
     sessionId: string,
+    expectedRevision: number,
     query: string,
     focusPaths: string[],
     streamEvent: string,
-    mode: ChatMode,
     protectedPaths: string[],
   ) =>
     invoke<ChatMessage>("chat_send", {
       request: {
         sessionId,
+        expectedRevision,
         query,
         focusPaths,
         streamEvent,
-        mode,
         protectedPaths,
       },
+    }),
+  chatUpdateSelection: (
+    sessionId: string,
+    expectedRevision: number,
+    patch: {
+      backendId?: string;
+      modelKind?: "default" | "explicit";
+      modelValue?: string | null;
+      mode?: ChatMode;
+    },
+  ) =>
+    invoke<ChatSession>("chat_update_selection", {
+      sessionId,
+      expectedRevision,
+      patch,
     }),
   chatGetFileChange: (changeId: string) =>
     invoke<ChatFileChangeDetail>("chat_get_file_change", { changeId }),
@@ -315,6 +358,7 @@ export type ChatStreamEvent =
   | { type: "reading"; path: string }
   | { type: "file_editing"; path: string; operation: string }
   | { type: "file_staged"; path: string; operation: string }
+  | { type: "tool_activity"; label: string; target: string | null; done?: boolean }
   | { type: "generating" }
   | { type: "citations"; citations: import("@nest/shared").Citation[] }
   | { type: "thinking"; content: string }

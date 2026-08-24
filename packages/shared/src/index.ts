@@ -415,6 +415,67 @@ export type AppSettings = {
   knowledge_dir: string;
   /** Absolute path currently used for packs (read-only from UI). */
   resolved_knowledge_dir: string;
+  claude_agent_enabled: boolean;
+  claude_cli_path: string;
+  claude_custom_models: string;
+};
+
+export type GeneralSettingsUpdate = Omit<
+  AppSettings,
+  "claude_agent_enabled" | "claude_cli_path" | "claude_custom_models"
+>;
+
+export type ClaudeConnectionStatus =
+  | "disabled"
+  | "connected"
+  | "last_connected"
+  | "unavailable";
+
+export type ClaudeConnectionReport = {
+  status: ClaudeConnectionStatus;
+  configured_cli_path: string;
+  resolved_cli_path: string;
+  cli_version: string;
+  effective_model: string;
+  tested_at: string;
+  message: string | null;
+};
+
+export type ClaudeSettingsRequest = {
+  enabled: boolean;
+  cliPath: string;
+  customModels: string;
+};
+
+export type ClaudeDetectionDto = {
+  configured_path: string;
+  resolved_path: string;
+  spawn_strategy: string;
+  cli_version: string | null;
+};
+
+export type ClaudeModelOption = {
+  model_id: string;
+  source: "default" | "observed" | "custom";
+};
+
+export type ToolActivityRow = {
+  id: string;
+  turn_id: string;
+  sequence: number;
+  source: string;
+  kind: string;
+  status: string;
+  label: string;
+  target: string | null;
+  started_at: string;
+  finished_at: string | null;
+};
+
+export type WorkspaceHealth = {
+  reindex_required: boolean;
+  reason: string | null;
+  updated_at: string | null;
 };
 
 export type Citation = {
@@ -434,6 +495,7 @@ export type ChatMessage = {
   thinking_seconds?: number;
   file_changes?: ChatFileChangeSummary[];
   created_at: string;
+  turn_id?: string | null;
 };
 
 export type ChatMode = "ask" | "agent";
@@ -442,14 +504,72 @@ export type ChatFileChangeSummary = {
   id: string;
   path: string;
   operation: ChatFileOperation;
-  status: "pending" | "approved" | "rejected";
+  status: "pending" | "approved" | "rejected" | "conflicted" | "resolved_external" | "failed";
 };
 export type ChatFileChangeDetail = ChatFileChangeSummary & {
   old_content: string | null;
   new_content: string | null;
+  rebase_count?: number;
+  last_rebased_at?: string | null;
+  resolution_reason?: string | null;
 };
 
-export type ChatSessionTitleSource = "placeholder" | "llm" | "manual";
+export type ChatBackend = string;
+export type ChatBackendStatus = "uninitialized" | "ready" | "unresumable";
+
+export type ModelSelectionKind = "default" | "explicit";
+
+export type ModelSelection = {
+  kind: ModelSelectionKind;
+  value: string | null;
+};
+
+export type BackendAvailability =
+  | "checking"
+  | "ready"
+  | "last_verified"
+  | "unavailable";
+
+export type BackendModeDescriptor = {
+  id: ChatMode;
+  available: boolean;
+  reason_code: string | null;
+  message: string | null;
+};
+
+export type BackendModelDescriptor = {
+  selection: ModelSelection;
+  label: string;
+  source: string;
+};
+
+export type BackendDescriptor = {
+  id: ChatBackend;
+  label: string;
+  enabled: boolean;
+  availability: BackendAvailability;
+  reason_code: string | null;
+  message: string | null;
+  modes: BackendModeDescriptor[];
+  models: BackendModelDescriptor[];
+  native_tool_profile: string;
+  knowledge_profile: string;
+  settings_target: string | null;
+};
+
+export type AppOperationStatus = {
+  kind:
+    | "chat_turn"
+    | "connection_probe"
+    | "save_claude_settings"
+    | "reindex"
+    | "vault_switch"
+    | "delete_session";
+  owner: string;
+  started_at: string;
+};
+
+export type ChatSessionTitleSource = "placeholder" | "llm" | "manual" | "local";
 
 export type ChatSession = {
   id: string;
@@ -460,6 +580,11 @@ export type ChatSession = {
   mode: ChatMode;
   created_at: string;
   updated_at: string;
+  backend: ChatBackend | null;
+  backend_status: ChatBackendStatus;
+  selected_backend_id: ChatBackend | null;
+  selected_model: ModelSelection;
+  selection_revision: number;
 };
 
 export type IndexStatus = {

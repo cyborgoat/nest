@@ -1,13 +1,19 @@
 //! Chat session/message CRUD and the streaming `chat_send` command.
 
-use crate::agent;
 use crate::chat_events;
+use crate::chat_runtime;
 use crate::db::{self, ChatMessage, ChatSession};
 use crate::error::AppResult;
-use crate::indexing;
 use crate::state::SharedState;
 use tauri::AppHandle;
 use tauri::{Emitter, State};
+
+#[tauri::command]
+pub fn chat_backend_descriptors(
+    state: State<'_, SharedState>,
+) -> AppResult<Vec<crate::chat_backends::BackendDescriptor>> {
+    crate::chat_backends::descriptors(&state)
+}
 
 #[tauri::command]
 pub fn chat_create_session(
@@ -41,13 +47,69 @@ pub struct ChatSessionPatch {
 
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ChatSendRequest {
-    pub session_id: String,
-    pub query: String,
-    pub focus_paths: Option<Vec<String>>,
+pub struct ChatSelectionPatch {
+    pub backend_id: Option<String>,
+    pub model_kind: Option<String>,
+    pub model_value: Option<String>,
     pub mode: Option<String>,
-    pub protected_paths: Option<Vec<String>>,
-    pub stream_event: String,
+}
+
+#[tauri::command]
+pub fn chat_update_selection(
+    state: State<'_, SharedState>,
+    session_id: String,
+    expected_revision: u32,
+    patch: ChatSelectionPatch,
+) -> AppResult<ChatSession> {
+    state.ensure_no_operation()?;
+    let backend = match patch.backend_id.as_deref() {
+        Some(value) => Some(db::BackendId::parse(value)?),
+        None => None,
+    };
+    let model = match patch.model_kind.as_deref() {
+        Some(kind) => Some(db::ModelSelection::parse(
+            kind,
+            patch.model_value.as_deref(),
+        )?),
+        None => None,
+    };
+    let current = {
+        let conn = state.db.lock();
+        db::get_session(&conn, &session_id)?.ok_or_else(|| {
+            crate::error::AppError::msg(format!("Session not found: {session_id}"))
+        })?
+    };
+    let desired_backend = backend
+        .clone()
+        .or(current.backend.clone())
+        .or_else(|| {
+            current
+                .selected_backend_id
+                .as_deref()
+                .and_then(|value| db::BackendId::parse(value).ok())
+        })
+        .unwrap_or_else(db::BackendId::nest);
+    let desired_model = model
+        .clone()
+        .unwrap_or_else(|| current.selected_model.clone());
+    let desired_mode = patch.mode.as_deref().unwrap_or(&current.mode);
+    crate::chat_backends::validate_selection(
+        &crate::chat_backends::descriptors(&state)?,
+        &desired_backend,
+        &desired_model,
+        desired_mode,
+    )?;
+    let conn = state.db.lock();
+    db::update_session_selection(
+        &conn,
+        &session_id,
+        expected_revision,
+        db::SelectionPatch {
+            selected_backend_id: backend,
+            selected_model: model,
+            mode: patch.mode,
+        },
+    )
 }
 
 #[tauri::command]
@@ -95,49 +157,63 @@ pub fn chat_review_file_change(
     change_id: String,
     approve: bool,
 ) -> AppResult<()> {
-    let change = {
-        let conn = state.db.lock();
-        db::get_chat_file_change(&conn, &change_id)?
-    };
-    if change.status != "pending" {
-        return Err(crate::error::AppError::msg(
-            "File change is no longer pending",
-        ));
-    }
-    if approve {
-        let context = crate::agent_tools::AgentToolContext::new(
-            state.inner().clone(),
-            app,
-            String::new(),
-            Vec::new(),
-        );
-        context.apply_change(&change)?;
-        let result = {
-            let conn = state.db.lock();
-            db::set_chat_file_change_status(&conn, &change_id, "approved")
-        };
-        if let Err(error) = result {
-            crate::agent_tools::rollback_changes(
-                state.inner(),
-                &[db::NewChatFileChange {
-                    path: change.path,
-                    operation: change.operation,
-                    old_content: change.old_content,
-                    new_content: change.new_content,
-                }],
-            );
-            return Err(error);
+    use crate::knowledge_review::ReviewOutcome;
+    match crate::knowledge_review::KnowledgeReview::review(&state, &change_id, approve)? {
+        ReviewOutcome::Approved => Ok(()),
+        ReviewOutcome::Rejected => Ok(()),
+        ReviewOutcome::ResolvedExternal => Ok(()),
+        ReviewOutcome::RebasedReviewRequired => {
+            let _ = app;
+            Err(crate::error::AppError::msg(
+                "proposal_rebased_review_required: the file changed externally; the proposal was rebased onto the current content. Review the new diff and approve again.",
+            ))
         }
-        indexing::schedule(state.inner())?;
-    } else {
-        let conn = state.db.lock();
-        db::set_chat_file_change_status(&conn, &change_id, "rejected")?;
+        ReviewOutcome::Conflicted => Err(crate::error::AppError::msg(
+            "proposal_conflicted: the file changed externally in an overlapping way. Reject this proposal or start a new agent turn.",
+        )),
+        ReviewOutcome::Failed { code, message } => {
+            Err(crate::error::AppError::msg(format!("{code}: {message}")))
+        }
     }
-    Ok(())
 }
 
 #[tauri::command]
-pub fn chat_delete_session(state: State<'_, SharedState>, session_id: String) -> AppResult<()> {
+pub async fn chat_delete_session(
+    state: State<'_, SharedState>,
+    session_id: String,
+) -> AppResult<()> {
+    let mut stopped_active_turn = false;
+    if let Some(operation) = state.operation_status() {
+        if operation.kind == crate::state::OperationKind::ChatTurn && operation.owner == session_id
+        {
+            state.request_chat_cancel();
+            tokio::time::timeout(std::time::Duration::from_secs(15), async {
+                while state.operation_status().is_some() {
+                    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+                }
+            })
+            .await
+            .map_err(|_| {
+                crate::error::AppError::msg(
+                    "chat_stop_timeout: the active Claude process did not stop in time",
+                )
+            })?;
+            stopped_active_turn = true;
+        } else {
+            return Err(crate::error::AppError::msg(format!(
+                "operation_busy: another operation is running for {}",
+                operation.owner
+            )));
+        }
+    }
+    let _slot = state.inner().begin_operation(
+        crate::state::OperationKind::DeleteSession,
+        session_id.clone(),
+    )?;
+    if stopped_active_turn {
+        crate::vault_reconciliation::reconcile_vault(&state, std::time::Duration::from_secs(30))
+            .await?;
+    }
     let conn = state.db.lock();
     db::delete_session(&conn, &session_id)
 }
@@ -165,6 +241,26 @@ pub fn chat_list_messages(
 }
 
 #[tauri::command]
+pub fn chat_list_turn_activities(
+    state: State<'_, SharedState>,
+    turn_id: String,
+) -> AppResult<Vec<db::ToolActivityRow>> {
+    let conn = state.db.lock();
+    db::list_tool_activities(&conn, &turn_id)
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatSendRequest {
+    pub session_id: String,
+    pub expected_revision: u32,
+    pub query: String,
+    pub focus_paths: Option<Vec<String>>,
+    pub protected_paths: Option<Vec<String>>,
+    pub stream_event: String,
+}
+
+#[tauri::command]
 pub async fn chat_send(
     app: AppHandle,
     state: State<'_, SharedState>,
@@ -172,9 +268,9 @@ pub async fn chat_send(
 ) -> AppResult<ChatMessage> {
     let ChatSendRequest {
         session_id,
+        expected_revision,
         query,
         focus_paths,
-        mode,
         protected_paths,
         stream_event,
     } = request;
@@ -183,33 +279,71 @@ pub async fn chat_send(
         db::get_settings(&conn)?
     };
     let focus = focus_paths.unwrap_or_default();
-    let mode = mode.unwrap_or_else(|| "ask".into());
-    if mode != "ask" && mode != "agent" {
-        return Err(crate::error::AppError::msg(
-            "Chat mode must be ask or agent",
-        ));
-    }
     let app_data_dir = state.app_data_dir.clone();
 
-    // Persist the user turn first for durable history / UI refresh.
+    let _turn_slot = state
+        .inner()
+        .begin_operation(crate::state::OperationKind::ChatTurn, session_id.clone())?;
+
+    let existing_session = {
+        let conn = state.db.lock();
+        db::get_session(&conn, &session_id)?.ok_or_else(|| {
+            crate::error::AppError::msg(format!("Session not found: {session_id}"))
+        })?
+    };
+
+    let selected_backend = existing_session
+        .backend
+        .clone()
+        .or_else(|| {
+            existing_session
+                .selected_backend_id
+                .as_deref()
+                .and_then(|value| db::BackendId::parse(value).ok())
+        })
+        .unwrap_or_else(db::BackendId::nest);
+    crate::chat_backends::validate_selection(
+        &crate::chat_backends::descriptors(&state)?,
+        &selected_backend,
+        &existing_session.selected_model,
+        &existing_session.mode,
+    )?;
+
+    if existing_session.backend.as_ref().map(db::BackendId::as_str) == Some("claude") {
+        if existing_session.backend_status == db::ChatBackendStatus::Unresumable {
+            return Err(crate::error::AppError::msg(
+                "claude_session_unresumable: this Claude conversation can no longer be resumed; start a new chat",
+            ));
+        }
+        if !settings.claude_agent_enabled {
+            return Err(crate::error::AppError::msg(
+                "claude_disabled: re-enable Claude Agent in Settings to continue this chat",
+            ));
+        }
+        if !crate::commands::claude_connection_proven(&state, &settings) {
+            return Err(crate::error::AppError::msg(
+                "claude_unavailable: fix the Claude connection in Settings to continue this chat",
+            ));
+        }
+    } else if existing_session.backend.is_none()
+        && existing_session.selected_backend_id.as_deref() == Some("claude")
+        && settings.claude_agent_enabled
+        && !crate::commands::claude_connection_proven(&state, &settings)
     {
-        let mut conn = state.db.lock();
-        db::add_message(
-            &mut conn,
-            &session_id,
-            db::NewChatMessage {
-                role: "user",
-                content: &query,
-                citations: None,
-                thinking: None,
-                thinking_seconds: None,
-                file_changes: &[],
-            },
-        )?;
+        return Err(crate::error::AppError::msg(
+            "claude_unavailable: test the Claude connection in Settings before chatting",
+        ));
     }
 
-    // Build prior turns for the agent, excluding the just-saved user message
-    // so `stream_chat(query, …)` does not duplicate it.
+    let prepared = {
+        let mut conn = state.db.lock();
+        db::begin_chat_turn(&mut conn, &session_id, expected_revision, &query)?
+    };
+    let session = prepared.session;
+    let turn_id = prepared.turn_id.clone();
+    let turn_backend = prepared.backend.clone();
+    let turn_mode = prepared.mode.clone();
+
     let prior = {
         let conn = state.db.lock();
         let mut msgs = db::list_messages(&conn, &session_id)?;
@@ -225,31 +359,51 @@ pub async fn chat_send(
 
     crate::nest_debug!(
         "chat",
-        "chat_send session={session_id} query_len={} focus={:?}",
+        "chat_send session={session_id} backend={:?} model={:?} mode={turn_mode} query_len={} focus={:?}",
+        session.backend,
+        prepared.requested_model.cli_model_arg(),
         query.len(),
         focus
     );
 
-    let result = match agent::run_agent_chat(agent::AgentChatRequest {
+    let result = match chat_runtime::run_chat(chat_runtime::ChatRunRequest {
         app: app.clone(),
         state: state.inner().clone(),
         app_data_dir,
         settings: settings.clone(),
-        session_id: session_id.clone(),
+        session: session.clone(),
         query: query.clone(),
         focus_paths: focus,
-        stream_event: stream_event.clone(),
         prior_history: prior,
-        mode: mode.clone(),
+        mode: turn_mode,
+        requested_model: prepared.requested_model.clone(),
         protected_paths: protected_paths.unwrap_or_default(),
+        stream_event: stream_event.clone(),
+        turn_id: turn_id.clone(),
     })
     .await
     {
         Ok(v) => v,
         Err(e) => {
             crate::nest_debug!("chat", "chat_send failed: {e}");
-            // Soft-cancel: user stopped before any tokens arrived.
-            if e.to_string() == "cancelled" {
+            let cancelled = e.to_string() == "cancelled";
+            {
+                let conn = state.db.lock();
+                let _ = db::finish_chat_turn(
+                    &conn,
+                    &turn_id,
+                    if cancelled { "cancelled" } else { "failed" },
+                    None,
+                    None,
+                    Some(if cancelled {
+                        "chat_cancelled"
+                    } else {
+                        "chat_failed"
+                    }),
+                    Some(&e.to_string()),
+                );
+            }
+            if cancelled {
                 let _ = app.emit(
                     &stream_event,
                     chat_events::ChatStreamEvent::Done {
@@ -270,22 +424,24 @@ pub async fn chat_send(
 
     crate::nest_debug!(
         "chat",
-        "chat_send ok answer_len={} citations={} thinking={}",
+        "chat_send ok backend={:?} answer_len={} citations={} thinking={}",
+        result.backend,
         result.answer.len(),
         result.citations.len(),
         result.thinking.is_some()
     );
 
-    let answer = result.answer;
-
     let message = {
         let mut conn = state.db.lock();
-        db::add_message(
+        db::commit_assistant_and_finish_turn(
             &mut conn,
+            &turn_id,
             &session_id,
+            "succeeded",
+            result.effective_model.as_deref(),
             db::NewChatMessage {
                 role: "assistant",
-                content: &answer,
+                content: &result.answer,
                 citations: Some(&result.citations),
                 thinking: result.thinking.as_deref(),
                 thinking_seconds: result.thinking_seconds,
@@ -301,29 +457,30 @@ pub async fn chat_send(
         },
     );
 
-    // Best-effort title naming — do not block returning the assistant message.
-    let state_clone = state.inner().clone();
-    let sid = session_id.clone();
-    let settings_for_title = settings.clone();
-    let app_for_title = app.clone();
-    tauri::async_runtime::spawn(async move {
-        let updated = crate::title::maybe_auto_title_after_reply(
-            &settings_for_title,
-            &sid,
-            || {
-                let conn = state_clone.db.lock();
-                crate::title::load_session_turns(&conn, &sid)
-            },
-            |title| {
-                let conn = state_clone.db.lock();
-                db::set_session_title_llm(&conn, &sid, title)
-            },
-        )
-        .await;
-        if let Some(session) = updated {
-            let _ = app_for_title.emit("chat-session-updated", session);
-        }
-    });
+    if turn_backend.as_str() == "nest" {
+        let state_clone = state.inner().clone();
+        let sid = session_id.clone();
+        let settings_for_title = settings.clone();
+        let app_for_title = app.clone();
+        tauri::async_runtime::spawn(async move {
+            let updated = crate::title::maybe_auto_title_after_reply(
+                &settings_for_title,
+                &sid,
+                || {
+                    let conn = state_clone.db.lock();
+                    crate::title::load_session_turns(&conn, &sid)
+                },
+                |title| {
+                    let conn = state_clone.db.lock();
+                    db::set_session_title_llm(&conn, &sid, title)
+                },
+            )
+            .await;
+            if let Some(session) = updated {
+                let _ = app_for_title.emit("chat-session-updated", session);
+            }
+        });
+    }
 
     Ok(message)
 }

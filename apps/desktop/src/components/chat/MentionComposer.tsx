@@ -1,4 +1,4 @@
-import { ArrowUp, ChevronDown, ChevronsLeftRight, FileText, Folder, MessageCircle, Square, X } from "lucide-react";
+import { ArrowUp, ChevronDown, FileText, Folder, Square, X } from "lucide-react";
 import type { ChatMode } from "@nest/shared";
 import {
   useEffect,
@@ -8,6 +8,11 @@ import {
   type KeyboardEvent,
 } from "react";
 import { Button } from "@/components/ui/button";
+import {
+  type BackendOption,
+  type ModeOption,
+  type ModelOption,
+} from "@/lib/chat-selection";
 import { cn } from "@/lib/utils";
 
 export type MentionRef = {
@@ -21,21 +26,45 @@ type Candidate = MentionRef;
 type Props = {
   candidates: Candidate[];
   isGenerating?: boolean;
+  controlsDisabled?: boolean;
   onSend: (text: string, focusPaths: string[]) => void;
   onStop?: () => void;
   canSend: boolean;
   mode: ChatMode;
   onModeChange: (mode: ChatMode) => void;
+  backends: BackendOption[];
+  models: ModelOption[];
+  modes: ModeOption[];
+  activeBackendId: string;
+  activeModelId: string;
+  canChangeBackend: boolean;
+  onBackendChange: (backendId: string) => void;
+  onModelChange: (modelId: string) => void;
+  draft?: { text: string; refs: MentionRef[] } | null;
+  onDraftConsumed?: () => void;
+  onDraftChange?: (draft: { text: string; refs: MentionRef[] }) => void;
 };
 
 export function MentionComposer({
   candidates,
   isGenerating = false,
+  controlsDisabled = false,
   onSend,
   onStop,
   canSend,
   mode,
   onModeChange,
+  backends,
+  models,
+  modes,
+  activeBackendId,
+  activeModelId,
+  canChangeBackend,
+  onBackendChange,
+  onModelChange,
+  draft,
+  onDraftConsumed,
+  onDraftChange,
 }: Props) {
   const [text, setText] = useState("");
   const [refs, setRefs] = useState<MentionRef[]>([]);
@@ -59,6 +88,26 @@ export function MentionComposer({
   useEffect(() => {
     setHighlight(0);
   }, [mentionQuery, filtered.length]);
+
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const consumedRef = useRef(onDraftConsumed);
+  consumedRef.current = onDraftConsumed;
+  useEffect(() => {
+    if (draftRef.current) {
+      const next = draftRef.current;
+      setText(next.text);
+      setRefs(next.refs);
+      consumedRef.current?.();
+      requestAnimationFrame(() => textareaRef.current?.focus());
+    }
+  }, [draft]);
+
+  const draftChangeRef = useRef(onDraftChange);
+  draftChangeRef.current = onDraftChange;
+  useEffect(() => {
+    draftChangeRef.current?.({ text, refs });
+  }, [text, refs]);
 
   const updateMentionFromText = (value: string, cursor: number) => {
     const before = value.slice(0, cursor);
@@ -213,6 +262,49 @@ export function MentionComposer({
             ))}
           </div>
         )}
+        <div className="mb-1 flex flex-wrap items-center gap-1">
+          <CapsuleSelect
+            ariaLabel="Chat agent"
+            value={activeBackendId}
+            disabled={isGenerating || controlsDisabled}
+            onChange={onBackendChange}
+            options={backends.map((b) => ({
+              value: b.id,
+              label: b.label,
+              disabled: b.disabled,
+              title: b.disabled ? (b.disabledReason ?? undefined) : undefined,
+            }))}
+            lockedTitle={
+              canChangeBackend
+                ? undefined
+                : "Backend is bound to this chat. Switching creates a new chat."
+            }
+          />
+          <CapsuleSelect
+            ariaLabel="Chat model"
+            value={activeModelId}
+            disabled={isGenerating || controlsDisabled}
+            onChange={onModelChange}
+            options={models.map((m) => ({
+              value: m.id,
+              label: m.label,
+            }))}
+          />
+          <CapsuleSelect
+            ariaLabel="Chat mode"
+            value={mode}
+            disabled={isGenerating || controlsDisabled}
+            onChange={(value) => onModeChange(value as ChatMode)}
+            options={modes.map((option) => ({
+              value: option.id,
+              label: option.label,
+              disabled: option.disabled,
+              title: option.disabled
+                ? (option.disabledReason ?? undefined)
+                : undefined,
+            }))}
+          />
+        </div>
         <div className="relative">
           {text && (
             <div
@@ -227,7 +319,7 @@ export function MentionComposer({
           <textarea
             ref={textareaRef}
             value={text}
-            disabled={isGenerating}
+            disabled={isGenerating || controlsDisabled}
             placeholder={mode === "agent" ? "Describe a change…" : "Ask anything…"}
             rows={2}
             className="relative block w-full resize-none bg-transparent pr-8 text-sm leading-5 text-transparent caret-foreground outline-none selection:bg-primary/20 selection:text-foreground placeholder:text-muted-foreground"
@@ -255,22 +347,6 @@ export function MentionComposer({
             onKeyDown={onKeyDown}
           />
         </div>
-        <label className="absolute bottom-2 left-2">
-          <span className="sr-only">Chat mode</span>
-          <span className="pointer-events-none absolute inset-y-0 left-2 flex items-center">
-            {mode === "agent" ? <ChevronsLeftRight className="size-2.5" /> : <MessageCircle className="size-2.5" />}
-          </span>
-          <select
-            value={mode}
-            disabled={isGenerating}
-            onChange={(event) => onModeChange(event.target.value as ChatMode)}
-            className="h-6 appearance-none rounded-md border border-border bg-background py-0.5 pl-5 pr-5 text-[10px] font-medium outline-none transition-colors hover:bg-muted focus:ring-1 focus:ring-primary/25 disabled:opacity-50"
-          >
-            <option value="ask">Ask</option>
-            <option value="agent">Agent</option>
-          </select>
-          <ChevronDown className="pointer-events-none absolute right-1.5 top-1.5 size-3 text-muted-foreground" />
-        </label>
         {isGenerating ? (
           <Button
             size="icon-sm"
@@ -427,4 +503,52 @@ function removeMentionRange(text: string, mentionStart: number, mentionEnd: numb
 
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+type CapsuleOption = {
+  value: string;
+  label: string;
+  disabled?: boolean;
+  title?: string;
+};
+
+function CapsuleSelect({
+  ariaLabel,
+  value,
+  disabled,
+  onChange,
+  options,
+  lockedTitle,
+}: {
+  ariaLabel: string;
+  value: string;
+  disabled: boolean;
+  onChange: (value: string) => void;
+  options: CapsuleOption[];
+  lockedTitle?: string;
+}) {
+  return (
+    <label className="relative">
+      <span className="sr-only">{ariaLabel}</span>
+      <select
+        aria-label={ariaLabel}
+        value={value}
+        disabled={disabled}
+        title={lockedTitle}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-6 appearance-none rounded-md border border-border bg-background py-0.5 pl-2 pr-5 text-[10px] font-medium outline-none transition-colors hover:bg-muted focus:ring-1 focus:ring-primary/25 disabled:opacity-50"
+      >
+        {options.map((option) => (
+          <option
+            key={option.value}
+            value={option.value}
+            disabled={option.disabled}
+          >
+            {option.label}
+          </option>
+        ))}
+      </select>
+      <ChevronDown className="pointer-events-none absolute right-1.5 top-1.5 size-3 text-muted-foreground" />
+    </label>
+  );
 }

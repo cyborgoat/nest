@@ -41,3 +41,10 @@ of Settings.
 
 Chat needs an OpenAI-compatible API base URL, API key, and model name, set in
 **Settings**. These are only used when you use Chat.
+
+## Claude Agent (optional)
+
+To chat through your local Claude CLI instead of an API, enable **Claude
+Agent** in Settings and choose **Save and connect**. See the dedicated
+[Agents](./agents.md) guide for setup, models, and how both agents share
+Nest's knowledge tools.

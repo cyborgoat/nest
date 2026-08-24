@@ -33,6 +33,12 @@ pub struct AppSettings {
     /// Absolute path currently used for packs (not persisted).
     #[serde(default)]
     pub resolved_knowledge_dir: String,
+    #[serde(default)]
+    pub claude_agent_enabled: bool,
+    #[serde(default)]
+    pub claude_cli_path: String,
+    #[serde(default)]
+    pub claude_custom_models: String,
 }
 
 impl Default for AppSettings {
@@ -48,6 +54,9 @@ impl Default for AppSettings {
             display_language: default_display_language(),
             knowledge_dir: String::new(),
             resolved_knowledge_dir: String::new(),
+            claude_agent_enabled: false,
+            claude_cli_path: String::new(),
+            claude_custom_models: String::new(),
         }
     }
 }
@@ -69,21 +78,11 @@ impl AppSettings {
     /// an OpenRouter key is pasted while Nest's untouched OpenAI defaults are
     /// still selected. Explicit custom endpoints and models are preserved.
     pub fn normalize_llm_configuration(&mut self) {
-        self.llm_base_url = self.llm_base_url.trim().trim_end_matches('/').to_string();
-        self.llm_api_key = self.llm_api_key.trim().to_string();
-        self.chat_model = self.chat_model.trim().to_string();
-
-        let openrouter_key = self.llm_api_key.starts_with("sk-or-v1-");
-        let default_openai_endpoint =
-            self.llm_base_url.is_empty() || self.llm_base_url == LEGACY_OPENAI_BASE_URL;
-        if openrouter_key && default_openai_endpoint {
-            self.llm_base_url = OPENROUTER_BASE_URL.into();
-        }
-        if (openrouter_key || self.llm_base_url == OPENROUTER_BASE_URL)
-            && self.chat_model == LEGACY_OPENAI_CHAT_MODEL
-        {
-            self.chat_model = OPENROUTER_DEFAULT_CHAT_MODEL.into();
-        }
+        normalize_llm_configuration_fields(
+            &mut self.llm_base_url,
+            &mut self.llm_api_key,
+            &mut self.chat_model,
+        );
     }
 
     /// Proxy URL used for outbound requests when enabled; otherwise empty (direct).
@@ -93,6 +92,72 @@ impl AppSettings {
         } else {
             ""
         }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct GeneralSettingsUpdate {
+    pub llm_base_url: String,
+    pub llm_api_key: String,
+    pub chat_model: String,
+    pub hub_base_url: String,
+    #[serde(default)]
+    pub proxy_url: String,
+    #[serde(default)]
+    pub proxy_enabled: bool,
+    #[serde(default = "default_font_size_pt")]
+    pub font_size_pt: u32,
+    #[serde(default = "default_display_language")]
+    pub display_language: String,
+    #[serde(default)]
+    pub knowledge_dir: String,
+}
+
+impl From<&AppSettings> for GeneralSettingsUpdate {
+    fn from(settings: &AppSettings) -> Self {
+        Self {
+            llm_base_url: settings.llm_base_url.clone(),
+            llm_api_key: settings.llm_api_key.clone(),
+            chat_model: settings.chat_model.clone(),
+            hub_base_url: settings.hub_base_url.clone(),
+            proxy_url: settings.proxy_url.clone(),
+            proxy_enabled: settings.proxy_enabled,
+            font_size_pt: settings.font_size_pt,
+            display_language: settings.display_language.clone(),
+            knowledge_dir: settings.knowledge_dir.clone(),
+        }
+    }
+}
+
+impl GeneralSettingsUpdate {
+    pub fn normalize_llm_configuration(&mut self) {
+        normalize_llm_configuration_fields(
+            &mut self.llm_base_url,
+            &mut self.llm_api_key,
+            &mut self.chat_model,
+        );
+    }
+}
+
+fn normalize_llm_configuration_fields(
+    llm_base_url: &mut String,
+    llm_api_key: &mut String,
+    chat_model: &mut String,
+) {
+    *llm_base_url = llm_base_url.trim().trim_end_matches('/').to_string();
+    *llm_api_key = llm_api_key.trim().to_string();
+    *chat_model = chat_model.trim().to_string();
+
+    let openrouter_key = llm_api_key.starts_with("sk-or-v1-");
+    let default_openai_endpoint =
+        llm_base_url.is_empty() || *llm_base_url == LEGACY_OPENAI_BASE_URL;
+    if openrouter_key && default_openai_endpoint {
+        *llm_base_url = OPENROUTER_BASE_URL.into();
+    }
+    if (openrouter_key || *llm_base_url == OPENROUTER_BASE_URL)
+        && *chat_model == LEGACY_OPENAI_CHAT_MODEL
+    {
+        *chat_model = OPENROUTER_DEFAULT_CHAT_MODEL.into();
     }
 }
 
@@ -114,18 +179,157 @@ pub struct Citation {
     pub score: f32,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(transparent)]
+pub struct BackendId(String);
+
+impl BackendId {
+    pub fn new(value: impl Into<String>) -> AppResult<Self> {
+        let value = value.into();
+        let value = value.trim();
+        if value.is_empty() {
+            return Err(crate::error::AppError::msg(
+                "Chat backend id must not be empty",
+            ));
+        }
+        Ok(Self(value.to_string()))
+    }
+
+    pub fn nest() -> Self {
+        Self("nest".to_string())
+    }
+
+    pub fn claude() -> Self {
+        Self("claude".to_string())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn parse(value: &str) -> AppResult<Self> {
+        Self::new(value.to_string())
+    }
+}
+
+impl std::fmt::Display for BackendId {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatBackendStatus {
+    #[default]
+    Uninitialized,
+    Ready,
+    Unresumable,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct ModelSelection {
+    pub kind: ModelSelectionKind,
+    #[serde(default)]
+    pub value: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelSelectionKind {
+    #[default]
+    Default,
+    Explicit,
+}
+
+impl ModelSelection {
+    #[allow(dead_code)]
+    pub fn cli_model_arg(&self) -> Option<&str> {
+        match self.kind {
+            ModelSelectionKind::Default => Some("default"),
+            ModelSelectionKind::Explicit => self.value.as_deref(),
+        }
+    }
+
+    pub fn parse(kind: &str, value: Option<&str>) -> AppResult<Self> {
+        match kind {
+            "default" => Ok(Self {
+                kind: ModelSelectionKind::Default,
+                value: None,
+            }),
+            "explicit" => {
+                let value = value.unwrap_or_default().trim();
+                if value.is_empty() {
+                    return Err(crate::error::AppError::msg(
+                        "explicit model selection requires a model id",
+                    ));
+                }
+                Ok(Self {
+                    kind: ModelSelectionKind::Explicit,
+                    value: Some(value.to_string()),
+                })
+            }
+            other => Err(crate::error::AppError::msg(format!(
+                "Unknown model selection kind: {other}"
+            ))),
+        }
+    }
+}
+
+impl ChatBackendStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ChatBackendStatus::Uninitialized => "uninitialized",
+            ChatBackendStatus::Ready => "ready",
+            ChatBackendStatus::Unresumable => "unresumable",
+        }
+    }
+
+    pub fn parse(value: &str) -> AppResult<Self> {
+        match value {
+            "uninitialized" => Ok(ChatBackendStatus::Uninitialized),
+            "ready" => Ok(ChatBackendStatus::Ready),
+            "unresumable" => Ok(ChatBackendStatus::Unresumable),
+            other => Err(crate::error::AppError::msg(format!(
+                "Unknown chat backend status: {other}"
+            ))),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatSession {
     pub id: String,
     pub title: String,
     pub pinned: bool,
     pub archived: bool,
-    /// `placeholder` | `llm` | `manual`
+    /// `placeholder` | `llm` | `manual` | `local`
     pub title_source: String,
     /// `ask` | `agent`
     pub mode: String,
     pub created_at: String,
     pub updated_at: String,
+    #[serde(default)]
+    pub backend: Option<BackendId>,
+    #[serde(default)]
+    pub backend_status: ChatBackendStatus,
+    #[serde(default)]
+    pub selected_backend_id: Option<String>,
+    #[serde(default)]
+    pub selected_model: ModelSelection,
+    #[serde(default)]
+    pub selection_revision: u32,
+}
+
+#[allow(dead_code)]
+#[derive(Debug)]
+pub struct PreparedChatTurn {
+    pub session: ChatSession,
+    pub user_message: ChatMessage,
+    pub turn_id: String,
+    pub backend: BackendId,
+    pub requested_model: ModelSelection,
+    pub mode: String,
 }
 
 pub const TITLE_SOURCE_PLACEHOLDER: &str = "placeholder";
@@ -143,6 +347,8 @@ pub struct ChatMessage {
     #[serde(default)]
     pub file_changes: Vec<ChatFileChangeSummary>,
     pub created_at: String,
+    #[serde(default)]
+    pub turn_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -161,6 +367,23 @@ pub struct ChatFileChangeDetail {
     pub status: String,
     pub old_content: Option<String>,
     pub new_content: Option<String>,
+    #[serde(default)]
+    pub rebase_count: i64,
+    #[serde(default)]
+    pub last_rebased_at: Option<String>,
+    #[serde(default)]
+    pub resolution_reason: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ClaimedChatFileChange {
+    pub id: String,
+    pub path: String,
+    pub status: String,
+    pub claim_id: String,
+    pub claim_kind: String,
+    pub expected_old_hash: Option<String>,
+    pub expected_new_hash: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -169,6 +392,9 @@ pub struct NewChatFileChange {
     pub operation: String,
     pub old_content: Option<String>,
     pub new_content: Option<String>,
+    pub status: String,
+    pub rebase_count: i64,
+    pub resolution_reason: Option<String>,
 }
 
 pub struct NewChatMessage<'a> {
@@ -320,6 +546,39 @@ fn migrate(conn: &Connection) -> AppResult<()> {
             origin TEXT NOT NULL DEFAULT 'unknown'
         );
 
+        CREATE TABLE IF NOT EXISTS chat_turns (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+            user_message_id TEXT NOT NULL UNIQUE REFERENCES chat_messages(id) ON DELETE CASCADE,
+            assistant_message_id TEXT NULL UNIQUE REFERENCES chat_messages(id) ON DELETE SET NULL,
+            backend_id TEXT NOT NULL,
+            requested_model_kind TEXT NOT NULL,
+            requested_model_value TEXT NULL,
+            effective_model TEXT NULL,
+            mode TEXT NOT NULL,
+            selection_revision INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            error_code TEXT NULL,
+            error_message TEXT NULL,
+            warnings_json TEXT NULL,
+            started_at TEXT NOT NULL,
+            finished_at TEXT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS chat_tool_activities (
+            id TEXT PRIMARY KEY,
+            turn_id TEXT NOT NULL REFERENCES chat_turns(id) ON DELETE CASCADE,
+            sequence INTEGER NOT NULL,
+            source TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            status TEXT NOT NULL,
+            label TEXT NOT NULL,
+            target TEXT NULL,
+            started_at TEXT NOT NULL,
+            finished_at TEXT NULL,
+            UNIQUE(turn_id, sequence)
+        );
+
         CREATE TABLE IF NOT EXISTS index_meta (
             id INTEGER PRIMARY KEY CHECK (id = 1),
             indexed_files INTEGER NOT NULL DEFAULT 0,
@@ -332,6 +591,7 @@ fn migrate(conn: &Connection) -> AppResult<()> {
         "#,
     )?;
     ensure_chat_session_columns(conn)?;
+    ensure_chat_session_backend_columns(conn)?;
     ensure_chat_file_change_columns(conn)?;
     ensure_message_thinking_columns(conn)?;
     ensure_sync_state_active_column(conn)?;
@@ -350,7 +610,136 @@ fn ensure_chat_file_change_columns(conn: &Connection) -> AppResult<()> {
             [],
         )?;
     }
+    if !table_has_column(conn, "chat_file_changes", "claim_id")? {
+        conn.execute("ALTER TABLE chat_file_changes ADD COLUMN claim_id TEXT", [])?;
+        conn.execute(
+            "ALTER TABLE chat_file_changes ADD COLUMN claim_kind TEXT",
+            [],
+        )?;
+        conn.execute(
+            "ALTER TABLE chat_file_changes ADD COLUMN claimed_at TEXT",
+            [],
+        )?;
+    }
+    if !table_has_column(conn, "chat_file_changes", "failure_code")? {
+        conn.execute(
+            "ALTER TABLE chat_file_changes ADD COLUMN failure_code TEXT",
+            [],
+        )?;
+        conn.execute(
+            "ALTER TABLE chat_file_changes ADD COLUMN failure_message TEXT",
+            [],
+        )?;
+    }
+    if !table_has_column(conn, "chat_file_changes", "rebase_count")? {
+        conn.execute(
+            "ALTER TABLE chat_file_changes ADD COLUMN rebase_count INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+        conn.execute(
+            "ALTER TABLE chat_file_changes ADD COLUMN last_rebased_at TEXT",
+            [],
+        )?;
+        conn.execute(
+            "ALTER TABLE chat_file_changes ADD COLUMN rebased_from_old_hash TEXT",
+            [],
+        )?;
+        conn.execute(
+            "ALTER TABLE chat_file_changes ADD COLUMN rebased_from_new_hash TEXT",
+            [],
+        )?;
+        conn.execute(
+            "ALTER TABLE chat_file_changes ADD COLUMN resolution_reason TEXT",
+            [],
+        )?;
+    }
+    if !table_has_column(conn, "chat_file_changes", "apply_expected_old_hash")? {
+        conn.execute(
+            "ALTER TABLE chat_file_changes ADD COLUMN apply_expected_old_hash TEXT",
+            [],
+        )?;
+        conn.execute(
+            "ALTER TABLE chat_file_changes ADD COLUMN apply_expected_new_hash TEXT",
+            [],
+        )?;
+        conn.execute(
+            "ALTER TABLE chat_file_changes ADD COLUMN apply_journal_json TEXT",
+            [],
+        )?;
+    }
     Ok(())
+}
+
+fn ensure_chat_session_backend_columns(conn: &Connection) -> AppResult<()> {
+    if !table_has_column(conn, "chat_sessions", "backend")? {
+        conn.execute("ALTER TABLE chat_sessions ADD COLUMN backend TEXT", [])?;
+        conn.execute(
+            "UPDATE chat_sessions SET backend = 'nest' WHERE backend IS NULL",
+            [],
+        )?;
+    }
+    if !table_has_column(conn, "chat_sessions", "backend_status")? {
+        conn.execute(
+            "ALTER TABLE chat_sessions ADD COLUMN backend_status TEXT NOT NULL DEFAULT 'uninitialized'",
+            [],
+        )?;
+        conn.execute(
+            "UPDATE chat_sessions SET backend_status = 'ready' WHERE backend IS NOT NULL",
+            [],
+        )?;
+    }
+    if !table_has_column(conn, "chat_sessions", "selected_backend_id")? {
+        conn.execute(
+            "ALTER TABLE chat_sessions ADD COLUMN selected_backend_id TEXT",
+            [],
+        )?;
+        conn.execute(
+            "UPDATE chat_sessions SET selected_backend_id = backend WHERE backend IS NOT NULL",
+            [],
+        )?;
+        conn.execute(
+            "UPDATE chat_sessions SET selected_backend_id = 'nest' WHERE selected_backend_id IS NULL",
+            [],
+        )?;
+    }
+    if !table_has_column(conn, "chat_sessions", "selected_model_kind")? {
+        conn.execute(
+            "ALTER TABLE chat_sessions ADD COLUMN selected_model_kind TEXT",
+            [],
+        )?;
+        conn.execute(
+            "ALTER TABLE chat_sessions ADD COLUMN selected_model_value TEXT",
+            [],
+        )?;
+        conn.execute(
+            "UPDATE chat_sessions
+             SET selected_model_kind = CASE
+                 WHEN backend = 'nest' AND ?1 != '' THEN 'explicit'
+                 ELSE 'default'
+             END,
+             selected_model_value = CASE
+                 WHEN backend = 'nest' AND ?1 != '' THEN ?1
+                 ELSE NULL
+             END",
+            params![current_chat_model(conn)],
+        )?;
+    }
+    if !table_has_column(conn, "chat_sessions", "selection_revision")? {
+        conn.execute(
+            "ALTER TABLE chat_sessions ADD COLUMN selection_revision INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+    }
+    Ok(())
+}
+
+fn current_chat_model(conn: &Connection) -> String {
+    conn.query_row(
+        "SELECT value FROM settings WHERE key = 'chat_model'",
+        [],
+        |row| row.get::<_, String>(0),
+    )
+    .unwrap_or_default()
 }
 
 fn ensure_sync_state_patch_columns(conn: &Connection) -> AppResult<()> {
@@ -513,7 +902,24 @@ fn ensure_chat_session_columns(conn: &Connection) -> AppResult<()> {
     Ok(())
 }
 
+const SESSION_COLUMNS: &str = "id, title, pinned, archived, title_source, mode, created_at, updated_at, backend, backend_status, selected_backend_id, selected_model_kind, selected_model_value, selection_revision";
+
 fn map_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChatSession> {
+    let backend_raw: Option<String> = row.get(8)?;
+    let backend = backend_raw
+        .map(|raw| BackendId::parse(&raw).map_err(|error| row_conversion_failure(8, error)))
+        .transpose()?;
+    let status_raw: String = row.get(9)?;
+    let backend_status =
+        ChatBackendStatus::parse(&status_raw).map_err(|error| row_conversion_failure(9, error))?;
+    let selected_backend_id: Option<String> = row.get(10)?;
+    let model_kind: Option<String> = row.get(11)?;
+    let model_value: Option<String> = row.get(12)?;
+    let selected_model = match model_kind.as_deref() {
+        None => ModelSelection::default(),
+        Some(kind) => ModelSelection::parse(kind, model_value.as_deref())
+            .map_err(|error| row_conversion_failure(11, error))?,
+    };
     Ok(ChatSession {
         id: row.get(0)?,
         title: row.get(1)?,
@@ -523,7 +929,16 @@ fn map_session_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChatSession> {
         mode: row.get(5)?,
         created_at: row.get(6)?,
         updated_at: row.get(7)?,
+        backend,
+        backend_status,
+        selected_backend_id,
+        selected_model,
+        selection_revision: row.get(13)?,
     })
+}
+
+fn row_conversion_failure(column: usize, error: crate::error::AppError) -> rusqlite::Error {
+    rusqlite::Error::FromSqlConversionFailure(column, rusqlite::types::Type::Text, Box::new(error))
 }
 
 pub fn get_settings(conn: &Connection) -> AppResult<AppSettings> {
@@ -561,6 +976,14 @@ pub fn get_settings(conn: &Connection) -> AppResult<AppSettings> {
             // Removed account mirror. Hub authentication is the sole identity source.
             "user_name" => {}
             "knowledge_dir" => settings.knowledge_dir = value,
+            "claude_agent_enabled" => {
+                settings.claude_agent_enabled = matches!(
+                    value.trim().to_lowercase().as_str(),
+                    "1" | "true" | "yes" | "on"
+                );
+            }
+            "claude_cli_path" => settings.claude_cli_path = value,
+            "claude_custom_models" => settings.claude_custom_models = value,
             // legacy "top_k" rows ignored — retrieval uses DEFAULT_TOP_K
             _ => {}
         }
@@ -573,7 +996,18 @@ pub fn get_settings(conn: &Connection) -> AppResult<AppSettings> {
     Ok(settings)
 }
 
-pub fn save_settings(conn: &Connection, settings: &AppSettings) -> AppResult<()> {
+fn upsert_settings(conn: &Connection, pairs: &[(&str, String)]) -> AppResult<()> {
+    for (key, value) in pairs {
+        conn.execute(
+            "INSERT INTO settings(key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![key, value],
+        )?;
+    }
+    Ok(())
+}
+
+pub fn save_general_settings(conn: &Connection, settings: &GeneralSettingsUpdate) -> AppResult<()> {
     let pairs = [
         ("llm_base_url", settings.llm_base_url.clone()),
         ("llm_api_key", settings.llm_api_key.clone()),
@@ -592,14 +1026,7 @@ pub fn save_settings(conn: &Connection, settings: &AppSettings) -> AppResult<()>
         ("display_language", settings.display_language.clone()),
         ("knowledge_dir", settings.knowledge_dir.trim().to_string()),
     ];
-    for (key, value) in pairs {
-        conn.execute(
-            "INSERT INTO settings(key, value) VALUES (?1, ?2)
-             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            params![key, value],
-        )?;
-    }
-    Ok(())
+    upsert_settings(conn, &pairs)
 }
 
 const HUB_REFRESH_TOKEN_KEY: &str = "hub_refresh_token";
@@ -866,12 +1293,26 @@ pub fn lexical_search(
 }
 
 pub fn create_session(conn: &Connection, title: &str) -> AppResult<ChatSession> {
+    let (backend, model) = default_selection_for_new_session(conn, &current_chat_model(conn));
     let id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
     conn.execute(
-        "INSERT INTO chat_sessions (id, title, pinned, archived, title_source, mode, created_at, updated_at)
-         VALUES (?1, ?2, 0, 0, ?3, 'ask', ?4, ?5)",
-        params![id, title, TITLE_SOURCE_PLACEHOLDER, now, now],
+        "INSERT INTO chat_sessions (id, title, pinned, archived, title_source, mode, created_at, updated_at,
+            selected_backend_id, selected_model_kind, selected_model_value, selection_revision)
+         VALUES (?1, ?2, 0, 0, ?3, 'ask', ?4, ?5, ?6, ?7, ?8, 0)",
+        params![
+            id,
+            title,
+            TITLE_SOURCE_PLACEHOLDER,
+            now,
+            now,
+            backend.as_str(),
+            match model.kind {
+                ModelSelectionKind::Default => "default",
+                ModelSelectionKind::Explicit => "explicit",
+            },
+            model.value
+        ],
     )?;
     Ok(ChatSession {
         id,
@@ -882,17 +1323,22 @@ pub fn create_session(conn: &Connection, title: &str) -> AppResult<ChatSession> 
         mode: "ask".to_string(),
         created_at: now.clone(),
         updated_at: now,
+        backend: None,
+        backend_status: ChatBackendStatus::Uninitialized,
+        selected_backend_id: Some(backend.as_str().to_string()),
+        selected_model: model,
+        selection_revision: 0,
     })
 }
 
 pub fn get_or_create_initial_session(conn: &Connection) -> AppResult<ChatSession> {
-    let mut stmt = conn.prepare(
-        "SELECT id, title, pinned, archived, title_source, mode, created_at, updated_at
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {SESSION_COLUMNS}
          FROM chat_sessions
          WHERE archived = 0
          ORDER BY pinned DESC, updated_at DESC
-         LIMIT 1",
-    )?;
+         LIMIT 1"
+    ))?;
     let mut rows = stmt.query([])?;
     if let Some(row) = rows.next()? {
         return Ok(map_session_row(row)?);
@@ -903,10 +1349,10 @@ pub fn get_or_create_initial_session(conn: &Connection) -> AppResult<ChatSession
 }
 
 pub fn get_session(conn: &Connection, session_id: &str) -> AppResult<Option<ChatSession>> {
-    let mut stmt = conn.prepare(
-        "SELECT id, title, pinned, archived, title_source, mode, created_at, updated_at
-         FROM chat_sessions WHERE id = ?1",
-    )?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {SESSION_COLUMNS}
+         FROM chat_sessions WHERE id = ?1"
+    ))?;
     let mut rows = stmt.query(params![session_id])?;
     if let Some(row) = rows.next()? {
         Ok(Some(map_session_row(row)?))
@@ -916,13 +1362,24 @@ pub fn get_session(conn: &Connection, session_id: &str) -> AppResult<Option<Chat
 }
 
 pub fn list_sessions(conn: &Connection) -> AppResult<Vec<ChatSession>> {
-    let mut stmt = conn.prepare(
-        "SELECT id, title, pinned, archived, title_source, mode, created_at, updated_at
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {SESSION_COLUMNS}
          FROM chat_sessions
-         ORDER BY pinned DESC, updated_at DESC",
-    )?;
+         ORDER BY pinned DESC, updated_at DESC"
+    ))?;
     let rows = stmt.query_map([], map_session_row)?;
-    Ok(rows.filter_map(|r| r.ok()).collect())
+    let sessions = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(sessions)
+}
+
+pub fn list_distinct_backend_ids(conn: &Connection) -> AppResult<Vec<String>> {
+    let mut stmt = conn.prepare(
+        "SELECT DISTINCT backend FROM chat_sessions WHERE backend IS NOT NULL
+         UNION SELECT DISTINCT selected_backend_id FROM chat_sessions WHERE selected_backend_id IS NOT NULL
+         ORDER BY 1",
+    )?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1016,6 +1473,601 @@ pub fn set_session_title_llm(
     Ok(current)
 }
 
+pub fn begin_chat_turn(
+    conn: &mut Connection,
+    session_id: &str,
+    expected_revision: u32,
+    content: &str,
+) -> AppResult<PreparedChatTurn> {
+    let tx = conn.transaction()?;
+    let row = tx
+        .query_row(
+            "SELECT backend, selected_backend_id, selected_model_kind, selected_model_value, mode,
+                    selection_revision, title_source
+             FROM chat_sessions WHERE id = ?1",
+            params![session_id],
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, u32>(5)?,
+                    row.get::<_, String>(6)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((backend, selected_backend_id, model_kind, model_value, mode, revision, title_source)) =
+        row
+    else {
+        return Err(crate::error::AppError::msg(format!(
+            "Session not found: {session_id}"
+        )));
+    };
+    if revision != expected_revision {
+        return Err(crate::error::AppError::msg("chat_selection_stale"));
+    }
+    let selected_model = match model_kind.as_deref() {
+        None => ModelSelection::default(),
+        Some(kind) => ModelSelection::parse(kind, model_value.as_deref())?,
+    };
+
+    let backend = match backend.as_deref() {
+        Some(persisted) => BackendId::parse(persisted)?,
+        None => {
+            let requested = selected_backend_id
+                .as_deref()
+                .and_then(|value| BackendId::parse(value).ok())
+                .unwrap_or_else(BackendId::nest);
+            let initial_status = if requested.as_str() == "nest" {
+                ChatBackendStatus::Ready
+            } else {
+                ChatBackendStatus::Uninitialized
+            };
+            tx.execute(
+                "UPDATE chat_sessions
+                 SET backend = ?1, backend_status = ?2, selected_backend_id = ?1
+                 WHERE id = ?3 AND backend IS NULL",
+                params![requested.as_str(), initial_status.as_str(), session_id],
+            )?;
+            if title_source == TITLE_SOURCE_PLACEHOLDER && requested.as_str() == "claude" {
+                let title = local_session_title(content);
+                tx.execute(
+                    "UPDATE chat_sessions SET title = ?1, title_source = ?2 WHERE id = ?3",
+                    params![title, TITLE_SOURCE_LOCAL, session_id],
+                )?;
+            }
+            requested
+        }
+    };
+
+    let message_id = Uuid::new_v4().to_string();
+    let turn_id = Uuid::new_v4().to_string();
+    let now = Utc::now().to_rfc3339();
+    tx.execute(
+        "INSERT INTO chat_messages (id, session_id, role, content, citations_json, thinking, thinking_seconds, created_at)
+         VALUES (?1, ?2, 'user', ?3, '', NULL, NULL, ?4)",
+        params![message_id, session_id, content, now],
+    )?;
+    tx.execute(
+        "UPDATE chat_sessions SET updated_at = ?1 WHERE id = ?2",
+        params![now, session_id],
+    )?;
+    tx.execute(
+        "INSERT INTO chat_turns (id, session_id, user_message_id, backend_id,
+            requested_model_kind, requested_model_value, mode, selection_revision, status, started_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'running', ?9)",
+        params![
+            turn_id,
+            session_id,
+            message_id,
+            backend.as_str(),
+            match selected_model.kind {
+                ModelSelectionKind::Default => "default",
+                ModelSelectionKind::Explicit => "explicit",
+            },
+            selected_model.value,
+            mode,
+            revision,
+            now
+        ],
+    )?;
+    tx.commit()?;
+
+    let session = get_session(conn, session_id)?
+        .ok_or_else(|| crate::error::AppError::msg(format!("Session not found: {session_id}")))?;
+    Ok(PreparedChatTurn {
+        session,
+        user_message: ChatMessage {
+            id: message_id,
+            role: "user".into(),
+            content: content.to_string(),
+            citations: None,
+            thinking: None,
+            thinking_seconds: None,
+            file_changes: Vec::new(),
+            created_at: now,
+            turn_id: Some(turn_id.clone()),
+        },
+        turn_id,
+        backend,
+        requested_model: selected_model,
+        mode,
+    })
+}
+
+pub fn finish_chat_turn(
+    conn: &Connection,
+    turn_id: &str,
+    status: &str,
+    effective_model: Option<&str>,
+    assistant_message_id: Option<&str>,
+    error_code: Option<&str>,
+    error_message: Option<&str>,
+) -> AppResult<()> {
+    conn.execute(
+        "UPDATE chat_turns
+         SET status = ?1, effective_model = ?2, error_code = ?3, error_message = ?4,
+             assistant_message_id = ?5, finished_at = ?6
+         WHERE id = ?7 AND status = 'running'",
+        params![
+            status,
+            effective_model,
+            error_code,
+            error_message,
+            assistant_message_id,
+            Utc::now().to_rfc3339(),
+            turn_id
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn set_chat_turn_warnings(
+    conn: &Connection,
+    turn_id: &str,
+    warnings: &[String],
+) -> AppResult<()> {
+    let value = if warnings.is_empty() {
+        None
+    } else {
+        Some(serde_json::to_string(warnings)?)
+    };
+    conn.execute(
+        "UPDATE chat_turns SET warnings_json = ?1 WHERE id = ?2",
+        params![value, turn_id],
+    )?;
+    Ok(())
+}
+
+pub fn commit_assistant_and_finish_turn(
+    conn: &mut Connection,
+    turn_id: &str,
+    session_id: &str,
+    status: &str,
+    effective_model: Option<&str>,
+    message: NewChatMessage<'_>,
+) -> AppResult<ChatMessage> {
+    let tx = conn.transaction()?;
+    let id = Uuid::new_v4().to_string();
+    let now = Utc::now().to_rfc3339();
+    let citations_json = message
+        .citations
+        .map(serde_json::to_string)
+        .transpose()?
+        .unwrap_or_default();
+    tx.execute(
+        "INSERT INTO chat_messages (id, session_id, role, content, citations_json, thinking, thinking_seconds, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![id, session_id, message.role, message.content, citations_json, message.thinking, message.thinking_seconds, now],
+    )?;
+    let mut summaries = Vec::with_capacity(message.file_changes.len());
+    for change in message.file_changes {
+        let change_id = Uuid::new_v4().to_string();
+        tx.execute(
+            "UPDATE chat_file_changes SET status = 'rejected' WHERE path = ?1 AND status IN ('pending', 'conflicted')",
+            params![change.path],
+        )?;
+        if change.old_content == change.new_content {
+            continue;
+        }
+        tx.execute(
+            "INSERT INTO chat_file_changes (id, message_id, path, operation, status, old_content, new_content, rebase_count, last_rebased_at, resolution_reason)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, CASE WHEN ?8 > 0 THEN ?9 ELSE NULL END, ?10)",
+            params![change_id, id, change.path, change.operation, change.status, change.old_content, change.new_content, change.rebase_count, now, change.resolution_reason],
+        )?;
+        summaries.push(ChatFileChangeSummary {
+            id: change_id,
+            path: change.path.clone(),
+            operation: change.operation.to_string(),
+            status: change.status.clone(),
+        });
+    }
+    tx.execute(
+        "UPDATE chat_turns
+         SET status = ?1, effective_model = ?2, assistant_message_id = ?3, finished_at = ?4
+         WHERE id = ?5 AND status = 'running'",
+        params![status, effective_model, id, now, turn_id],
+    )?;
+    tx.commit()?;
+    Ok(ChatMessage {
+        id,
+        role: message.role.to_string(),
+        content: message.content.to_string(),
+        citations: message.citations.map(|c| c.to_vec()),
+        thinking: message.thinking.map(str::to_string),
+        thinking_seconds: message.thinking_seconds,
+        file_changes: summaries,
+        created_at: now,
+        turn_id: None,
+    })
+}
+
+#[allow(dead_code)]
+pub fn set_session_backend_status(
+    conn: &Connection,
+    session_id: &str,
+    status: ChatBackendStatus,
+) -> AppResult<ChatSession> {
+    let n = conn.execute(
+        "UPDATE chat_sessions SET backend_status = ?1 WHERE id = ?2",
+        params![status.as_str(), session_id],
+    )?;
+    if n == 0 {
+        return Err(crate::error::AppError::msg(format!(
+            "Session not found: {session_id}"
+        )));
+    }
+    get_session(conn, session_id)?
+        .ok_or_else(|| crate::error::AppError::msg(format!("Session not found: {session_id}")))
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ClaudeConnectionStatus {
+    Disabled,
+    Connected,
+    LastConnected,
+    #[default]
+    Unavailable,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ClaudeConnectionReport {
+    pub status: ClaudeConnectionStatus,
+    pub configured_cli_path: String,
+    pub resolved_cli_path: String,
+    pub cli_version: String,
+    pub effective_model: String,
+    pub tested_at: String,
+    pub message: Option<String>,
+}
+
+impl ClaudeConnectionReport {
+    pub fn matches_configured(&self, current_cli_path: &str) -> bool {
+        self.configured_cli_path == current_cli_path.trim()
+    }
+}
+
+const CLAUDE_CONNECTION_REPORT_KEY: &str = "claude_connection_report_v1";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClaudeModelOption {
+    pub model_id: String,
+    pub source: ClaudeModelSource,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClaudeModelSource {
+    Default,
+    Observed,
+    Custom,
+}
+
+impl ClaudeModelSource {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ClaudeModelSource::Default => "default",
+            ClaudeModelSource::Observed => "observed",
+            ClaudeModelSource::Custom => "custom",
+        }
+    }
+}
+
+pub fn claude_model_options(observed: &[String], custom_models: &str) -> Vec<ClaudeModelOption> {
+    let mut options = vec![ClaudeModelOption {
+        model_id: String::new(),
+        source: ClaudeModelSource::Default,
+    }];
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for model in observed {
+        let trimmed = model.trim();
+        if trimmed.is_empty() || !seen.insert(trimmed.to_string()) {
+            continue;
+        }
+        options.push(ClaudeModelOption {
+            model_id: trimmed.to_string(),
+            source: ClaudeModelSource::Observed,
+        });
+    }
+    for line in custom_models.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || seen.contains(trimmed) {
+            continue;
+        }
+        seen.insert(trimmed.to_string());
+        options.push(ClaudeModelOption {
+            model_id: trimmed.to_string(),
+            source: ClaudeModelSource::Custom,
+        });
+    }
+    options
+}
+
+pub const OBSERVED_MODEL_LIMIT: usize = 20;
+
+pub fn observed_claude_models(
+    conn: &Connection,
+    configured_cli_path: &str,
+) -> AppResult<Vec<String>> {
+    let mut models: Vec<String> = Vec::new();
+    if let Some(report) = load_claude_connection_report(conn) {
+        if report.matches_configured(configured_cli_path)
+            && report.status == ClaudeConnectionStatus::Connected
+            && !report.effective_model.trim().is_empty()
+        {
+            models.push(report.effective_model.trim().to_string());
+        }
+    }
+    let mut stmt = conn.prepare(
+        "SELECT DISTINCT effective_model FROM chat_turns
+         WHERE backend_id = 'claude'
+           AND status = 'succeeded'
+           AND effective_model IS NOT NULL
+           AND effective_model != ''
+         ORDER BY finished_at DESC",
+    )?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+    for row in rows {
+        let model = row?;
+        if !models.iter().any(|m| m == &model) {
+            models.push(model);
+        }
+        if models.len() >= OBSERVED_MODEL_LIMIT {
+            break;
+        }
+    }
+    Ok(models)
+}
+
+pub fn save_claude_connection_report(
+    conn: &Connection,
+    report: &ClaudeConnectionReport,
+) -> AppResult<()> {
+    conn.execute(
+        "INSERT INTO settings(key, value) VALUES (?1, ?2)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![CLAUDE_CONNECTION_REPORT_KEY, serde_json::to_string(report)?],
+    )?;
+    Ok(())
+}
+
+pub fn load_claude_connection_report(conn: &Connection) -> Option<ClaudeConnectionReport> {
+    conn.query_row(
+        "SELECT value FROM settings WHERE key = ?1",
+        params![CLAUDE_CONNECTION_REPORT_KEY],
+        |row| row.get::<_, String>(0),
+    )
+    .ok()
+    .and_then(|value| serde_json::from_str(&value).ok())
+}
+
+pub fn connection_proven_from(
+    enabled: bool,
+    configured_cli_path: &str,
+    memory: Option<&ClaudeConnectionReport>,
+    persisted: Option<&ClaudeConnectionReport>,
+) -> bool {
+    if !enabled {
+        return false;
+    }
+    if let Some(report) = memory {
+        if report.matches_configured(configured_cli_path) {
+            return report.status == ClaudeConnectionStatus::Connected;
+        }
+    }
+    persisted.is_some_and(|report| {
+        report.status == ClaudeConnectionStatus::Connected
+            && report.matches_configured(configured_cli_path)
+    })
+}
+
+#[allow(dead_code)]
+pub fn normalize_claude_custom_models(input: &str) -> String {
+    let mut seen = std::collections::HashSet::new();
+    let mut lines = Vec::new();
+    for line in input.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if seen.insert(trimmed.to_string()) {
+            lines.push(trimmed.to_string());
+        }
+    }
+    lines.join("\n")
+}
+
+pub const TITLE_SOURCE_LOCAL: &str = "local";
+
+pub fn local_session_title(first_user_message: &str) -> String {
+    let collapsed: String = first_user_message
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let trimmed = collapsed.trim();
+    if trimmed.is_empty() {
+        return "New chat".to_string();
+    }
+    let count = trimmed.chars().count();
+    if count <= 48 {
+        return trimmed.to_string();
+    }
+    let mut shown: String = trimmed.chars().take(48).collect();
+    shown.push('…');
+    shown
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct SelectionPatch {
+    pub selected_backend_id: Option<BackendId>,
+    pub selected_model: Option<ModelSelection>,
+    pub mode: Option<String>,
+}
+
+pub fn update_session_selection(
+    conn: &Connection,
+    session_id: &str,
+    expected_revision: u32,
+    patch: SelectionPatch,
+) -> AppResult<ChatSession> {
+    let current = get_session(conn, session_id)?
+        .ok_or_else(|| crate::error::AppError::msg(format!("Session not found: {session_id}")))?;
+    if current.selection_revision != expected_revision {
+        return Err(crate::error::AppError::msg("chat_selection_stale"));
+    }
+    if let Some(mode) = patch.mode.as_deref() {
+        if mode != "ask" && mode != "agent" {
+            return Err(crate::error::AppError::msg("Invalid chat mode"));
+        }
+    }
+    let mut selected_backend_id = current.selected_backend_id.clone();
+    if let Some(backend) = patch.selected_backend_id {
+        if current.backend.is_some() {
+            return Err(crate::error::AppError::msg(
+                "chat_backend_bound: create a new chat to switch backends",
+            ));
+        }
+        selected_backend_id = Some(backend.as_str().to_string());
+    }
+    let selected_model = patch.selected_model.unwrap_or(current.selected_model);
+    let mode = patch.mode.unwrap_or(current.mode);
+    let now = Utc::now().to_rfc3339();
+    conn.execute(
+        "UPDATE chat_sessions
+         SET selected_backend_id = ?1, selected_model_kind = ?2, selected_model_value = ?3,
+             mode = ?4, selection_revision = selection_revision + 1, updated_at = ?5
+         WHERE id = ?6 AND selection_revision = ?7",
+        params![
+            selected_backend_id,
+            match selected_model.kind {
+                ModelSelectionKind::Default => "default",
+                ModelSelectionKind::Explicit => "explicit",
+            },
+            selected_model.value,
+            mode,
+            now,
+            session_id,
+            expected_revision
+        ],
+    )?;
+    get_session(conn, session_id)?
+        .ok_or_else(|| crate::error::AppError::msg(format!("Session not found: {session_id}")))
+}
+
+#[allow(dead_code)]
+pub fn default_selection_for_new_session(
+    conn: &Connection,
+    current_chat_model: &str,
+) -> (BackendId, ModelSelection) {
+    let mut stmt = match conn.prepare(
+        "SELECT backend, selected_backend_id, selected_model_kind, selected_model_value
+         FROM chat_sessions
+         ORDER BY created_at DESC, id DESC
+         LIMIT 1",
+    ) {
+        Ok(stmt) => stmt,
+        Err(_) => return (BackendId::nest(), ModelSelection::default()),
+    };
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, Option<String>>(0)?,
+            row.get::<_, Option<String>>(1)?,
+            row.get::<_, Option<String>>(2)?,
+            row.get::<_, Option<String>>(3)?,
+        ))
+    });
+    let rows = match rows {
+        Ok(rows) => rows,
+        Err(_) => return (BackendId::nest(), ModelSelection::default()),
+    };
+    if let Some(row) = rows.flatten().next() {
+        let (backend, selected_backend, model_kind, model_value) = row;
+        let backend_id = backend
+            .as_deref()
+            .and_then(|value| BackendId::parse(value).ok())
+            .or_else(|| {
+                selected_backend
+                    .as_deref()
+                    .and_then(|value| BackendId::parse(value).ok())
+            })
+            .unwrap_or_else(BackendId::nest);
+        let model = match model_kind.as_deref() {
+            Some("explicit") => {
+                ModelSelection::parse("explicit", model_value.as_deref()).unwrap_or_default()
+            }
+            _ => {
+                if backend_id.as_str() == "nest" && !current_chat_model.trim().is_empty() {
+                    ModelSelection {
+                        kind: ModelSelectionKind::Explicit,
+                        value: Some(current_chat_model.trim().to_string()),
+                    }
+                } else {
+                    ModelSelection::default()
+                }
+            }
+        };
+        return (backend_id, model);
+    }
+    let model = if !current_chat_model.trim().is_empty() {
+        ModelSelection {
+            kind: ModelSelectionKind::Explicit,
+            value: Some(current_chat_model.trim().to_string()),
+        }
+    } else {
+        ModelSelection::default()
+    };
+    (BackendId::nest(), model)
+}
+
+#[allow(dead_code)]
+pub fn save_claude_settings(
+    conn: &Connection,
+    enabled: bool,
+    cli_path: &str,
+    custom_models: &str,
+) -> AppResult<()> {
+    let pairs = [
+        (
+            "claude_agent_enabled",
+            if enabled {
+                "true".into()
+            } else {
+                "false".into()
+            },
+        ),
+        ("claude_cli_path", cli_path.trim().to_string()),
+        (
+            "claude_custom_models",
+            normalize_claude_custom_models(custom_models),
+        ),
+    ];
+    upsert_settings(conn, &pairs)
+}
+
+#[allow(dead_code)]
 pub fn add_message(
     conn: &mut Connection,
     session_id: &str,
@@ -1038,7 +2090,7 @@ pub fn add_message(
     for change in message.file_changes {
         let change_id = Uuid::new_v4().to_string();
         tx.execute(
-            "UPDATE chat_file_changes SET status = 'rejected' WHERE path = ?1 AND status = 'pending'",
+            "UPDATE chat_file_changes SET status = 'rejected' WHERE path = ?1 AND status IN ('pending', 'conflicted')",
             params![change.path],
         )?;
         // A follow-up Agent turn may intentionally restore the original disk
@@ -1048,22 +2100,26 @@ pub fn add_message(
             continue;
         }
         tx.execute(
-            "INSERT INTO chat_file_changes (id, message_id, path, operation, old_content, new_content)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT INTO chat_file_changes (id, message_id, path, operation, status, old_content, new_content, rebase_count, last_rebased_at, resolution_reason)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, CASE WHEN ?8 > 0 THEN ?9 ELSE NULL END, ?10)",
             params![
                 change_id,
                 id,
                 change.path,
                 change.operation,
+                change.status,
                 change.old_content,
                 change.new_content,
+                change.rebase_count,
+                now,
+                change.resolution_reason,
             ],
         )?;
         summaries.push(ChatFileChangeSummary {
             id: change_id,
             path: change.path.clone(),
             operation: change.operation.clone(),
-            status: "pending".into(),
+            status: change.status.clone(),
         });
     }
     tx.execute(
@@ -1080,13 +2136,16 @@ pub fn add_message(
         thinking_seconds: message.thinking_seconds,
         file_changes: summaries,
         created_at: now,
+        turn_id: None,
     })
 }
 
 pub fn list_messages(conn: &Connection, session_id: &str) -> AppResult<Vec<ChatMessage>> {
     let mut stmt = conn.prepare(
-        "SELECT id, role, content, citations_json, thinking, thinking_seconds, created_at FROM chat_messages
-         WHERE session_id = ?1 ORDER BY created_at ASC",
+        "SELECT m.id, m.role, m.content, m.citations_json, m.thinking, m.thinking_seconds, m.created_at,
+                (SELECT t.id FROM chat_turns t WHERE t.user_message_id = m.id OR t.assistant_message_id = m.id LIMIT 1)
+         FROM chat_messages m
+         WHERE m.session_id = ?1 ORDER BY m.created_at ASC",
     )?;
     let rows = stmt.query_map(params![session_id], |row| {
         let citations_json: String = row.get(3)?;
@@ -1104,6 +2163,7 @@ pub fn list_messages(conn: &Connection, session_id: &str) -> AppResult<Vec<ChatM
             thinking_seconds: row.get(5)?,
             file_changes: Vec::new(),
             created_at: row.get(6)?,
+            turn_id: row.get(7)?,
         })
     })?;
     let mut messages = rows.collect::<Result<Vec<_>, _>>()?;
@@ -1134,7 +2194,7 @@ fn list_file_change_summaries(
 
 pub fn get_chat_file_change(conn: &Connection, change_id: &str) -> AppResult<ChatFileChangeDetail> {
     conn.query_row(
-        "SELECT id, path, operation, status, old_content, new_content FROM chat_file_changes WHERE id = ?1",
+        "SELECT id, path, operation, status, old_content, new_content, rebase_count, last_rebased_at, resolution_reason FROM chat_file_changes WHERE id = ?1",
         params![change_id],
         |row| {
             Ok(ChatFileChangeDetail {
@@ -1144,6 +2204,9 @@ pub fn get_chat_file_change(conn: &Connection, change_id: &str) -> AppResult<Cha
                 status: row.get(3)?,
                 old_content: row.get(4)?,
                 new_content: row.get(5)?,
+                rebase_count: row.get(6)?,
+                last_rebased_at: row.get(7)?,
+                resolution_reason: row.get(8)?,
             })
         },
     )
@@ -1155,9 +2218,9 @@ pub fn get_pending_chat_file_change_for_path(
     path: &str,
 ) -> AppResult<Option<ChatFileChangeDetail>> {
     conn.query_row(
-        "SELECT id, path, operation, status, old_content, new_content
+        "SELECT id, path, operation, status, old_content, new_content, rebase_count, last_rebased_at, resolution_reason
          FROM chat_file_changes
-         WHERE path = ?1 AND status = 'pending'
+         WHERE path = ?1 AND status IN ('pending', 'conflicted')
          ORDER BY rowid DESC LIMIT 1",
         params![path],
         |row| {
@@ -1168,6 +2231,9 @@ pub fn get_pending_chat_file_change_for_path(
                 status: row.get(3)?,
                 old_content: row.get(4)?,
                 new_content: row.get(5)?,
+                rebase_count: row.get(6)?,
+                last_rebased_at: row.get(7)?,
+                resolution_reason: row.get(8)?,
             })
         },
     )
@@ -1177,7 +2243,7 @@ pub fn get_pending_chat_file_change_for_path(
 
 pub fn list_pending_chat_file_changes(conn: &Connection) -> AppResult<Vec<ChatFileChangeDetail>> {
     let mut stmt = conn.prepare(
-        "SELECT id, path, operation, status, old_content, new_content
+        "SELECT id, path, operation, status, old_content, new_content, rebase_count, last_rebased_at, resolution_reason
          FROM chat_file_changes WHERE status = 'pending' ORDER BY rowid",
     )?;
     let rows = stmt.query_map([], |row| {
@@ -1188,9 +2254,54 @@ pub fn list_pending_chat_file_changes(conn: &Connection) -> AppResult<Vec<ChatFi
             status: row.get(3)?,
             old_content: row.get(4)?,
             new_content: row.get(5)?,
+            rebase_count: row.get(6)?,
+            last_rebased_at: row.get(7)?,
+            resolution_reason: row.get(8)?,
         })
     })?;
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
+pub fn list_claimed_chat_file_changes(conn: &Connection) -> AppResult<Vec<ClaimedChatFileChange>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, path, status, claim_id, claim_kind,
+                apply_expected_old_hash, apply_expected_new_hash
+         FROM chat_file_changes
+         WHERE status IN ('applying', 'rebasing') AND claim_id IS NOT NULL
+         ORDER BY rowid",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(ClaimedChatFileChange {
+            id: row.get(0)?,
+            path: row.get(1)?,
+            status: row.get(2)?,
+            claim_id: row.get(3)?,
+            claim_kind: row.get(4)?,
+            expected_old_hash: row.get(5)?,
+            expected_new_hash: row.get(6)?,
+        })
+    })?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
+pub fn approve_chat_file_change(
+    conn: &Connection,
+    change_id: &str,
+    claim_id: &str,
+) -> AppResult<()> {
+    let changed = conn.execute(
+        "UPDATE chat_file_changes
+         SET status = 'approved', claim_id = NULL, claim_kind = NULL, claimed_at = NULL,
+             apply_journal_json = NULL
+         WHERE id = ?1 AND status = 'applying' AND claim_id = ?2 AND claim_kind = 'apply'",
+        params![change_id, claim_id],
+    )?;
+    if changed == 0 {
+        return Err(crate::error::AppError::msg(
+            "File change is no longer pending",
+        ));
+    }
+    Ok(())
 }
 
 pub fn set_chat_file_change_status(
@@ -1202,7 +2313,8 @@ pub fn set_chat_file_change_status(
         return Err(crate::error::AppError::msg("Invalid file-change status"));
     }
     let changed = conn.execute(
-        "UPDATE chat_file_changes SET status = ?1 WHERE id = ?2 AND status = 'pending'",
+        "UPDATE chat_file_changes SET status = ?1
+         WHERE id = ?2 AND (status = 'pending' OR (status = 'conflicted' AND ?1 = 'rejected'))",
         params![status, change_id],
     )?;
     if changed == 0 {
@@ -1211,6 +2323,303 @@ pub fn set_chat_file_change_status(
         ));
     }
     Ok(())
+}
+
+pub fn claim_chat_file_change(
+    conn: &Connection,
+    change_id: &str,
+    claim_id: &str,
+    claim_kind: &str,
+    expected_old_hash: Option<&str>,
+    expected_new_hash: Option<&str>,
+) -> AppResult<()> {
+    if claim_kind != "apply" && claim_kind != "rebase" {
+        return Err(crate::error::AppError::msg("Invalid proposal claim kind"));
+    }
+    let status = if claim_kind == "apply" {
+        "applying"
+    } else {
+        "rebasing"
+    };
+    let changed = conn.execute(
+        "UPDATE chat_file_changes
+         SET status = ?1, claim_id = ?2, claim_kind = ?3, claimed_at = ?4,
+             apply_expected_old_hash = ?5, apply_expected_new_hash = ?6,
+             apply_journal_json = ?7
+         WHERE id = ?8 AND status = 'pending' AND claim_id IS NULL",
+        params![
+            status,
+            claim_id,
+            claim_kind,
+            Utc::now().to_rfc3339(),
+            expected_old_hash,
+            expected_new_hash,
+            serde_json::json!({ "phase": "claimed" }).to_string(),
+            change_id
+        ],
+    )?;
+    if changed == 0 {
+        return Err(crate::error::AppError::msg(
+            "File change is no longer pending",
+        ));
+    }
+    Ok(())
+}
+
+pub fn rebase_chat_file_change(
+    conn: &Connection,
+    change_id: &str,
+    new_old_content: Option<&str>,
+    new_new_content: Option<&str>,
+    old_hash: &str,
+    new_hash: &str,
+    claim_id: &str,
+) -> AppResult<()> {
+    let changed = conn.execute(
+        "UPDATE chat_file_changes
+         SET old_content = ?1, new_content = ?2,
+             rebase_count = rebase_count + 1,
+             last_rebased_at = ?3,
+             rebased_from_old_hash = ?4,
+             rebased_from_new_hash = ?5,
+             status = 'pending', claim_id = NULL, claim_kind = NULL, claimed_at = NULL,
+             apply_journal_json = NULL
+         WHERE id = ?6 AND status = 'rebasing' AND claim_id = ?7 AND claim_kind = 'rebase'",
+        params![
+            new_old_content,
+            new_new_content,
+            Utc::now().to_rfc3339(),
+            old_hash,
+            new_hash,
+            change_id,
+            claim_id
+        ],
+    )?;
+    ensure_claim_updated(changed)?;
+    Ok(())
+}
+
+pub fn resolve_chat_file_change_externally(
+    conn: &Connection,
+    change_id: &str,
+    reason: &str,
+    claim_id: &str,
+) -> AppResult<()> {
+    let changed = conn.execute(
+        "UPDATE chat_file_changes
+         SET status = 'resolved_external', resolution_reason = ?1,
+             claim_id = NULL, claim_kind = NULL, claimed_at = NULL, apply_journal_json = NULL
+         WHERE id = ?2 AND status = 'rebasing' AND claim_id = ?3 AND claim_kind = 'rebase'",
+        params![reason, change_id, claim_id],
+    )?;
+    ensure_claim_updated(changed)?;
+    Ok(())
+}
+
+pub fn conflict_chat_file_change(
+    conn: &Connection,
+    change_id: &str,
+    reason: &str,
+    claim_id: &str,
+) -> AppResult<()> {
+    let changed = conn.execute(
+        "UPDATE chat_file_changes
+         SET status = 'conflicted', resolution_reason = ?1,
+             claim_id = NULL, claim_kind = NULL, claimed_at = NULL, apply_journal_json = NULL
+         WHERE id = ?2 AND status = 'rebasing' AND claim_id = ?3 AND claim_kind = 'rebase'",
+        params![reason, change_id, claim_id],
+    )?;
+    ensure_claim_updated(changed)?;
+    Ok(())
+}
+
+pub fn conflict_claimed_chat_file_change(
+    conn: &Connection,
+    change_id: &str,
+    reason: &str,
+    claim_id: &str,
+) -> AppResult<()> {
+    let changed = conn.execute(
+        "UPDATE chat_file_changes
+         SET status = 'conflicted', resolution_reason = ?1,
+             claim_id = NULL, claim_kind = NULL, claimed_at = NULL, apply_journal_json = NULL
+         WHERE id = ?2 AND status IN ('applying', 'rebasing') AND claim_id = ?3",
+        params![reason, change_id, claim_id],
+    )?;
+    ensure_claim_updated(changed)
+}
+
+fn ensure_claim_updated(changed: usize) -> AppResult<()> {
+    if changed == 0 {
+        return Err(crate::error::AppError::msg(
+            "proposal_claim_lost: proposal claim is no longer owned by this operation",
+        ));
+    }
+    Ok(())
+}
+
+pub fn mark_chat_file_change_written(
+    conn: &Connection,
+    change_id: &str,
+    claim_id: &str,
+) -> AppResult<()> {
+    let changed = conn.execute(
+        "UPDATE chat_file_changes SET apply_journal_json = ?1
+         WHERE id = ?2 AND status = 'applying' AND claim_id = ?3 AND claim_kind = 'apply'",
+        params![
+            serde_json::json!({ "phase": "written" }).to_string(),
+            change_id,
+            claim_id
+        ],
+    )?;
+    ensure_claim_updated(changed)
+}
+
+pub fn fail_chat_file_change(
+    conn: &Connection,
+    change_id: &str,
+    failure_code: &str,
+    failure_message: &str,
+    claim_id: &str,
+) -> AppResult<()> {
+    let changed = conn.execute(
+        "UPDATE chat_file_changes
+         SET status = 'failed', failure_code = ?1, failure_message = ?2,
+             claim_id = NULL, claim_kind = NULL, claimed_at = NULL, apply_journal_json = NULL
+         WHERE id = ?3 AND status = 'applying' AND claim_id = ?4 AND claim_kind = 'apply'",
+        params![failure_code, failure_message, change_id, claim_id],
+    )?;
+    ensure_claim_updated(changed)
+}
+
+pub fn release_chat_file_change_claim(
+    conn: &Connection,
+    change_id: &str,
+    claim_id: &str,
+) -> AppResult<()> {
+    let changed = conn.execute(
+        "UPDATE chat_file_changes
+         SET status = 'pending', claim_id = NULL, claim_kind = NULL, claimed_at = NULL,
+             apply_journal_json = NULL
+         WHERE id = ?1 AND claim_id = ?2 AND status IN ('applying', 'rebasing')",
+        params![change_id, claim_id],
+    )?;
+    ensure_claim_updated(changed)
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ToolActivityRow {
+    pub id: String,
+    pub turn_id: String,
+    pub sequence: i64,
+    pub source: String,
+    pub kind: String,
+    pub status: String,
+    pub label: String,
+    pub target: Option<String>,
+    pub started_at: String,
+    pub finished_at: Option<String>,
+}
+
+pub fn insert_tool_activity(
+    conn: &Connection,
+    turn_id: &str,
+    sequence: i64,
+    source: &str,
+    kind: &str,
+    label: &str,
+    target: Option<&str>,
+) -> AppResult<()> {
+    conn.execute(
+        "INSERT OR IGNORE INTO chat_tool_activities
+            (id, turn_id, sequence, source, kind, status, label, target, started_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, 'running', ?6, ?7, ?8)",
+        params![
+            uuid::Uuid::new_v4().to_string(),
+            turn_id,
+            sequence,
+            source,
+            kind,
+            label,
+            target,
+            Utc::now().to_rfc3339()
+        ],
+    )?;
+    Ok(())
+}
+
+#[allow(dead_code)]
+pub fn finish_tool_activity(
+    conn: &Connection,
+    turn_id: &str,
+    sequence: i64,
+    status: &str,
+) -> AppResult<()> {
+    conn.execute(
+        "UPDATE chat_tool_activities
+         SET status = ?1, finished_at = ?2
+         WHERE turn_id = ?3 AND sequence = ?4",
+        params![status, Utc::now().to_rfc3339(), turn_id, sequence],
+    )?;
+    Ok(())
+}
+
+pub fn finalize_running_tool_activities(
+    conn: &Connection,
+    turn_id: &str,
+    status: &str,
+) -> AppResult<()> {
+    conn.execute(
+        "UPDATE chat_tool_activities
+         SET status = ?1, finished_at = ?2
+         WHERE turn_id = ?3 AND status = 'running'",
+        params![status, Utc::now().to_rfc3339(), turn_id],
+    )?;
+    Ok(())
+}
+
+pub fn recover_interrupted_turns(conn: &Connection) -> AppResult<usize> {
+    let now = Utc::now().to_rfc3339();
+    conn.execute(
+        "UPDATE chat_turns
+         SET status = 'interrupted',
+             error_code = COALESCE(error_code, 'app_shutdown'),
+             finished_at = COALESCE(finished_at, ?1)
+         WHERE status = 'running'",
+        params![now],
+    )?;
+    let count = conn.execute(
+        "UPDATE chat_tool_activities
+         SET status = 'interrupted', finished_at = ?1
+         WHERE status = 'running'
+           AND turn_id IN (SELECT id FROM chat_turns WHERE status = 'interrupted')",
+        params![now],
+    )?;
+    Ok(count)
+}
+
+pub fn list_tool_activities(conn: &Connection, turn_id: &str) -> AppResult<Vec<ToolActivityRow>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, turn_id, sequence, source, kind, status, label, target, started_at, finished_at
+         FROM chat_tool_activities
+         WHERE turn_id = ?1
+         ORDER BY sequence ASC",
+    )?;
+    let rows = stmt.query_map(params![turn_id], |row| {
+        Ok(ToolActivityRow {
+            id: row.get(0)?,
+            turn_id: row.get(1)?,
+            sequence: row.get(2)?,
+            source: row.get(3)?,
+            kind: row.get(4)?,
+            status: row.get(5)?,
+            label: row.get(6)?,
+            target: row.get(7)?,
+            started_at: row.get(8)?,
+            finished_at: row.get(9)?,
+        })
+    })?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
 }
 
 /// Parameters for `upsert_sync_state` — grouped into a struct since the
@@ -1658,6 +3067,9 @@ mod sync_state_tests {
                     operation: "modified".into(),
                     old_content: Some("before".into()),
                     new_content: Some("after".into()),
+                    status: "pending".into(),
+                    rebase_count: 0,
+                    resolution_reason: None,
                 }],
             },
         )
@@ -1691,12 +3103,18 @@ mod sync_state_tests {
             operation: "created".into(),
             old_content: None,
             new_content: Some("draft".into()),
+            status: "pending".into(),
+            rebase_count: 0,
+            resolution_reason: None,
         }];
         let reverted = [NewChatFileChange {
             path: "sample/new.md".into(),
             operation: "modified".into(),
             old_content: None,
             new_content: None,
+            status: "pending".into(),
+            rebase_count: 0,
+            resolution_reason: None,
         }];
         for changes in [&proposed[..], &reverted[..]] {
             add_message(
@@ -1718,6 +3136,43 @@ mod sync_state_tests {
                 .unwrap()
                 .is_none()
         );
+    }
+
+    #[test]
+    fn conflicted_turn_proposal_persists_conflict_and_rebase_metadata() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        let session = create_session(&conn, "Agent work").unwrap();
+        let message = add_message(
+            &mut conn,
+            &session.id,
+            NewChatMessage {
+                role: "assistant",
+                content: "Conflict detected.",
+                citations: None,
+                thinking: None,
+                thinking_seconds: None,
+                file_changes: &[NewChatFileChange {
+                    path: "sample/conflict.md".into(),
+                    operation: "modified".into(),
+                    old_content: Some("direct".into()),
+                    new_content: Some("proposed".into()),
+                    status: "conflicted".into(),
+                    rebase_count: 1,
+                    resolution_reason: Some("overlap".into()),
+                }],
+            },
+        )
+        .unwrap();
+
+        assert_eq!(message.file_changes[0].status, "conflicted");
+        let detail = get_chat_file_change(&conn, &message.file_changes[0].id).unwrap();
+        assert_eq!(detail.status, "conflicted");
+        assert_eq!(detail.rebase_count, 1);
+        assert_eq!(detail.resolution_reason.as_deref(), Some("overlap"));
+        let reviewable =
+            get_pending_chat_file_change_for_path(&conn, "sample/conflict.md").unwrap();
+        assert_eq!(reviewable.unwrap().status, "conflicted");
     }
 
     #[test]
@@ -1772,5 +3227,789 @@ mod sync_state_tests {
         assert_eq!(cleared.publish_review_created_at, None);
         assert!(!cleared.pending_can_cancel);
         assert_eq!(cleared.version, "1.0.0", "clearing must not touch version");
+    }
+}
+
+#[cfg(test)]
+mod chat_backend_tests {
+    use super::*;
+
+    fn migrated_db() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        conn
+    }
+
+    fn legacy_db_with_session() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE chat_sessions (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                pinned INTEGER NOT NULL DEFAULT 0,
+                archived INTEGER NOT NULL DEFAULT 0,
+                title_source TEXT NOT NULL DEFAULT 'placeholder',
+                mode TEXT NOT NULL DEFAULT 'ask',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            INSERT INTO chat_sessions
+                (id, title, title_source, mode, created_at, updated_at)
+            VALUES
+                ('legacy', 'Old chat', 'llm', 'ask', '2020-01-01T00:00:00Z', '2020-01-01T00:00:00Z');",
+        )
+        .unwrap();
+        migrate(&conn).unwrap();
+        conn
+    }
+
+    #[test]
+    fn migrates_existing_sessions_to_nest_ready() {
+        let conn = legacy_db_with_session();
+        let session = get_session(&conn, "legacy").unwrap().unwrap();
+        assert_eq!(session.backend, Some(BackendId::nest()));
+        assert_eq!(session.backend_status, ChatBackendStatus::Ready);
+        assert_eq!(
+            session.selected_backend_id.as_deref(),
+            Some("nest"),
+            "bound legacy sessions inherit their backend as selection"
+        );
+        assert_eq!(session.selected_model.kind, ModelSelectionKind::Default);
+        assert_eq!(session.selection_revision, 0);
+    }
+
+    #[test]
+    fn new_sessions_start_with_nest_selection_and_zero_revision() {
+        let conn = migrated_db();
+        let session = create_session(&conn, "New chat").unwrap();
+        assert_eq!(session.backend, None);
+        assert_eq!(session.selected_backend_id.as_deref(), Some("nest"));
+        assert_eq!(session.selected_model.kind, ModelSelectionKind::Default);
+        assert_eq!(session.selection_revision, 0);
+    }
+
+    #[test]
+    fn model_selection_parse_validates_kind_and_value() {
+        assert_eq!(
+            ModelSelection::parse("default", None).unwrap().kind,
+            ModelSelectionKind::Default
+        );
+        assert!(ModelSelection::parse("explicit", Some("glm-5.3")).is_ok());
+        assert!(ModelSelection::parse("explicit", None).is_err());
+        assert!(ModelSelection::parse("explicit", Some("  ")).is_err());
+        assert!(ModelSelection::parse("bogus", None).is_err());
+    }
+
+    #[test]
+    fn cli_model_arg_maps_selection_to_transport() {
+        let default = ModelSelection::default();
+        assert_eq!(default.cli_model_arg(), Some("default"));
+        let explicit = ModelSelection::parse("explicit", Some("glm-5.3")).unwrap();
+        assert_eq!(explicit.cli_model_arg(), Some("glm-5.3"));
+    }
+
+    #[test]
+    fn selection_update_requires_matching_revision() {
+        let conn = migrated_db();
+        let session = create_session(&conn, "New chat").unwrap();
+        let updated = update_session_selection(
+            &conn,
+            &session.id,
+            0,
+            SelectionPatch {
+                selected_backend_id: Some(BackendId::claude()),
+                selected_model: Some(ModelSelection::parse("explicit", Some("glm-5.3")).unwrap()),
+                mode: Some("agent".to_string()),
+            },
+        )
+        .unwrap();
+        assert_eq!(updated.selection_revision, 1);
+        assert_eq!(updated.selected_backend_id.as_deref(), Some("claude"));
+        assert_eq!(updated.selected_model.value.as_deref(), Some("glm-5.3"));
+        assert_eq!(updated.mode, "agent");
+
+        let stale = update_session_selection(&conn, &session.id, 0, SelectionPatch::default());
+        assert!(stale.is_err());
+        let message = stale.unwrap_err().to_string();
+        assert!(message.contains("chat_selection_stale"));
+    }
+
+    #[test]
+    fn bound_sessions_reject_backend_selection_change() {
+        let conn = migrated_db();
+        let session = create_session(&conn, "New chat").unwrap();
+        let mut conn = conn;
+        begin_chat_turn(&mut conn, &session.id, 0, "hi").unwrap();
+        let result = update_session_selection(
+            &conn,
+            &session.id,
+            0,
+            SelectionPatch {
+                selected_backend_id: Some(BackendId::nest()),
+                ..Default::default()
+            },
+        );
+        assert!(result.is_err());
+        let message = result.unwrap_err().to_string();
+        assert!(message.contains("chat_backend_bound"));
+    }
+
+    #[test]
+    fn bound_sessions_can_still_change_model_and_mode() {
+        let conn = migrated_db();
+        let session = create_session(&conn, "New chat").unwrap();
+        update_session_selection(
+            &conn,
+            &session.id,
+            0,
+            SelectionPatch {
+                selected_backend_id: Some(BackendId::claude()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let mut conn = conn;
+        begin_chat_turn(&mut conn, &session.id, 1, "hi").unwrap();
+        let updated = update_session_selection(
+            &conn,
+            &session.id,
+            1,
+            SelectionPatch {
+                selected_model: Some(ModelSelection::parse("explicit", Some("glm-4.7")).unwrap()),
+                mode: Some("agent".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(updated.selected_model.value.as_deref(), Some("glm-4.7"));
+        assert_eq!(updated.mode, "agent");
+        assert_eq!(updated.backend, Some(BackendId::claude()));
+    }
+
+    #[test]
+    fn new_session_defaults_inherit_most_recent_session() {
+        let conn = migrated_db();
+        conn.execute(
+            "INSERT INTO settings(key, value) VALUES ('chat_model', 'gpt-test')",
+            [],
+        )
+        .unwrap();
+        let first = create_session(&conn, "a").unwrap();
+        update_session_selection(
+            &conn,
+            &first.id,
+            0,
+            SelectionPatch {
+                selected_backend_id: Some(BackendId::claude()),
+                selected_model: Some(ModelSelection::parse("explicit", Some("glm-5.3")).unwrap()),
+                mode: None,
+            },
+        )
+        .unwrap();
+
+        let (backend, model) = default_selection_for_new_session(&conn, "gpt-test");
+        assert_eq!(backend, BackendId::claude());
+        assert_eq!(model.value.as_deref(), Some("glm-5.3"));
+
+        let (backend, model) = default_selection_for_new_session(&conn, "");
+        assert_eq!(backend, BackendId::claude());
+        assert_eq!(
+            model.value.as_deref(),
+            Some("glm-5.3"),
+            "recent session selection inherits verbatim regardless of current chat_model"
+        );
+    }
+
+    #[test]
+    fn no_history_defaults_to_nest_with_configured_model() {
+        let conn = migrated_db();
+        let (backend, model) = default_selection_for_new_session(&conn, "gpt-test");
+        assert_eq!(backend, BackendId::nest());
+        assert_eq!(model.value.as_deref(), Some("gpt-test"));
+        let (backend, model) = default_selection_for_new_session(&conn, "");
+        assert_eq!(backend, BackendId::nest());
+        assert_eq!(model.kind, ModelSelectionKind::Default);
+    }
+
+    #[test]
+    fn local_title_collapses_whitespace_and_truncates() {
+        assert_eq!(local_session_title("hello"), "hello");
+        assert_eq!(local_session_title("  a \n b\t c  "), "a b c");
+        assert_eq!(local_session_title(""), "New chat");
+        assert_eq!(local_session_title("   \n\t "), "New chat");
+        let long = "x".repeat(60);
+        let title = local_session_title(&long);
+        assert_eq!(title.chars().count(), 49);
+        assert!(title.ends_with('…'));
+        let exactly = "y".repeat(48);
+        assert_eq!(local_session_title(&exactly), exactly);
+    }
+
+    #[test]
+    fn migration_backfill_runs_once_and_never_touches_new_unbound_sessions() {
+        let conn = legacy_db_with_session();
+        migrate(&conn).unwrap();
+        let legacy = get_session(&conn, "legacy").unwrap().unwrap();
+        assert_eq!(legacy.backend, Some(BackendId::nest()));
+        assert_eq!(legacy.backend_status, ChatBackendStatus::Ready);
+        let fresh = create_session(&conn, "New chat").unwrap();
+        migrate(&conn).unwrap();
+        let fresh = get_session(&conn, &fresh.id).unwrap().unwrap();
+        assert_eq!(fresh.backend, None);
+        assert_eq!(fresh.backend_status, ChatBackendStatus::Uninitialized);
+    }
+
+    #[test]
+    fn new_sessions_start_unbound_and_uninitialized() {
+        let conn = migrated_db();
+        let session = create_session(&conn, "New chat").unwrap();
+        assert_eq!(session.backend, None);
+        assert_eq!(session.backend_status, ChatBackendStatus::Uninitialized);
+    }
+
+    #[test]
+    fn first_bind_nest_marks_ready_and_persists_user_message() {
+        let conn = migrated_db();
+        let session = create_session(&conn, "New chat").unwrap();
+        let mut conn = conn;
+        let prepared = begin_chat_turn(&mut conn, &session.id, 0, "hi").unwrap();
+        assert_eq!(prepared.session.backend, Some(BackendId::nest()));
+        assert_eq!(prepared.session.backend_status, ChatBackendStatus::Ready);
+        assert_eq!(prepared.user_message.role, "user");
+        assert_eq!(prepared.user_message.content, "hi");
+
+        let reloaded = get_session(&conn, &session.id).unwrap().unwrap();
+        assert_eq!(reloaded.backend, Some(BackendId::nest()));
+        assert_eq!(reloaded.backend_status, ChatBackendStatus::Ready);
+        let messages = list_messages(&conn, &session.id).unwrap();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].content, "hi");
+        assert_eq!(messages[0].role, "user");
+    }
+
+    #[test]
+    fn first_bind_claude_stays_uninitialized() {
+        let conn = migrated_db();
+        let session = create_session(&conn, "New chat").unwrap();
+        update_session_selection(
+            &conn,
+            &session.id,
+            0,
+            SelectionPatch {
+                selected_backend_id: Some(BackendId::claude()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let mut conn = conn;
+        let prepared = begin_chat_turn(&mut conn, &session.id, 1, "hi").unwrap();
+        assert_eq!(prepared.session.backend, Some(BackendId::claude()));
+        assert_eq!(
+            prepared.session.backend_status,
+            ChatBackendStatus::Uninitialized
+        );
+    }
+
+    #[test]
+    fn claude_init_marks_session_ready() {
+        let conn = migrated_db();
+        let session = create_session(&conn, "New chat").unwrap();
+        update_session_selection(
+            &conn,
+            &session.id,
+            0,
+            SelectionPatch {
+                selected_backend_id: Some(BackendId::claude()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let mut conn = conn;
+        begin_chat_turn(&mut conn, &session.id, 1, "hi").unwrap();
+        let updated =
+            set_session_backend_status(&conn, &session.id, ChatBackendStatus::Ready).unwrap();
+        assert_eq!(updated.backend, Some(BackendId::claude()));
+        assert_eq!(updated.backend_status, ChatBackendStatus::Ready);
+        assert_eq!(
+            get_session(&conn, &session.id)
+                .unwrap()
+                .unwrap()
+                .backend_status,
+            ChatBackendStatus::Ready
+        );
+    }
+
+    #[test]
+    fn second_bind_keeps_existing_backend_and_still_inserts_message() {
+        let conn = migrated_db();
+        let session = create_session(&conn, "New chat").unwrap();
+        update_session_selection(
+            &conn,
+            &session.id,
+            0,
+            SelectionPatch {
+                selected_backend_id: Some(BackendId::claude()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let mut conn = conn;
+        begin_chat_turn(&mut conn, &session.id, 1, "one").unwrap();
+        let prepared = begin_chat_turn(&mut conn, &session.id, 1, "two").unwrap();
+        assert_eq!(
+            prepared.session.backend,
+            Some(BackendId::claude()),
+            "bound backend wins over any later selection"
+        );
+        let messages = list_messages(&conn, &session.id).unwrap();
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[1].content, "two");
+    }
+
+    #[test]
+    fn begin_chat_turn_rejects_stale_revision() {
+        let conn = migrated_db();
+        let session = create_session(&conn, "New chat").unwrap();
+        let mut conn = conn;
+        let result = begin_chat_turn(&mut conn, &session.id, 7, "hi");
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("chat_selection_stale"));
+    }
+
+    #[test]
+    fn first_claude_turn_writes_local_title() {
+        let conn = migrated_db();
+        let session = create_session(&conn, "New chat").unwrap();
+        update_session_selection(
+            &conn,
+            &session.id,
+            0,
+            SelectionPatch {
+                selected_backend_id: Some(BackendId::claude()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let mut conn = conn;
+        let prepared =
+            begin_chat_turn(&mut conn, &session.id, 1, "how do I export a pack?").unwrap();
+        assert_eq!(prepared.session.title, "how do I export a pack?");
+        assert_eq!(prepared.session.title_source, TITLE_SOURCE_LOCAL);
+    }
+
+    #[test]
+    fn first_nest_turn_keeps_placeholder_title() {
+        let conn = migrated_db();
+        let session = create_session(&conn, "New chat").unwrap();
+        let mut conn = conn;
+        let prepared = begin_chat_turn(&mut conn, &session.id, 0, "hello world").unwrap();
+        assert_eq!(prepared.session.title, "New chat");
+        assert_eq!(prepared.session.title_source, TITLE_SOURCE_PLACEHOLDER);
+    }
+
+    #[test]
+    fn chat_turn_row_is_created_running_then_finished() {
+        let conn = migrated_db();
+        let session = create_session(&conn, "New chat").unwrap();
+        let mut conn = conn;
+        let prepared = begin_chat_turn(&mut conn, &session.id, 0, "hi").unwrap();
+        let status: (String, String) = conn
+            .query_row(
+                "SELECT status, backend_id FROM chat_turns WHERE id = ?1",
+                params![prepared.turn_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(status.0, "running");
+        assert_eq!(status.1, "nest");
+
+        let assistant = add_message(
+            &mut conn,
+            &session.id,
+            NewChatMessage {
+                role: "assistant",
+                content: "answer",
+                citations: None,
+                thinking: None,
+                thinking_seconds: None,
+                file_changes: &[],
+            },
+        )
+        .unwrap();
+        finish_chat_turn(
+            &conn,
+            &prepared.turn_id,
+            "succeeded",
+            Some("gpt-test"),
+            Some(&assistant.id),
+            None,
+            None,
+        )
+        .unwrap();
+        let finished: (String, Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT status, effective_model, assistant_message_id FROM chat_turns WHERE id = ?1",
+                params![prepared.turn_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(finished.0, "succeeded");
+        assert_eq!(finished.1.as_deref(), Some("gpt-test"));
+        assert_eq!(finished.2.as_deref(), Some(assistant.id.as_str()));
+    }
+
+    #[test]
+    fn bind_unknown_session_fails_without_side_effects() {
+        let conn = migrated_db();
+        let mut conn = conn;
+        let result = begin_chat_turn(&mut conn, "00000000-0000-4000-8000-000000000000", 0, "hi");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn unresumable_status_persists() {
+        let conn = migrated_db();
+        let session = create_session(&conn, "New chat").unwrap();
+        update_session_selection(
+            &conn,
+            &session.id,
+            0,
+            SelectionPatch {
+                selected_backend_id: Some(BackendId::claude()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let mut conn = conn;
+        begin_chat_turn(&mut conn, &session.id, 1, "hi").unwrap();
+        set_session_backend_status(&conn, &session.id, ChatBackendStatus::Unresumable).unwrap();
+        let reloaded = get_session(&conn, &session.id).unwrap().unwrap();
+        assert_eq!(reloaded.backend, Some(BackendId::claude()));
+        assert_eq!(reloaded.backend_status, ChatBackendStatus::Unresumable);
+    }
+
+    #[test]
+    fn unknown_backend_values_round_trip_without_falling_back() {
+        let conn = migrated_db();
+        let session = create_session(&conn, "New chat").unwrap();
+        conn.execute(
+            "UPDATE chat_sessions SET backend = 'grok' WHERE id = ?1",
+            params![session.id],
+        )
+        .unwrap();
+        assert_eq!(
+            get_session(&conn, &session.id)
+                .unwrap()
+                .unwrap()
+                .backend
+                .unwrap()
+                .as_str(),
+            "grok"
+        );
+    }
+
+    #[test]
+    fn list_sessions_preserves_unknown_backend_value() {
+        let conn = migrated_db();
+        create_session(&conn, "a").unwrap();
+        create_session(&conn, "b").unwrap();
+        conn.execute(
+            "UPDATE chat_sessions SET backend = 'grok' WHERE id = (SELECT id FROM chat_sessions ORDER BY created_at LIMIT 1)",
+            [],
+        )
+        .unwrap();
+        assert!(list_sessions(&conn).unwrap().iter().any(|session| session
+            .backend
+            .as_ref()
+            .is_some_and(|id| id.as_str() == "grok")));
+    }
+
+    #[test]
+    fn first_message_bumps_session_updated_at() {
+        let conn = migrated_db();
+        let session = create_session(&conn, "New chat").unwrap();
+        let before = session.updated_at.clone();
+        let mut conn = conn;
+        begin_chat_turn(&mut conn, &session.id, 0, "hi").unwrap();
+        let after = get_session(&conn, &session.id).unwrap().unwrap();
+        assert_ne!(after.updated_at, before);
+    }
+
+    #[test]
+    fn unknown_backend_status_values_fail() {
+        let conn = migrated_db();
+        let session = create_session(&conn, "New chat").unwrap();
+        conn.execute(
+            "UPDATE chat_sessions SET backend_status = 'loading' WHERE id = ?1",
+            params![session.id],
+        )
+        .unwrap();
+        assert!(get_session(&conn, &session.id).is_err());
+    }
+
+    #[test]
+    fn general_settings_save_never_writes_claude_keys() {
+        let conn = migrated_db();
+        save_claude_settings(&conn, true, "C:\\claude\\claude.exe", "glm-5.3").unwrap();
+        let mut general = GeneralSettingsUpdate::from(&get_settings(&conn).unwrap());
+        general.chat_model = "gpt-test".into();
+        save_general_settings(&conn, &general).unwrap();
+
+        let reloaded = get_settings(&conn).unwrap();
+        assert_eq!(reloaded.chat_model, "gpt-test");
+        assert!(reloaded.claude_agent_enabled);
+        assert_eq!(reloaded.claude_cli_path, "C:\\claude\\claude.exe");
+        assert_eq!(reloaded.claude_custom_models, "glm-5.3");
+    }
+
+    #[test]
+    fn general_settings_update_deserializes_full_app_settings_payload() {
+        let payload = serde_json::json!({
+            "llm_base_url": "https://api.openai.com/v1",
+            "llm_api_key": "sk-x",
+            "chat_model": "gpt-4o-mini",
+            "hub_base_url": "",
+            "proxy_url": "",
+            "proxy_enabled": false,
+            "font_size_pt": 12,
+            "display_language": "en",
+            "knowledge_dir": "",
+            "resolved_knowledge_dir": "",
+            "claude_agent_enabled": true,
+            "claude_cli_path": "D:\\evil\\override.exe",
+            "claude_custom_models": "hijacked"
+        });
+        let update: GeneralSettingsUpdate = serde_json::from_value(payload).unwrap();
+        assert_eq!(update.chat_model, "gpt-4o-mini");
+        assert_eq!(update.llm_base_url, "https://api.openai.com/v1");
+        assert!(update.knowledge_dir.is_empty());
+    }
+
+    #[test]
+    fn interleaved_claude_and_general_saves_keep_claude_config() {
+        let conn = migrated_db();
+        save_claude_settings(&conn, true, "C:\\claude\\claude.exe", "glm-5.3").unwrap();
+        let general = GeneralSettingsUpdate::from(&get_settings(&conn).unwrap());
+        save_general_settings(&conn, &general).unwrap();
+        save_claude_settings(&conn, true, "C:\\claude\\new.exe", "glm-5.3").unwrap();
+        let reloaded = get_settings(&conn).unwrap();
+        assert_eq!(reloaded.claude_cli_path, "C:\\claude\\new.exe");
+        assert!(reloaded.claude_agent_enabled);
+    }
+
+    #[test]
+    fn claude_custom_models_normalize_trims_dedupes_and_preserves_order() {
+        assert_eq!(normalize_claude_custom_models(""), "");
+        assert_eq!(normalize_claude_custom_models("\n\n"), "");
+        assert_eq!(
+            normalize_claude_custom_models("  glm-5.3  \n\nclaude-sonnet-4-5\nglm-5.3\n"),
+            "glm-5.3\nclaude-sonnet-4-5"
+        );
+        assert_eq!(normalize_claude_custom_models("a\r\nb\r\n"), "a\nb");
+    }
+
+    #[test]
+    fn claude_settings_defaults_are_disabled_and_empty() {
+        let settings = AppSettings::default();
+        assert!(!settings.claude_agent_enabled);
+        assert!(settings.claude_cli_path.is_empty());
+        assert!(settings.claude_custom_models.is_empty());
+    }
+
+    #[test]
+    fn claude_connection_report_round_trips() {
+        let conn = migrated_db();
+        assert!(load_claude_connection_report(&conn).is_none());
+        let report = ClaudeConnectionReport {
+            status: ClaudeConnectionStatus::Connected,
+            configured_cli_path: "C:\\claude\\claude.exe".into(),
+            resolved_cli_path: "C:\\claude\\wrapper.cjs".into(),
+            cli_version: "2.1.238".into(),
+            effective_model: "glm-5.3[1m]".into(),
+            tested_at: "2026-01-01T00:00:00Z".into(),
+            message: None,
+        };
+        save_claude_connection_report(&conn, &report).unwrap();
+        assert_eq!(load_claude_connection_report(&conn), Some(report));
+    }
+
+    #[test]
+    fn model_options_merge_dedupes_with_observed_priority() {
+        let options = claude_model_options(
+            &["glm-5.3[1m]".to_string(), "  ".to_string()],
+            "glm-5.3[1m]\nclaude-sonnet-4-5\nclaude-sonnet-4-5",
+        );
+        assert_eq!(options.len(), 3);
+        assert_eq!(options[0].source, ClaudeModelSource::Default);
+        assert_eq!(options[1].model_id, "glm-5.3[1m]");
+        assert_eq!(options[1].source, ClaudeModelSource::Observed);
+        assert_eq!(options[2].model_id, "claude-sonnet-4-5");
+        assert_eq!(options[2].source, ClaudeModelSource::Custom);
+    }
+
+    #[test]
+    fn model_options_with_no_observations_show_default_and_custom() {
+        let options = claude_model_options(&[], "a\nb");
+        assert_eq!(options.len(), 3);
+        assert_eq!(options[0].source, ClaudeModelSource::Default);
+        assert_eq!(options[2].model_id, "b");
+    }
+
+    #[test]
+    fn observed_models_dedup_report_and_turns() {
+        let conn = migrated_db();
+        let session = create_session(&conn, "New chat").unwrap();
+        let report = ClaudeConnectionReport {
+            status: ClaudeConnectionStatus::Connected,
+            configured_cli_path: "C:\\claude\\claude.exe".into(),
+            effective_model: "glm-5.3[1m]".into(),
+            ..Default::default()
+        };
+        save_claude_connection_report(&conn, &report).unwrap();
+
+        insert_test_turn(&conn, &session.id, "turn-1", "succeeded", Some("glm-4.7"));
+        insert_test_turn(
+            &conn,
+            &session.id,
+            "turn-2",
+            "succeeded",
+            Some("glm-5.3[1m]"),
+        );
+        insert_test_turn(&conn, &session.id, "turn-3", "failed", Some("glm-x"));
+
+        let observed = observed_claude_models(&conn, "C:\\claude\\claude.exe").unwrap();
+        assert_eq!(observed, vec!["glm-5.3[1m]", "glm-4.7"]);
+    }
+
+    #[test]
+    fn observed_models_ignore_report_for_other_cli_path() {
+        let conn = migrated_db();
+        let report = ClaudeConnectionReport {
+            status: ClaudeConnectionStatus::Connected,
+            configured_cli_path: "C:\\claude\\claude.exe".into(),
+            effective_model: "glm-5.3[1m]".into(),
+            ..Default::default()
+        };
+        save_claude_connection_report(&conn, &report).unwrap();
+        let observed = observed_claude_models(&conn, "D:\\other\\claude.exe").unwrap();
+        assert!(observed.is_empty());
+    }
+
+    fn insert_test_turn(
+        conn: &Connection,
+        session_id: &str,
+        turn_id: &str,
+        status: &str,
+        effective_model: Option<&str>,
+    ) {
+        let message_id = format!("{turn_id}-msg");
+        conn.execute(
+            "INSERT INTO chat_messages (id, session_id, role, content, citations_json, created_at)
+             VALUES (?1, ?2, 'user', 'q', '', ?3)",
+            params![message_id, session_id, "2026-01-01T00:00:00Z"],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO chat_turns (id, session_id, user_message_id, backend_id,
+                requested_model_kind, mode, selection_revision, status, started_at, finished_at, effective_model)
+             VALUES (?1, ?2, ?3, 'claude', 'default', 'ask', 0, ?4, ?5, ?6, ?7)",
+            params![turn_id, session_id, message_id, status, "2026-01-01T00:00:00Z", "2026-01-01T00:00:01Z", effective_model],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn connection_proof_requires_enabled_and_matching_path() {
+        let connected = ClaudeConnectionReport {
+            status: ClaudeConnectionStatus::Connected,
+            configured_cli_path: "C:\\claude\\claude.exe".into(),
+            ..Default::default()
+        };
+        assert!(connection_proven_from(
+            true,
+            "C:\\claude\\claude.exe",
+            Some(&connected),
+            None
+        ));
+        assert!(!connection_proven_from(
+            false,
+            "C:\\claude\\claude.exe",
+            Some(&connected),
+            None
+        ));
+        assert!(!connection_proven_from(
+            true,
+            "D:\\other\\claude.exe",
+            Some(&connected),
+            None
+        ));
+        assert!(connection_proven_from(
+            true,
+            "C:\\claude\\claude.exe",
+            None,
+            Some(&connected)
+        ));
+        let unavailable = ClaudeConnectionReport {
+            status: ClaudeConnectionStatus::Unavailable,
+            configured_cli_path: "C:\\claude\\claude.exe".into(),
+            ..Default::default()
+        };
+        assert!(!connection_proven_from(
+            true,
+            "C:\\claude\\claude.exe",
+            Some(&unavailable),
+            Some(&connected)
+        ));
+        let last_connected = ClaudeConnectionReport {
+            status: ClaudeConnectionStatus::LastConnected,
+            configured_cli_path: "C:\\claude\\claude.exe".into(),
+            ..Default::default()
+        };
+        assert!(!connection_proven_from(
+            true,
+            "C:\\claude\\claude.exe",
+            Some(&last_connected),
+            None
+        ));
+    }
+
+    #[test]
+    fn legacy_settings_json_without_claude_fields_deserializes() {
+        let legacy = r#"{
+            "llm_base_url": "https://api.openai.com/v1",
+            "llm_api_key": "sk-x",
+            "chat_model": "gpt-4o-mini",
+            "hub_base_url": "",
+            "proxy_url": "",
+            "proxy_enabled": false,
+            "font_size_pt": 12,
+            "display_language": "en",
+            "knowledge_dir": "",
+            "resolved_knowledge_dir": ""
+        }"#;
+        let settings: AppSettings = serde_json::from_str(legacy).unwrap();
+        assert!(!settings.claude_agent_enabled);
+        assert!(settings.claude_cli_path.is_empty());
+        assert!(settings.claude_custom_models.is_empty());
+    }
+
+    #[test]
+    fn legacy_session_json_without_backend_fields_deserializes_unbound() {
+        let legacy = r#"{
+            "id": "s1",
+            "title": "Old",
+            "pinned": false,
+            "archived": false,
+            "title_source": "placeholder",
+            "mode": "ask",
+            "created_at": "2020-01-01T00:00:00Z",
+            "updated_at": "2020-01-01T00:00:00Z"
+        }"#;
+        let session: ChatSession = serde_json::from_str(legacy).unwrap();
+        assert_eq!(session.backend, None);
+        assert_eq!(session.backend_status, ChatBackendStatus::Uninitialized);
     }
 }

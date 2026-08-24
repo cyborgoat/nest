@@ -417,9 +417,11 @@ export function MarkdownEditor({ path }: { path: string }) {
               <Button size="sm" variant="outline" className="h-7" disabled={reviewAgentChange.isPending} onClick={() => reviewAgentChange.mutate(false)}>
                 <X className="size-3.5" /> Reject
               </Button>
-              <Button size="sm" className="h-7" disabled={reviewAgentChange.isPending} onClick={() => reviewAgentChange.mutate(true)}>
-                <Check className="size-3.5" /> {reviewAgentChange.isPending ? "Applying…" : "Approve"}
-              </Button>
+              {pendingChangeQuery.data.status === "pending" && (
+                <Button size="sm" className="h-7" disabled={reviewAgentChange.isPending} onClick={() => reviewAgentChange.mutate(true)}>
+                  <Check className="size-3.5" /> {reviewAgentChange.isPending ? "Applying…" : "Approve"}
+                </Button>
+              )}
             </>
           ) : <>
             <Button
@@ -497,6 +499,7 @@ export function MarkdownEditor({ path }: { path: string }) {
           oldContent={pendingChangeQuery.data.old_content ?? ""}
           newContent={pendingChangeQuery.data.new_content ?? ""}
           operation={pendingChangeQuery.data.operation}
+          status={pendingChangeQuery.data.status}
         />
       ) : <ScrollArea className="markdown-editor-scroll min-h-0 flex-1">
         <div className="markdown-editor-layout w-full py-5 pl-2 pr-6">
@@ -561,14 +564,16 @@ export function MarkdownEditor({ path }: { path: string }) {
   );
 }
 
-function AgentProposalDiff({ oldContent, newContent, operation }: { oldContent: string; newContent: string; operation: string }) {
+function AgentProposalDiff({ oldContent, newContent, operation, status }: { oldContent: string; newContent: string; operation: string; status: string }) {
   const rows = buildInlineDiffRows(oldContent, newContent);
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <AgentProposalBanner>
         <span className="font-medium">Agent proposal · {operation}</span>
         <span className="text-muted-foreground">
-          Review the diff, then approve or reject it.
+          {status === "conflicted"
+            ? "The file changed externally in an overlapping way. This proposal can only be rejected."
+            : "Review the diff, then approve or reject it."}
         </span>
       </AgentProposalBanner>
       <ScrollArea className="min-h-0 flex-1">

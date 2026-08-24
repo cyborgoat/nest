@@ -28,6 +28,57 @@ The desktop app can start without the Hub service and will still include a bundl
 
 The Hub service listens on `PORT` (from `.env`, typically `8787`). Configure the desktop app's **Settings → Hub URL** to the address you want it to use, for example `http://127.0.0.1:8787` for local development. Settings is the gear at the bottom of the far-left activity bar; Account is the user icon directly above it. When no URL is configured, the Hub page's **Configure Hub URL in Settings** action opens Settings and focuses that field automatically.
 
+### Claude Agent development notes
+
+- Claude Agent requires the Claude CLI installed and logged in (`claude` on PATH, or a path configured in Settings → Claude Agent). The desktop app spawns one CLI process per turn with `--mcp-config`, `--append-system-prompt`, and an explicit `--model`.
+- Step 2 is implemented and acceptance-tested on native Windows. macOS packaging exists, but Claude Agent is not yet a supported macOS runtime; do not infer support from the generic `.dmg` release job.
+- On Windows, `npm run tauri dev` can pick up the Git-bundled `link.exe` and fail the Rust build. Install the Visual Studio C++ Build Tools and launch through a VS-enabled environment if that happens.
+- The loopback MCP server (`claude_mcp.rs`) binds `127.0.0.1:0` inside the app process; no extra ports need to be opened. Tool calls are authenticated with a per-turn bearer credential.
+- Debugging the webview console: start the app with `$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=9222"` and run `node scripts/cdp-watch.cjs` to stream console output and exceptions.
+
+The main runtime seams are:
+
+| Module | Responsibility |
+|--------|----------------|
+| `chat_backends.rs` | Backend descriptors, availability, modes/models, and selection validation. Keep the UI descriptor-driven when adding another Agent. |
+| `chat_runtime.rs` | Per-turn backend dispatch, streaming lifecycle, and turn-end reconciliation. |
+| `claude_cli.rs` | Windows CLI discovery, process-tree lifecycle, stream-json parsing, session resume, and native tool events. |
+| `claude_mcp.rs` | Authenticated loopback MCP adapter for Nest knowledge capabilities. |
+| `knowledge_workspace.rs` | Shared permission rules, staging, effective read/list/search view, and turn finalization. |
+| `knowledge_review.rs` | Proposal claims, three-way rebase/apply, journaled writes, and recovery. |
+| `vault_reconciliation.rs` | Markdown manifest comparison, persisted workspace health, and awaited reindex. |
+| `state.rs` | App-wide operation slot shared by chat, probe/save, reindex, Vault switch, and deletion. |
+
+`BackendId` is an open string identifier in persistence and shared types. Unknown historical IDs must round-trip and produce an unavailable descriptor; they must not be coerced to Nest or rejected during session deserialization. A new backend supplies a descriptor and runtime adapter instead of adding Agent-specific branches to the three composer capsules.
+
+The effective knowledge view is `turn-local staged > pending proposal > disk/index`. All protocol adapters must call `KnowledgeWorkspace`; they must not duplicate path, permission, proposal, or overlay rules. Native Claude file operations bypass staging by design, so every successful, failed, or stopped turn must still run Vault reconciliation before releasing the app-wide operation slot.
+
+Claude tool activity has three stable sources: `nest_mcp`, `external_mcp`, and `claude_native`. A tool named `mcp__<server>__<tool>` outside the reserved `mcp__nest__*` namespace is external MCP activity; it must not produce Nest Sources, permissions, staging, or proposals. Ask launches with a strict MCP config, while Agent keeps user/project MCP discovery open and injects the authenticated `nest` server for the reserved name.
+
+The Settings connection test is intentionally destructive only inside an isolated temporary pack. It runs a real two-turn Claude session, observes the six MCP tools and their semantic results, applies proposals through the production review path, waits for index generations, and verifies cleanup. A lightweight MCP registration or fake health call is not an acceptable replacement.
+
+### Refreshing the bundled tutorial packs
+
+The `getting-started` and `getting-started-zh-cn` packs are compiled into the desktop
+binary (`include_dir!` in `default_pack.rs`) and seeded into the vault once per app-data
+directory. Normally they are never re-seeded — markers under the app data dir and the
+`sync_state` rows both guard against overwriting. To pick up edited pack content while
+iterating on the guides:
+
+1. Rebuild so the binary embeds the new files (`npm run tauri dev` recompiles automatically).
+2. Restart the app with the reseed flag:
+
+```powershell
+$env:NEST_DEV_RESEED = "1"
+npm run tauri dev
+```
+
+On startup the app deletes both packs' `sync_state` rows and vault folders, then seeds the
+embedded copies fresh. Settings, sessions, and other packs are untouched; existing pack
+snapshots are reused. The flag only matters at startup — unset it (or start normally)
+afterwards. Pack content edits also need a rebuild even without the flag, because the
+files are baked into the binary at compile time.
+
 ## Environment
 
 | App | File | Variables |

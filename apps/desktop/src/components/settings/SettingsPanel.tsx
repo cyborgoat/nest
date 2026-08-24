@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   AppSettings,
+  GeneralSettingsUpdate,
   HubConnectionStatus,
   VaultChangeMode,
   VaultChangePreview,
@@ -11,12 +12,10 @@ import {
   CheckCircle2,
   Cloud,
   FolderOpen,
-  Info,
   LoaderCircle,
   Network,
   Palette,
   XCircle,
-  type LucideIcon,
 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
@@ -36,11 +35,8 @@ import { Label } from "@/components/ui/label";
 import { PanelHeader } from "@/components/ui/panel-header";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Switch } from "@/components/ui/switch";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { ClaudeAgentSettingsSection } from "@/components/settings/ClaudeAgentSettingsSection";
+import { GeneralGroup } from "@/components/settings/GeneralGroup";
 import { api } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { queryKeys } from "@/lib/query-keys";
@@ -64,6 +60,9 @@ const EMPTY: AppSettings = {
   display_language: "en",
   knowledge_dir: "",
   resolved_knowledge_dir: "",
+  claude_agent_enabled: false,
+  claude_cli_path: "",
+  claude_custom_models: "",
 };
 
 function withCompatibleLlmDefaults(settings: AppSettings): AppSettings {
@@ -85,8 +84,24 @@ function withCompatibleLlmDefaults(settings: AppSettings): AppSettings {
 
 /** Persist payload omits transient resolved path differences for dirty checks. */
 function persistKey(settings: AppSettings): string {
-  const { resolved_knowledge_dir: _, ...rest } = settings;
+  const {
+    resolved_knowledge_dir: _resolved,
+    claude_agent_enabled: _claudeEnabled,
+    claude_cli_path: _claudePath,
+    claude_custom_models: _claudeModels,
+    ...rest
+  } = settings;
   return JSON.stringify(rest);
+}
+
+function generalPayload(settings: AppSettings): GeneralSettingsUpdate {
+  const {
+    claude_agent_enabled: _claudeEnabled,
+    claude_cli_path: _claudePath,
+    claude_custom_models: _claudeModels,
+    ...general
+  } = settings;
+  return general;
 }
 
 function describeHubStatus(status: HubConnectionStatus): string {
@@ -157,6 +172,11 @@ export function SettingsPanel() {
     queryKey: queryKeys.settings,
     queryFn: api.settingsGet,
   });
+  const operationQuery = useQuery({
+    queryKey: queryKeys.appOperation,
+    queryFn: api.appOperationStatus,
+    refetchInterval: 500,
+  });
 
   const indexQuery = useQuery({
     queryKey: queryKeys.index,
@@ -170,11 +190,14 @@ export function SettingsPanel() {
     const initial: AppSettings = {
       ...EMPTY,
       ...data,
-      // Older backends may omit this field until the desktop binary is rebuilt.
+      // Older backends may omit fields until the desktop binary is rebuilt.
       proxy_enabled:
         typeof data.proxy_enabled === "boolean"
           ? data.proxy_enabled
           : Boolean(data.proxy_url?.trim()),
+      claude_agent_enabled: data.claude_agent_enabled ?? false,
+      claude_cli_path: data.claude_cli_path ?? "",
+      claude_custom_models: data.claude_custom_models ?? "",
     };
     setForm(initial);
     setFontSizeDraft(String(initial.font_size_pt));
@@ -205,7 +228,7 @@ export function SettingsPanel() {
     const timer = window.setTimeout(() => {
       void (async () => {
         try {
-          await api.settingsSet(form);
+          await api.settingsSet(generalPayload(form));
           const refreshed = await api.settingsGet();
           lastSavedKey.current = persistKey(refreshed);
           setForm((prev) => ({
@@ -420,6 +443,12 @@ export function SettingsPanel() {
       />
       <ScrollArea className="min-h-0 flex-1">
         <div className="mx-auto max-w-2xl px-6 py-5">
+          {operationQuery.data && (
+            <p className="mb-3 rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+              {operationQuery.data.kind.replace(/_/g, " ")} is running for {operationQuery.data.owner}
+            </p>
+          )}
+          <fieldset disabled={operationQuery.data != null} className="contents">
           <SettingsSection>
                 <GeneralGroup icon={Cloud} title={t("settings.knowledgeHub")}>
                   <Field
@@ -595,6 +624,8 @@ export function SettingsPanel() {
                     />
                   </Field>
                 </GeneralGroup>
+                <ClaudeAgentSettingsSection settingsQuery={settingsQuery} />
+
                 <GeneralGroup icon={Network} title={t("settings.network")}>
                   <div className="flex items-start justify-between gap-4 rounded-lg bg-muted/40 px-3 py-3">
                     <div className="min-w-0 space-y-1">
@@ -662,6 +693,7 @@ export function SettingsPanel() {
                   </div>
                 </Field>
           </SettingsSection>
+          </fieldset>
         </div>
       </ScrollArea>
       <AlertDialog
@@ -743,46 +775,4 @@ export function SettingsPanel() {
 
 function SettingsSection({ children }: { children: ReactNode }) {
   return <section className="space-y-8">{children}</section>;
-}
-
-function GeneralGroup({
-  icon: Icon,
-  title,
-  help,
-  children,
-}: {
-  icon: LucideIcon;
-  title: string;
-  help?: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <div className="space-y-4">
-      <h4 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        <Icon className="size-4 text-primary" aria-hidden />
-        {title}
-        {help && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                className="rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                aria-label={`${title} configuration help`}
-              >
-                <Info className="size-3.5" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent
-              side="right"
-              align="start"
-              className="max-w-80 normal-case leading-5 tracking-normal"
-            >
-              {help}
-            </TooltipContent>
-          </Tooltip>
-        )}
-      </h4>
-      {children}
-    </div>
-  );
 }

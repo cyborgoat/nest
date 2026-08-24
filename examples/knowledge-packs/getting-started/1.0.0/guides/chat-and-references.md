@@ -1,5 +1,13 @@
 # Chat and `@` References
 
+## Choose an agent and model
+
+The chat box starts with three selectors: **Agent**, **Model**, and **Mode**.
+**Agent** picks the backend (Nest Agent or Claude), **Model** shows the
+model you'll get, and **Mode** is **Ask** or **Agent** as described below.
+The full story — agents, binding, models, and setup — lives in the
+[Agents](./agents.md) guide.
+
 ## Ask across active packs
 
 Use the selector at the lower-left of the chat box to choose a mode:
