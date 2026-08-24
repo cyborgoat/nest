@@ -1691,6 +1691,7 @@ mod resolver_tests {
         ));
     }
 
+    #[cfg(windows)]
     #[test]
     fn shim_content_fallback_when_layout_is_unusual() {
         let fx = Fixture::new("shim-content");
@@ -1840,6 +1841,7 @@ mod resolver_tests {
         assert_eq!(normalized, exe);
     }
 
+    #[cfg(windows)]
     #[test]
     fn path_env_splits_into_directories() {
         let dirs = collect_search_dirs("C:\\a\\bin;D:\\tools;;C:\\b");
@@ -2431,11 +2433,12 @@ mod process_tests {
 
     fn which_node() -> PathBuf {
         let path_env = std::env::var("PATH").unwrap_or_default();
+        let executable = if cfg!(windows) { "node.exe" } else { "node" };
         let node = collect_search_dirs(&path_env)
             .into_iter()
-            .map(|dir| dir.join("node.exe"))
+            .map(|dir| dir.join(executable))
             .find(|node| node.is_file());
-        node.expect("node.exe must be available for process tests")
+        node.expect("Node.js must be available for process tests")
     }
 
     async fn run(
