@@ -4,6 +4,7 @@ use crate::error::AppResult;
 use crate::indexer;
 use crate::state::SharedState;
 use crate::vector_store::{self, KnowledgeChunk};
+use std::time::Duration;
 
 pub fn status(state: &SharedState) -> AppResult<IndexStatus> {
     let conn = state.db.lock();
@@ -71,17 +72,27 @@ async fn rebuild(state: &SharedState) -> AppResult<IndexStatus> {
 /// Queue a coalesced background rebuild. Pack filesystem operations are already
 /// complete when this is called, so model loading never blocks their dialogs.
 pub fn schedule(state: &SharedState) -> AppResult<IndexStatus> {
-    state.request_index_rebuild();
+    schedule_generation(state);
+    status(state)
+}
+
+fn schedule_generation(state: &SharedState) -> u64 {
+    let generation = state.request_index_rebuild();
     if state.try_begin_indexing() {
         let state_clone = state.clone();
         tauri::async_runtime::spawn(async move {
             loop {
                 let generation = state_clone.requested_index_generation();
-                if let Err(error) = rebuild(&state_clone).await {
-                    let conn = state_clone.db.lock();
-                    let _ = db::set_index_message(&conn, &format!("Index update failed: {error}"));
-                }
-                state_clone.mark_index_generation_complete(generation);
+                let succeeded = match rebuild(&state_clone).await {
+                    Ok(_) => true,
+                    Err(error) => {
+                        let conn = state_clone.db.lock();
+                        let _ =
+                            db::set_index_message(&conn, &format!("Index update failed: {error}"));
+                        false
+                    }
+                };
+                state_clone.mark_index_generation_complete(generation, succeeded);
                 state_clone.set_indexing(false);
 
                 if state_clone.requested_index_generation() == state_clone.indexed_generation()
@@ -92,6 +103,24 @@ pub fn schedule(state: &SharedState) -> AppResult<IndexStatus> {
             }
         });
     }
+    generation
+}
 
-    status(state)
+pub async fn schedule_and_wait(state: &SharedState, timeout: Duration) -> AppResult<IndexStatus> {
+    let generation = schedule_generation(state);
+    tokio::time::timeout(timeout, async {
+        loop {
+            if state.indexed_generation() >= generation {
+                if state.successful_index_generation() >= generation {
+                    return status(state);
+                }
+                return Err(crate::error::AppError::msg(
+                    "workspace_reindex_failed: index rebuild did not complete successfully",
+                ));
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .map_err(|_| crate::error::AppError::msg("workspace_reindex_timeout"))?
 }

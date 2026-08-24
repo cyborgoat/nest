@@ -28,6 +28,17 @@ struct EmbeddedPackMeta {
 }
 
 pub fn ensure_seeded(conn: &Connection, app_data_dir: &Path, vault_root: &Path) -> AppResult<()> {
+    let force_reseed = dev_force_reseed();
+    if force_reseed {
+        db::purge_path_data(conn, DEFAULT_PACK_ID)?;
+        db::purge_path_data(conn, ZH_CN_PACK_ID)?;
+        let _ = fs::remove_dir_all(vault_root.join(DEFAULT_PACK_ID));
+        let _ = fs::remove_dir_all(vault_root.join(ZH_CN_PACK_ID));
+        crate::nest_debug!(
+            "startup",
+            "NEST_DEV_RESEED=1: re-seeding bundled default packs"
+        );
+    }
     ensure_pack_seeded_once(
         conn,
         app_data_dir,
@@ -47,6 +58,16 @@ pub fn ensure_seeded(conn: &Connection, app_data_dir: &Path, vault_root: &Path) 
         ZH_CN_PACK_MARKER,
     )?;
     ensure_default_snapshots(conn, app_data_dir, vault_root)
+}
+
+fn dev_force_reseed() -> bool {
+    if !cfg!(debug_assertions) {
+        return false;
+    }
+    matches!(
+        std::env::var("NEST_DEV_RESEED").ok().as_deref(),
+        Some("1") | Some("true") | Some("yes") | Some("on")
+    )
 }
 
 pub fn seed_fresh_defaults(conn: &Connection, vault_root: &Path) -> AppResult<()> {

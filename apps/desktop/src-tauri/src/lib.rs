@@ -1,8 +1,14 @@
 mod agent;
 mod agent_tools;
+mod chat_backends;
 mod chat_events;
 mod chat_history;
+mod chat_runtime;
+mod claude_cli;
+mod claude_mcp;
 mod commands;
+mod connection_probe;
+mod connection_probe_direct;
 mod db;
 mod debug;
 mod default_pack;
@@ -12,12 +18,16 @@ mod http;
 mod hub;
 mod indexer;
 mod indexing;
+mod knowledge_merge;
+mod knowledge_review;
+mod knowledge_workspace;
 mod retrieval;
 mod snapshot;
 mod state;
 mod title;
 mod tray;
 mod vault;
+mod vault_reconciliation;
 mod vector_store;
 
 use state::{AppState, SharedState};
@@ -38,6 +48,20 @@ pub fn run() {
             let state = AppState::new(app_data)?;
             app.manage(Arc::new(state) as SharedState);
             let shared_state = app.state::<SharedState>();
+            let startup_state = shared_state.inner().clone();
+            let startup_operation = startup_state
+                .begin_operation(state::OperationKind::Reindex, "startup_reconciliation")?;
+            tauri::async_runtime::spawn(async move {
+                let _operation = startup_operation;
+                if let Err(error) = vault_reconciliation::reconcile_vault(
+                    &startup_state,
+                    std::time::Duration::from_secs(300),
+                )
+                .await
+                {
+                    nest_debug!("app", "startup reconciliation failed: {error}");
+                }
+            });
             if indexing::status(&shared_state)?.indexed_chunks == 0 {
                 indexing::schedule(&shared_state)?;
             }
@@ -63,6 +87,14 @@ pub fn run() {
             commands::hub_pack_file_diff,
             commands::hub_pack_discard_file,
             commands::hub_pack_discard_all,
+            commands::claude_detect_cli,
+            commands::claude_test_connection,
+            commands::claude_save_settings,
+            commands::claude_connection_status,
+            commands::claude_model_options,
+            commands::workspace_health,
+            commands::workspace_reindex,
+            commands::app_operation_status,
             commands::settings_get,
             commands::settings_preview_knowledge_dir,
             commands::settings_change_knowledge_dir,
@@ -72,9 +104,12 @@ pub fn run() {
             commands::chat_create_session,
             commands::chat_get_or_create_initial_session,
             commands::chat_list_sessions,
+            commands::chat_backend_descriptors,
             commands::chat_update_session,
+            commands::chat_update_selection,
             commands::chat_delete_session,
             commands::chat_list_messages,
+            commands::chat_list_turn_activities,
             commands::chat_get_file_change,
             commands::chat_get_pending_file_change,
             commands::chat_review_file_change,
