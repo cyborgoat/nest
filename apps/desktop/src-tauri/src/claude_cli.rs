@@ -677,6 +677,7 @@ async fn read_capped<R: tokio::io::AsyncRead + Unpin>(
     String::from_utf8_lossy(&buffer).to_string()
 }
 
+#[cfg(windows)]
 const KILL_TREE_TIMEOUT: Duration = Duration::from_secs(5);
 const REAP_TIMEOUT: Duration = Duration::from_secs(5);
 
