@@ -13,6 +13,7 @@ export const queryKeys = {
   appOperation: ["app-operation"] as const,
   chatBackendDescriptors: ["chat-backend-descriptors"] as const,
   claudeModelOptions: ["claude-model-options"] as const,
+  claudeModelStatuses: ["claude-model-statuses"] as const,
   hubAuth: ["hub-auth"] as const,
   publishReconcile: ["publish-reconcile"] as const,
   messages: ["hub-messages"] as const,

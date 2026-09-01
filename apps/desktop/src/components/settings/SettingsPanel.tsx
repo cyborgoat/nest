@@ -154,6 +154,7 @@ export function SettingsPanel() {
   const hydrated = useRef(false);
   const lastSavedKey = useRef("");
   const hubBaseUrlRef = useRef<HTMLInputElement>(null);
+  const claudeSectionRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (settingsTarget !== "hub-url") return;
@@ -163,6 +164,18 @@ export function SettingsPanel() {
         block: "center",
       });
       hubBaseUrlRef.current?.focus({ preventScroll: true });
+      clearSettingsTarget();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [clearSettingsTarget, settingsTarget]);
+
+  useEffect(() => {
+    if (settingsTarget !== "claude-agent") return;
+    const frame = window.requestAnimationFrame(() => {
+      claudeSectionRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
       clearSettingsTarget();
     });
     return () => window.cancelAnimationFrame(frame);
@@ -624,7 +637,9 @@ export function SettingsPanel() {
                     />
                   </Field>
                 </GeneralGroup>
-                <ClaudeAgentSettingsSection settingsQuery={settingsQuery} />
+                <div ref={claudeSectionRef}>
+                  <ClaudeAgentSettingsSection settingsQuery={settingsQuery} />
+                </div>
 
                 <GeneralGroup icon={Network} title={t("settings.network")}>
                   <div className="flex items-start justify-between gap-4 rounded-lg bg-muted/40 px-3 py-3">

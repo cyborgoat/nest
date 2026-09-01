@@ -16,7 +16,10 @@ import { api } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
-import { ClaudeModelsEditor } from "./ClaudeModelsEditor";
+import {
+  ClaudeModelsEditor,
+  type ModelRowStatuses,
+} from "./ClaudeModelsEditor";
 import { parseModelRows, serializeModelRows } from "./model-rows";
 import { GeneralGroup } from "./GeneralGroup";
 
@@ -44,7 +47,7 @@ function useClaudeAgentSettings(settingsQuery: {
   const [stale, setStale] = useState(false);
   const [detection, setDetection] = useState<ClaudeDetectionDto | null>(null);
   const [detectFailed, setDetectFailed] = useState(false);
-  const [testedModel, setTestedModel] = useState<string | null>(null);
+  const [testingModel, setTestingModel] = useState<string | null>(null);
 
   useEffect(() => {
     if (!settingsQuery.data || hydrated) return;
@@ -63,20 +66,10 @@ function useClaudeAgentSettings(settingsQuery: {
     queryFn: api.claudeConnectionStatus,
   });
 
-  const modelOptionsQuery = useQuery({
-    queryKey: queryKeys.claudeModelOptions,
-    queryFn: api.claudeModelOptions,
+  const statusesQuery = useQuery({
+    queryKey: [...queryKeys.claudeModelStatuses, draft.cliPath.trim()],
+    queryFn: () => api.claudeModelStatuses(draft.cliPath.trim()),
   });
-  const persistedObserved = (modelOptionsQuery.data ?? [])
-    .filter((option) => option.source === "observed")
-    .map((option) => option.model_id ?? "")
-    .filter((model) => model.trim() !== "");
-  const observedModels = testedModel
-    ? [
-        testedModel,
-        ...persistedObserved.filter((model) => model !== testedModel),
-      ]
-    : persistedObserved;
 
   const serializedModels = serializeModelRows(modelRows);
   const dirty =
@@ -107,19 +100,45 @@ function useClaudeAgentSettings(settingsQuery: {
     onSuccess: (report) => {
       setTestResult(report);
       setDetectFailed(false);
-      setTestedModel(
-        report.status === "connected" && report.effective_model.trim()
-          ? report.effective_model.trim()
-          : null,
-      );
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.claudeConnection,
+      });
       void queryClient.invalidateQueries({
         queryKey: queryKeys.claudeModelOptions,
+      });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.chatBackendDescriptors,
       });
     },
     onError: (e: unknown) => {
       toast.error(t("settings.claude.couldNotTest"), {
         description: e instanceof Error ? e.message : String(e),
       });
+    },
+  });
+
+  const testModel = useMutation({
+    mutationFn: ({
+      cliPath,
+      model,
+    }: {
+      cliPath: string;
+      model: string;
+    }) => api.claudeTestModel(cliPath, model),
+    onMutate: ({ model }) => {
+      setTestingModel(model.trim());
+    },
+    onSuccess: () => {
+      setTestingModel(null);
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.claudeModelStatuses,
+      });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.chatBackendDescriptors,
+      });
+    },
+    onError: () => {
+      setTestingModel(null);
     },
   });
 
@@ -131,10 +150,11 @@ function useClaudeAgentSettings(settingsQuery: {
         customModels: serializedModels,
       }),
     onSuccess: (report) => {
-      setTestResult(null);
+      setTestResult(
+        report.status === "connected" ? report : null,
+      );
       setStale(false);
       setDetectFailed(false);
-      setTestedModel(null);
       void queryClient.invalidateQueries({ queryKey: queryKeys.settings });
       void queryClient.invalidateQueries({
         queryKey: queryKeys.claudeConnection,
@@ -164,18 +184,61 @@ function useClaudeAgentSettings(settingsQuery: {
     },
   });
 
+  const matchingTestResult =
+    testResult?.configured_cli_path === draft.cliPath.trim()
+      ? testResult
+      : null;
+
   const persistedStatus =
-    stale || testResult
+    stale || matchingTestResult
       ? null
       : connectionQuery.data &&
           connectionQuery.data.configured_cli_path === draft.cliPath.trim()
         ? connectionQuery.data
         : null;
 
-  const clearDetection = () => {
+  const defaultModelReport =
+    matchingTestResult ??
+    (connectionQuery.data &&
+    connectionQuery.data.configured_cli_path === draft.cliPath.trim()
+      ? connectionQuery.data
+      : null);
+  const defaultModel = (defaultModelReport?.effective_model ?? "").trim();
+
+  const savedModels = new Set(
+    (settingsQuery.data?.claude_custom_models ?? "")
+      .split("\n")
+      .map((model) => model.trim())
+      .filter((model) => model !== ""),
+  );
+
+  const persistedRowStatuses: ModelRowStatuses = {};
+  for (const [model, entry] of Object.entries(statusesQuery.data ?? {})) {
+    if (entry.configured_cli_path !== draft.cliPath.trim()) continue;
+    persistedRowStatuses[model] = {
+      ok: entry.ok,
+      message: entry.ok
+        ? t("settings.claude.modelTestedAt", {
+            time: entry.tested_at.replace("T", " ").slice(0, 19),
+          })
+        : entry.message,
+    };
+  }
+
+  const saveRowAndTest = (index: number) => {
+    const model = modelRows[index]?.trim();
+    if (!model || save.isPending) return;
+    save.mutate(undefined, {
+      onSuccess: () => {
+        testModel.mutate({ cliPath: draft.cliPath, model });
+      },
+    });
+  };
+
+  const clearPathFeedback = () => {
     setDetection(null);
     setDetectFailed(false);
-    setTestedModel(null);
+    setTestResult(null);
   };
 
   return {
@@ -185,15 +248,20 @@ function useClaudeAgentSettings(settingsQuery: {
     setModelRows,
     detect,
     test,
+    testModel,
+    testingModel,
+    persistedRowStatuses,
+    savedModels,
+    saveRowAndTest,
     save,
     dirty,
     markDirty,
-    testResult,
+    testResult: matchingTestResult,
     persistedStatus,
+    defaultModel,
     detectFailed,
     detection,
-    observedModels,
-    clearDetection,
+    clearPathFeedback,
   };
 }
 
@@ -210,21 +278,33 @@ export function ClaudeAgentSettingsSection({
     setModelRows,
     detect,
     test,
+    testModel,
+    testingModel,
+    persistedRowStatuses,
+    savedModels,
+    saveRowAndTest,
     save,
     dirty,
     markDirty,
     testResult,
     persistedStatus,
+    defaultModel,
     detectFailed,
     detection,
-    observedModels,
-    clearDetection,
+    clearPathFeedback,
   } = useClaudeAgentSettings(settingsQuery);
 
   const displayReport = testResult ?? persistedStatus;
   const reportConnected =
     displayReport?.status === "connected" ||
     displayReport?.status === "last_connected";
+  const featureDisabled = !draft.enabled;
+  const localOperationPending =
+    detect.isPending || test.isPending || testModel.isPending || save.isPending;
+  const mergedRowStatuses =
+    testingModel != null
+      ? { ...persistedRowStatuses, [testingModel]: "testing" as const }
+      : persistedRowStatuses;
 
   return (
     <GeneralGroup
@@ -237,7 +317,7 @@ export function ClaudeAgentSettingsSection({
           size="sm"
           variant={dirty ? "default" : "outline"}
           className={cn("shrink-0", dirty && "animate-pulse")}
-          disabled={save.isPending}
+          disabled={localOperationPending}
           onClick={() => save.mutate()}
         >
           {save.isPending && (
@@ -281,6 +361,7 @@ export function ClaudeAgentSettingsSection({
             markDirty();
           }}
           aria-label={t("settings.claude.enabled")}
+          disabled={localOperationPending}
         />
       </div>
       <Field
@@ -292,7 +373,7 @@ export function ClaudeAgentSettingsSection({
             value={draft.cliPath}
             onChange={(e) => {
               setDraft((prev) => ({ ...prev, cliPath: e.target.value }));
-              clearDetection();
+              clearPathFeedback();
               markDirty();
             }}
             placeholder={
@@ -300,7 +381,7 @@ export function ClaudeAgentSettingsSection({
                 ? t("settings.claude.detectionFailedPlaceholder")
                 : "claude.exe · cli-wrapper.cjs · empty = auto-detect"
             }
-            disabled={detect.isPending}
+            disabled={featureDisabled || localOperationPending}
             className={cn(
               "min-w-0 flex-1 font-mono text-xs",
               detectFailed && !draft.cliPath.trim() && "border-destructive",
@@ -310,7 +391,7 @@ export function ClaudeAgentSettingsSection({
             type="button"
             variant="outline"
             className="shrink-0"
-            disabled={detect.isPending}
+            disabled={featureDisabled || localOperationPending}
             onClick={() => detect.mutate()}
           >
             {detect.isPending && (
@@ -346,7 +427,7 @@ export function ClaudeAgentSettingsSection({
             type="button"
             size="sm"
             variant="outline"
-            disabled={test.isPending}
+            disabled={featureDisabled || localOperationPending}
             onClick={() => test.mutate()}
           >
             {test.isPending && (
@@ -403,30 +484,22 @@ export function ClaudeAgentSettingsSection({
       >
         <ClaudeModelsEditor
           rows={modelRows}
-          disabled={save.isPending}
+          disabled={featureDisabled || localOperationPending}
+          defaultModel={defaultModel}
+          savedModels={savedModels}
+          rowStatuses={mergedRowStatuses}
+          onTestRow={(index) => {
+            const model = modelRows[index]?.trim();
+            if (!model) return;
+            testModel.mutate({ cliPath: draft.cliPath, model });
+          }}
+          onSaveRow={saveRowAndTest}
           onChange={(rows) => {
             setModelRows(rows);
             markDirty();
           }}
         />
       </Field>
-      {observedModels.length > 0 && (
-        <Field
-          label={t("settings.claude.detectedModels")}
-          description={t("settings.claude.detectedModelsDescription")}
-        >
-          <ul className="flex flex-wrap gap-1.5">
-            {observedModels.map((model) => (
-              <li
-                key={model}
-                className="rounded-md border bg-muted/40 px-2 py-1 font-mono text-xs"
-              >
-                {model}
-              </li>
-            ))}
-          </ul>
-        </Field>
-      )}
     </GeneralGroup>
   );
 }

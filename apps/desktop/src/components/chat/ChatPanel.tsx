@@ -5,7 +5,7 @@ import {
   useMessageScroller,
 } from "@shadcn/react/message-scroller";
 import { AlertCircle, Check, ChevronDown, FilePenLine, Info, Lightbulb, Loader2, LoaderCircle, X, XCircle } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   AgentStatusIndicator,
   type AgentActivity,
@@ -19,6 +19,7 @@ import { claudeBackendNotice, claudeComposerGate } from "@/lib/claude-composer";
 import {
   capsuleFromModelSelection,
   deriveCapsules,
+  isBackendUsable,
   modelSelectionFromCapsule,
 } from "@/lib/chat-selection";
 import { MarkdownBody } from "@/components/markdown/MarkdownBody";
@@ -35,6 +36,10 @@ import {
   type ChatStreamEvent,
 } from "@/lib/api";
 import { appErrorMessage } from "@/lib/errors";
+import {
+  backendBlockNotice,
+  backendBlockNoticeFromReason,
+} from "@/lib/backend-block-notice";
 import { indexInstalledPacksByLocalPath } from "@/lib/pack-index";
 import { queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
@@ -50,6 +55,8 @@ export function ChatPanel() {
   const sessionId = useUiStore((s) => s.chatSessionId);
   const openChatTab = useUiStore((s) => s.openChatTab);
   const pruneChatTabs = useUiStore((s) => s.pruneChatTabs);
+  const openSettingsTab = useUiStore((s) => s.openSettingsTab);
+  const openClaudeSettingsTab = useUiStore((s) => s.openClaudeSettingsTab);
   const queryClient = useQueryClient();
   const setAgentRunActive = useEditorStore((s) => s.setAgentRunActive);
   const setEditing = useEditorStore((s) => s.setEditing);
@@ -67,13 +74,6 @@ export function ChatPanel() {
   const [chatError, setChatError] = useState<string | null>(null);
   const [isStopping, setIsStopping] = useState(false);
   const [completedTurn, setCompletedTurn] = useState(0);
-  const [pendingDraft, setPendingDraft] = useState<{
-    text: string;
-    refs: MentionRef[];
-  } | null>(null);
-  const composerDraftRef = useRef<{ text: string; refs: MentionRef[] } | null>(
-    null,
-  );
 
   const isGeneratingHere = isSending && pendingSessionId === sessionId;
 
@@ -186,79 +186,42 @@ export function ChatPanel() {
     currentSession?.selected_model ?? { kind: "default", value: null },
   );
 
-  const applySelection = (
-    patch: {
+  const applySelection = useCallback(
+    (patch: {
       backendId?: string;
       modelKind?: "default" | "explicit";
       modelValue?: string | null;
       mode?: ChatMode;
-    },
-    previousState: { text: string; refs: MentionRef[] } | null = null,
-  ) => {
-    if (!sessionId || isSending) return;
-    const revision = currentSession?.selection_revision ?? 0;
-    if (patch.backendId && currentSession?.backend != null) {
-      const draft = previousState ?? null;
+    }) => {
+      if (!sessionId || isSending) return;
+      const revision = currentSession?.selection_revision ?? 0;
       void api
-        .chatCreateSession("New chat")
-        .then((created) => {
-          const createdRevision = created.selection_revision;
-          return api
-            .chatUpdateSelection(
-              created.id,
-              createdRevision,
-              patch.backendId
-                ? {
-                    backendId: patch.backendId,
-                    modelKind: patch.modelKind,
-                    modelValue: patch.modelValue,
-                    mode: patch.mode,
-                  }
-                : patch,
-            )
-            .then((updated) => {
-              queryClient.setQueryData<ChatSession[]>(
-                queryKeys.chatSessions,
-                (current) => [updated, ...(current ?? [])],
-              );
-              openChatTab(updated.id);
-              if (draft) {
-                setPendingDraft(draft);
-              }
-            });
-        })
-        .catch((e: unknown) =>
-          setStatusMessage(
-            appErrorMessage(e, "Could not start a new chat"),
-          ),
-        );
-      return;
-    }
-    void api
-      .chatUpdateSelection(sessionId, revision, patch)
-      .then((updated) => {
-        queryClient.setQueryData<ChatSession[]>(
-          queryKeys.chatSessions,
-          (current) =>
-            current?.map((session) =>
-              session.id === updated.id ? updated : session,
-            ),
-        );
-      })
-      .catch((e: unknown) => {
-        const message = e instanceof Error ? e.message : String(e);
-        if (message.includes("chat_selection_stale")) {
-          void queryClient.invalidateQueries({
-            queryKey: queryKeys.chatSessions,
-          });
-          setStatusMessage(
-            "Chat selection changed elsewhere. Review and send again.",
+        .chatUpdateSelection(sessionId, revision, patch)
+        .then((updated) => {
+          queryClient.setQueryData<ChatSession[]>(
+            queryKeys.chatSessions,
+            (current) =>
+              current?.map((session) =>
+                session.id === updated.id ? updated : session,
+              ),
           );
-          return;
-        }
-        setStatusMessage(appErrorMessage(e, "Could not update selection"));
-      });
-  };
+        })
+        .catch((e: unknown) => {
+          const message = e instanceof Error ? e.message : String(e);
+          if (message.includes("chat_selection_stale")) {
+            void queryClient.invalidateQueries({
+              queryKey: queryKeys.chatSessions,
+            });
+            setStatusMessage(
+              "Chat selection changed elsewhere. Review and send again.",
+            );
+            return;
+          }
+          setStatusMessage(appErrorMessage(e, "Could not update selection"));
+        });
+    },
+    [currentSession?.selection_revision, isSending, queryClient, sessionId, setStatusMessage],
+  );
 
   const changeMode = (nextMode: ChatMode) => {
     if (isSending || nextMode === mode) return;
@@ -267,19 +230,7 @@ export function ChatPanel() {
 
   const changeBackend = (backendId: string) => {
     if (backendId === activeBackendId) return;
-    if (currentSession?.backend != null) {
-      applySelection(
-        {
-          backendId,
-          modelKind: "default",
-          modelValue: null,
-        },
-        composerDraftRef.current
-          ? { text: composerDraftRef.current.text, refs: composerDraftRef.current.refs }
-          : null,
-      );
-      return;
-    }
+    if (currentSession?.backend != null) return;
     applySelection({
       backendId,
       modelKind: "default",
@@ -308,19 +259,40 @@ export function ChatPanel() {
     (activeDescriptor.availability === "unavailable" ||
       !activeDescriptor.enabled);
   const activeOperation = operationQuery.data;
-  const composerBlocked: string | null = isSending
+  const blockedNotice: {
+    before: string;
+    linkWord: string | null;
+    after: string;
+    settingsTarget: "claude-agent" | "general" | null;
+  } | null = isSending
     ? null
     : activeOperation
-      ? `${activeOperation.kind.replace(/_/g, " ")} is running`
-      : descriptorBlocked
-        ? (activeDescriptor.message ??
-          activeDescriptor.reason_code ??
-          "Selected backend is unavailable")
-        : composerGate.reason;
+      ? backendBlockNoticeFromReason(
+          `${activeOperation.kind.replace(/_/g, " ")} is running`,
+        )
+      : descriptorBlocked && activeDescriptor
+        ? backendBlockNotice(activeDescriptor)
+        : composerGate.reason
+          ? backendBlockNoticeFromReason(composerGate.reason)
+          : null;
+  const composerBlocked: string | null = blockedNotice?.before || null;
   const backendNotice = claudeBackendNotice(
     currentSession ? { backend: currentSession.backend, backend_status: currentSession.backend_status } : null,
     claudeStatus,
   );
+
+  useEffect(() => {
+    if (!descriptorsQuery.data || !currentSession || currentSession.backend != null) {
+      return;
+    }
+    const descriptor = descriptorsQuery.data.find(
+      (candidate) => candidate.id === activeBackendId,
+    );
+    const usable = descriptor != null && isBackendUsable(descriptor);
+    if (!usable && activeBackendId !== "nest") {
+      applySelection({ backendId: "nest", modelKind: "default", modelValue: null });
+    }
+  }, [descriptorsQuery.data, currentSession, activeBackendId, applySelection]);
 
   const reconnectClaude = useMutation({
     mutationFn: () => {
@@ -777,15 +749,29 @@ export function ChatPanel() {
 
       <div className="shrink-0 px-3 pb-3 pt-4">
         {composerBlocked && (
-          <div className="mb-2 flex items-center justify-between gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-            <span className="flex min-w-0 items-center gap-1.5">
-              <AlertCircle className="size-3.5 shrink-0" />
-              {composerBlocked}
-            </span>
+          <div className="mb-2 flex flex-wrap items-center gap-x-1 rounded-md border border-destructive/40 bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+            <AlertCircle className="size-3.5 shrink-0 text-destructive" />
+            <span>{composerBlocked}</span>
+            {blockedNotice?.linkWord && blockedNotice.settingsTarget && (
+              <button
+                type="button"
+                className="rounded-sm border border-border bg-card px-1.5 py-px font-medium text-foreground transition-colors hover:bg-muted"
+                onClick={() => {
+                  if (blockedNotice.settingsTarget === "claude-agent") {
+                    openClaudeSettingsTab();
+                  } else {
+                    openSettingsTab();
+                  }
+                }}
+              >
+                {blockedNotice.linkWord}
+              </button>
+            )}
+            {blockedNotice?.after}
             {composerGate.reconnectable && (
               <button
                 type="button"
-                className="flex shrink-0 items-center gap-1 font-medium text-primary hover:underline disabled:opacity-60"
+                className="ml-1 flex items-center gap-1 font-medium text-primary hover:underline disabled:opacity-60"
                 disabled={reconnectClaude.isPending}
                 onClick={() => reconnectClaude.mutate()}
               >
@@ -847,11 +833,8 @@ export function ChatPanel() {
           canChangeBackend={capsules.canChangeBackend}
           onBackendChange={changeBackend}
           onModelChange={changeModel}
-          draft={pendingDraft}
-          onDraftConsumed={() => setPendingDraft(null)}
-          onDraftChange={(draft) => {
-            composerDraftRef.current = draft;
-          }}
+          blocked={!!composerBlocked}
+          blockedReason={composerBlocked}
           onStop={() => {
             if (isStopping) return;
             setIsStopping(true);

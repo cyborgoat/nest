@@ -17,6 +17,7 @@ export default defineConfig(async () => ({
     environment: "node",
     environmentMatchGlobs: [
       ["src/components/settings/ClaudeModelsEditor.test.tsx", "jsdom"],
+      ["src/components/settings/ClaudeAgentSettingsSection.test.tsx", "jsdom"],
       ["src/components/settings/SettingsPanel.render.test.tsx", "jsdom"],
     ],
   },

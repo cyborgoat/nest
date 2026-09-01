@@ -6,7 +6,7 @@ export const HUB_TAB_ID = "__hub__";
 export const SETTINGS_TAB_ID = "__settings__";
 export const ACCOUNT_TAB_ID = "__account__";
 export const MESSAGES_TAB_ID = "__messages__";
-type SettingsTarget = "hub-url";
+type SettingsTarget = "hub-url" | "claude-agent";
 export type ActivitySidebarView = "explorer" | "source-control" | "reviews";
 
 /** Whole-app webview zoom. Session-only: deliberately excluded from
@@ -81,6 +81,7 @@ type UiState = {
   openHubTab: () => void;
   openHubInstalledTab: () => void;
   openSettingsTab: () => void;
+  openClaudeSettingsTab: () => void;
   openHubSettingsTab: () => void;
   openAccountTab: () => void;
   clearSettingsTarget: () => void;
@@ -313,6 +314,10 @@ export const useUiStore = create<UiState>()(
         openSettingsTab: () =>
           openEphemeralTab(SETTINGS_TAB_ID, {
             settingsTarget: null,
+          }),
+        openClaudeSettingsTab: () =>
+          openEphemeralTab(SETTINGS_TAB_ID, {
+            settingsTarget: "claude-agent",
           }),
         openHubSettingsTab: () =>
           openEphemeralTab(SETTINGS_TAB_ID, {

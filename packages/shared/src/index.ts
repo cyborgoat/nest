@@ -456,7 +456,21 @@ export type ClaudeDetectionDto = {
 
 export type ClaudeModelOption = {
   model_id: string;
-  source: "default" | "observed" | "custom";
+  source: "default" | "custom";
+};
+
+export type ClaudeModelTestResult = {
+  model: string;
+  ok: boolean;
+  message: string | null;
+  effective_model: string | null;
+};
+
+export type ClaudeModelStatusEntry = {
+  configured_cli_path: string | null;
+  ok: boolean;
+  message: string | null;
+  tested_at: string;
 };
 
 export type ToolActivityRow = {

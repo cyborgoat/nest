@@ -158,14 +158,6 @@ enum StageRequirement {
 }
 
 impl KnowledgeWorkspace {
-    pub async fn search_turn(
-        state: &SharedState,
-        query: &str,
-        limit: Option<u32>,
-    ) -> KnowledgeResult<Vec<KnowledgeHit>> {
-        search_effective(state, query, limit, None).await
-    }
-
     pub async fn search_turn_with_overlay(
         state: &SharedState,
         query: &str,
@@ -890,9 +882,14 @@ mod tests {
             .unwrap();
         }
 
-        let hits = KnowledgeWorkspace::search_turn(&state, "pending unique token", Some(10))
-            .await
-            .unwrap();
+        let hits = KnowledgeWorkspace::search_turn_with_overlay(
+            &state,
+            "pending unique token",
+            Some(10),
+            &BTreeMap::new(),
+        )
+        .await
+        .unwrap();
 
         assert_eq!(hits[0].file_path, "pending-pack/new.md");
     }

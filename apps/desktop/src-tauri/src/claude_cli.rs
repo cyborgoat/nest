@@ -192,37 +192,31 @@ pub(crate) fn resolve_entry(
     if !path.is_file() {
         return Err(invalid_path(path));
     }
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or_default();
     let extension = path
         .extension()
         .and_then(|ext| ext.to_str())
         .map(|ext| ext.to_ascii_lowercase());
     let candidate = match extension.as_deref() {
-        Some("exe") if file_name.eq_ignore_ascii_case("claude.exe") => (
+        Some("exe") => (
             path.to_path_buf(),
             ClaudeLaunchTarget::Executable {
                 executable: path.to_path_buf(),
             },
         ),
-        Some("cjs") if file_name.eq_ignore_ascii_case("cli-wrapper.cjs") => {
-            (path.to_path_buf(), build_node_target(path, path_env)?)
-        }
-        Some("cmd") | Some("ps1") | None if file_stem_is_claude(path) => {
-            let wrapper = resolve_shim(path).ok_or_else(|| invalid_path(path))?;
-            (wrapper.clone(), build_node_target(&wrapper, path_env)?)
-        }
+        Some("cjs") => (path.to_path_buf(), build_node_target(path, path_env)?),
+        Some("cmd") | Some("bat") | Some("ps1") | None => match resolve_shim(path) {
+            Some(wrapper) => (wrapper.clone(), build_node_target(&wrapper, path_env)?),
+            None if !cfg!(windows) && path.extension().is_none() && is_native_binary(path) => (
+                path.to_path_buf(),
+                ClaudeLaunchTarget::Executable {
+                    executable: path.to_path_buf(),
+                },
+            ),
+            None => return Err(invalid_path(path)),
+        },
         _ => return Err(invalid_path(path)),
     };
     Ok(vec![candidate])
-}
-
-fn file_stem_is_claude(path: &Path) -> bool {
-    path.file_stem()
-        .and_then(|stem| stem.to_str())
-        .is_some_and(|stem| stem.eq_ignore_ascii_case("claude"))
 }
 
 pub(crate) fn resolve_shim(shim: &Path) -> Option<PathBuf> {
@@ -285,12 +279,42 @@ fn lexical_normalize(path: &Path) -> PathBuf {
 
 pub(crate) fn find_node_executable(hints: &[PathBuf], path_env: &str) -> Option<PathBuf> {
     for dir in hints.iter().chain(collect_search_dirs(path_env).iter()) {
-        let node = dir.join("node.exe");
-        if node.is_file() {
-            return Some(node);
+        for name in node_candidate_names() {
+            let node = dir.join(name);
+            if node.is_file() {
+                return Some(node);
+            }
         }
     }
     None
+}
+
+fn node_candidate_names() -> &'static [&'static str] {
+    if cfg!(windows) {
+        &["node.exe"]
+    } else {
+        &["node", "node.exe"]
+    }
+}
+
+fn is_native_binary(path: &Path) -> bool {
+    use std::io::Read as _;
+    let mut magic = [0u8; 4];
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return false;
+    };
+    if file.read_exact(&mut magic).is_err() {
+        return false;
+    }
+    magic == [0x7f, b'E', b'L', b'F']
+        || matches!(
+            magic,
+            [0xfe, 0xed, 0xfa, 0xce]
+                | [0xfe, 0xed, 0xfa, 0xcf]
+                | [0xce, 0xfa, 0xed, 0xfe]
+                | [0xcf, 0xfa, 0xed, 0xfe]
+                | [0xca, 0xfe, 0xba, 0xbe]
+        )
 }
 
 fn node_hints(wrapper: &Path) -> Vec<PathBuf> {
@@ -343,6 +367,11 @@ pub(crate) fn find_auto_candidates(
                     if let Ok(target) = build_node_target(&wrapper, path_env) {
                         candidates.push((wrapper, target));
                     }
+                } else if !cfg!(windows) && shim_name == "claude" && is_native_binary(&shim) {
+                    candidates.push((
+                        shim.clone(),
+                        ClaudeLaunchTarget::Executable { executable: shim },
+                    ));
                 }
             }
         }
@@ -362,7 +391,11 @@ fn build_node_target(wrapper: &Path, path_env: &str) -> Result<ClaudeLaunchTarge
     let node = find_node_executable(&node_hints(wrapper), path_env).ok_or_else(|| {
         ClaudeError::new(
             ClaudeErrorCode::NodeNotFound,
-            format!("node.exe is required to launch {}", wrapper.display()),
+            format!(
+                "{} is required to launch {}",
+                node_candidate_names()[0],
+                wrapper.display()
+            ),
         )
     })?;
     Ok(ClaudeLaunchTarget::NodeScript {
@@ -724,16 +757,6 @@ impl ChildGuard {
         self.child.stderr.take()
     }
 
-    async fn write_stdin_all(&mut self, bytes: &[u8]) -> Result<(), String> {
-        if let Some(mut stdin) = self.child.stdin.take() {
-            if let Err(error) = stdin.write_all(bytes).await {
-                return Err(format!("prompt write failed: {error}"));
-            }
-            let _ = stdin.shutdown().await;
-        }
-        Ok(())
-    }
-
     async fn terminate(&mut self) {
         kill_tree(&mut self.child).await;
         if tokio::time::timeout(REAP_TIMEOUT, self.child.wait())
@@ -803,132 +826,6 @@ pub async fn probe_version(detection: &ClaudeDetection, timeout: Duration) -> Pr
         return ProbeOutcome::Failed(ProbeFailure::NoVersionOutput);
     }
     ProbeOutcome::Version(first_token)
-}
-
-#[allow(dead_code)]
-pub async fn probe_connection(
-    detection: &ClaudeDetection,
-    probe_session_id: &str,
-    cwd: &Path,
-    timeout: Duration,
-) -> Result<ProbeConnectionOutcome, String> {
-    let args = vec![
-        "-p".to_string(),
-        "--output-format".to_string(),
-        "stream-json".to_string(),
-        "--verbose".to_string(),
-        "--include-partial-messages".to_string(),
-        "--no-session-persistence".to_string(),
-        "--session-id".to_string(),
-        probe_session_id.to_string(),
-    ];
-    let mut command = spawn_command(detection, &args);
-    command.current_dir(cwd);
-    let mut guard = ChildGuard::spawn(command).map_err(|error| format!("spawn failed: {error}"))?;
-
-    let stdout = match guard.take_stdout() {
-        Some(stdout) => stdout,
-        None => {
-            guard.terminate().await;
-            return Err("no stdout pipe".to_string());
-        }
-    };
-    let stderr_task = tokio::spawn(read_capped(
-        guard.take_stderr(),
-        MAX_STDERR_BYTES,
-        Keep::Tail,
-    ));
-
-    let (line_tx, mut line_rx) = tokio::sync::mpsc::channel::<String>(STDOUT_CHANNEL_CAPACITY);
-    let stdout_task = tokio::spawn(async move {
-        let mut reader = BufReader::new(stdout).lines();
-        while let Ok(Some(line)) = reader.next_line().await {
-            if line_tx.send(line).await.is_err() {
-                break;
-            }
-        }
-    });
-
-    if let Err(message) = guard.write_stdin_all(b"ok").await {
-        guard.terminate().await;
-        drop(line_rx);
-        let _ = stdout_task.await;
-        let _ = stderr_task.await;
-        return Err(message);
-    }
-
-    let mut parser = StreamParser::new(probe_session_id);
-    let deadline = tokio::time::Instant::now() + timeout;
-    let outcome = loop {
-        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-        if remaining.is_zero() {
-            break Err("timeout".to_string());
-        }
-        tokio::select! {
-            maybe_line = line_rx.recv() => {
-                match maybe_line {
-                    Some(line) => {
-                        if let Err(error) = parser.ingest_line(&line) {
-                            break Err(error.to_string());
-                        }
-                    }
-                    None => break Ok(()),
-                }
-            }
-            _ = tokio::time::sleep(remaining) => {
-                break Err("timeout".to_string());
-            }
-        }
-    };
-    if let Err(message) = outcome {
-        guard.terminate().await;
-        drop(line_rx);
-        let _ = stdout_task.await;
-        let _ = stderr_task.await;
-        return Err(message);
-    }
-    let status = match tokio::time::timeout(Duration::from_secs(30), guard.wait()).await {
-        Ok(status) => status,
-        Err(_) => {
-            guard.terminate().await;
-            drop(line_rx);
-            let _ = stdout_task.await;
-            let _ = stderr_task.await;
-            return Err("timeout waiting for process exit".to_string());
-        }
-    };
-    let exit_ok = matches!(&status, Ok(status) if status.success());
-    let stderr_tail = stderr_task.await.unwrap_or_default();
-    let _ = stdout_task.await;
-
-    match parser.finish(exit_ok) {
-        Ok(TurnOutcome::Success {
-            model, cli_version, ..
-        }) => Ok(ProbeConnectionOutcome {
-            resolved_path: detection.resolved_path.clone(),
-            cli_version: cli_version.unwrap_or_default(),
-            effective_model: model.unwrap_or_default(),
-        }),
-        Ok(TurnOutcome::Failed {
-            subtype,
-            sanitized_result,
-            ..
-        }) => Err(format!(
-            "probe failed: {} {}",
-            subtype.unwrap_or_default(),
-            sanitized_result.unwrap_or_default()
-        )
-        .trim()
-        .to_string()),
-        Err(error) => Err(format!("{error} | stderr: {stderr_tail}")),
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct ProbeConnectionOutcome {
-    pub resolved_path: String,
-    pub cli_version: String,
-    pub effective_model: String,
 }
 
 #[allow(dead_code)]
@@ -1767,19 +1664,44 @@ mod resolver_tests {
     }
 
     #[test]
-    fn arbitrary_exe_files_are_rejected() {
-        let fx = Fixture::new("evil-exe");
-        let exe = fx.touch("tools/evil.exe");
-        let err = detect_cli(Some(&exe)).unwrap_err();
-        assert_eq!(err.code(), ClaudeErrorCode::InvalidCliPath);
+    fn renamed_exe_files_are_accepted() {
+        let fx = Fixture::new("renamed-exe");
+        let exe = fx.touch("tools/claude2.exe");
+        let detections = detect_cli(Some(&exe)).unwrap();
+        assert_eq!(
+            detections[0].launch_target,
+            ClaudeLaunchTarget::Executable { executable: exe }
+        );
     }
 
     #[test]
-    fn arbitrary_scripts_are_rejected() {
-        let fx = Fixture::new("evil-cjs");
-        let script = fx.touch("tools/other.cjs");
-        let err = detect_cli(Some(&script)).unwrap_err();
-        assert_eq!(err.code(), ClaudeErrorCode::InvalidCliPath);
+    fn renamed_node_scripts_are_accepted() {
+        let fx = Fixture::new("renamed-cjs");
+        let script = fx.touch("tools/my-claude.cjs");
+        fx.touch("tools/node.exe");
+        let detections = detect_cli(Some(&script)).unwrap();
+        assert!(matches!(
+            &detections[0].launch_target,
+            ClaudeLaunchTarget::NodeScript { script: resolved, .. } if *resolved == script
+        ));
+    }
+
+    #[test]
+    fn renamed_shims_resolving_to_the_wrapper_are_accepted() {
+        let fx = Fixture::new("renamed-shim");
+        let shim = fx.touch("tools/myclaude.cmd");
+        let wrapper = fx.touch("tools/node_modules/@anthropic-ai/claude-code/cli-wrapper.cjs");
+        fx.touch("tools/node.exe");
+        std::fs::write(
+            &shim,
+            "@echo off\r\nnode \"%~dp0\\node_modules\\@anthropic-ai\\claude-code\\cli-wrapper.cjs\" %*\r\n",
+        )
+        .unwrap();
+        let detections = detect_cli(Some(&shim)).unwrap();
+        assert!(matches!(
+            &detections[0].launch_target,
+            ClaudeLaunchTarget::NodeScript { script, .. } if *script == wrapper
+        ));
     }
 
     #[test]
@@ -1848,6 +1770,15 @@ mod resolver_tests {
         assert_eq!(dirs.len(), 3);
         assert_eq!(dirs[0], PathBuf::from("C:\\a\\bin"));
         assert_eq!(dirs[2], PathBuf::from("C:\\b"));
+    }
+
+    #[test]
+    #[cfg(not(windows))]
+    fn path_env_splits_into_directories() {
+        let dirs = collect_search_dirs("/a/bin:/tools::/b");
+        assert_eq!(dirs.len(), 3);
+        assert_eq!(dirs[0], PathBuf::from("/a/bin"));
+        assert_eq!(dirs[2], PathBuf::from("/b"));
     }
 
     #[test]
@@ -1923,6 +1854,49 @@ mod resolver_tests {
     fn auto_detection_failure_is_invalid_path() {
         let err = detections_from_candidates(Vec::new()).unwrap_err();
         assert_eq!(err.code(), ClaudeErrorCode::InvalidCliPath);
+    }
+
+    #[test]
+    #[cfg(not(windows))]
+    fn node_without_exe_suffix_resolves_in_search_dirs() {
+        let fx = Fixture::new("node-unix");
+        let dir = fx.root.join("tools");
+        let node = fx.touch("tools/node");
+        assert_eq!(find_node_executable(&[dir], ""), Some(node));
+    }
+
+    #[test]
+    #[cfg(not(windows))]
+    fn native_claude_symlink_on_path_is_an_executable_candidate() {
+        let fx = Fixture::new("native-symlink");
+        let target = fx.file("pkg/bin/claude.exe");
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        std::fs::write(&target, [0x7f, b'E', b'L', b'F', 2, 0, 1, 0]).unwrap();
+        let bin = fx.root.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::os::unix::fs::symlink(&target, bin.join("claude")).unwrap();
+        let candidates = find_auto_candidates(std::slice::from_ref(&bin), &[], "");
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].0, bin.join("claude"));
+        assert!(matches!(
+            candidates[0].1,
+            ClaudeLaunchTarget::Executable { .. }
+        ));
+    }
+
+    #[test]
+    #[cfg(not(windows))]
+    fn extensionless_native_claude_entry_resolves_as_executable() {
+        let fx = Fixture::new("native-entry");
+        let claude = fx.file("bin/claude");
+        std::fs::create_dir_all(claude.parent().unwrap()).unwrap();
+        std::fs::write(&claude, [0x7f, b'E', b'L', b'F', 2, 0, 1, 0]).unwrap();
+        let candidates = resolve_entry(&claude, "").unwrap();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(
+            candidates[0].1,
+            ClaudeLaunchTarget::Executable { executable: claude }
+        );
     }
 }
 
@@ -2433,12 +2407,7 @@ mod process_tests {
 
     fn which_node() -> PathBuf {
         let path_env = std::env::var("PATH").unwrap_or_default();
-        let executable = if cfg!(windows) { "node.exe" } else { "node" };
-        let node = collect_search_dirs(&path_env)
-            .into_iter()
-            .map(|dir| dir.join(executable))
-            .find(|node| node.is_file());
-        node.expect("Node.js must be available for process tests")
+        find_node_executable(&[], &path_env).expect("node must be available for process tests")
     }
 
     async fn run(
@@ -3124,66 +3093,6 @@ for (const line of lines) { console.log(line); }
         };
         let error = run(&detection, request).await.unwrap_err();
         assert!(matches!(error, ClaudeTurnError::SessionMismatch { .. }));
-    }
-
-    #[tokio::test]
-    async fn probe_connection_reports_model_and_version() {
-        let fx = Fixture::new("conn-ok");
-        let script = r#"
-const fs = require('fs');
-const args = process.argv.slice(2);
-const prompt = fs.readFileSync(0, 'utf8');
-const sid = args[args.indexOf('--session-id') + 1];
-const noPersist = args.includes('--no-session-persistence');
-const lines = [];
-lines.push(JSON.stringify({type:'system',subtype:'init',session_id:sid,model:'glm-5.3',claude_code_version:'2.1.238'}));
-lines.push(JSON.stringify({type:'result',subtype:'success',session_id:sid,result:'ack:' + prompt + ':' + noPersist}));
-for (const line of lines) { console.log(line); }
-"#;
-        let detection = fx.write_fake_cli(script);
-        let cwd = fx.vault_root();
-        let probe_session = "99999999-9999-4999-8999-999999999999";
-        let outcome = probe_connection(&detection, probe_session, &cwd, Duration::from_secs(30))
-            .await
-            .unwrap();
-        assert_eq!(outcome.effective_model, "glm-5.3");
-        assert_eq!(outcome.cli_version, "2.1.238");
-        assert_eq!(outcome.resolved_path, detection.resolved_path);
-    }
-
-    #[tokio::test]
-    async fn probe_connection_error_result_is_a_failure() {
-        let fx = Fixture::new("conn-err");
-        let script = r#"
-const args = process.argv.slice(2);
-const sid = args[args.indexOf('--session-id') + 1];
-const lines = [];
-lines.push(JSON.stringify({type:'system',subtype:'init',session_id:sid,model:'m',claude_code_version:'v'}));
-lines.push(JSON.stringify({type:'result',subtype:'error_during_execution',session_id:sid,is_error:true,result:'no auth'}));
-for (const line of lines) { console.log(line); }
-"#;
-        let detection = fx.write_fake_cli(script);
-        let cwd = fx.vault_root();
-        let probe_session = "99999999-9999-4999-8999-999999999999";
-        let error = probe_connection(&detection, probe_session, &cwd, Duration::from_secs(30))
-            .await
-            .unwrap_err();
-        assert!(error.contains("no auth"));
-    }
-    #[tokio::test]
-    async fn probe_connection_timeout_kills_the_process() {
-        let fx = Fixture::new("conn-timeout");
-        let detection = fx.write_fake_cli(
-            "console.log(JSON.stringify({type:'system',subtype:'status'})); setInterval(() => {}, 1000);",
-        );
-        let cwd = fx.vault_root();
-        let probe_session = "99999999-9999-4999-8999-999999999999";
-        let started = std::time::Instant::now();
-        let error = probe_connection(&detection, probe_session, &cwd, Duration::from_millis(300))
-            .await
-            .unwrap_err();
-        assert!(error.contains("timeout"));
-        assert!(started.elapsed() < Duration::from_secs(60));
     }
 
     #[test]
