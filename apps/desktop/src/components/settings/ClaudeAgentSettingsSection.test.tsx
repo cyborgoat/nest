@@ -56,12 +56,14 @@ const enabledSettings: AppSettings = {
   claude_agent_enabled: true,
   claude_cli_path: "/saved/claude",
   claude_custom_models: "kimi",
+  claude_custom_args: "--skip-safe-check",
 };
 
 function report(overrides: Record<string, string | null> = {}) {
   return {
     status: "connected" as const,
     configured_cli_path: "/saved/claude",
+    configured_cli_args: "--skip-safe-check",
     resolved_cli_path: "/saved/claude",
     cli_version: "2.1.238",
     effective_model: "claude-default",
@@ -77,6 +79,7 @@ describe("ClaudeAgentSettingsSection", () => {
     apiMocks.claudeConnectionStatus.mockResolvedValue({
       status: "disabled",
       configured_cli_path: "",
+      configured_cli_args: "",
       resolved_cli_path: "",
       cli_version: "",
       effective_model: "",
@@ -96,6 +99,8 @@ describe("ClaudeAgentSettingsSection", () => {
     expect(html).toContain("Auto-detect");
     expect(html).toContain("Test connection");
     expect(html).toContain("Custom models");
+    expect(html).toContain("Custom startup arguments");
+    expect(html).toContain("--skip-safe-check");
     expect(html).toContain("empty = auto-detect");
     expect(html).toContain("Add model");
   });
@@ -142,6 +147,7 @@ describe("ClaudeAgentSettingsSection", () => {
     apiMocks.claudeModelStatuses.mockResolvedValue({
       kimi: {
         configured_cli_path: "/saved/claude",
+        configured_cli_args: "--skip-safe-check",
         ok: true,
         message: null,
         tested_at: "2026-08-29T00:00:00Z",

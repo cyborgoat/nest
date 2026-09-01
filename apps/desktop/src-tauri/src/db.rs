@@ -38,6 +38,8 @@ pub struct AppSettings {
     #[serde(default)]
     pub claude_cli_path: String,
     #[serde(default)]
+    pub claude_custom_args: String,
+    #[serde(default)]
     pub claude_custom_models: String,
 }
 
@@ -56,6 +58,7 @@ impl Default for AppSettings {
             resolved_knowledge_dir: String::new(),
             claude_agent_enabled: false,
             claude_cli_path: String::new(),
+            claude_custom_args: String::new(),
             claude_custom_models: String::new(),
         }
     }
@@ -983,6 +986,7 @@ pub fn get_settings(conn: &Connection) -> AppResult<AppSettings> {
                 );
             }
             "claude_cli_path" => settings.claude_cli_path = value,
+            "claude_custom_args" => settings.claude_custom_args = value,
             "claude_custom_models" => settings.claude_custom_models = value,
             // legacy "top_k" rows ignored — retrieval uses DEFAULT_TOP_K
             _ => {}
@@ -1738,6 +1742,8 @@ pub enum ClaudeConnectionStatus {
 pub struct ClaudeConnectionReport {
     pub status: ClaudeConnectionStatus,
     pub configured_cli_path: String,
+    #[serde(default)]
+    pub configured_cli_args: String,
     pub resolved_cli_path: String,
     pub cli_version: String,
     pub effective_model: String,
@@ -1746,8 +1752,9 @@ pub struct ClaudeConnectionReport {
 }
 
 impl ClaudeConnectionReport {
-    pub fn matches_configured(&self, current_cli_path: &str) -> bool {
+    pub fn matches_configured(&self, current_cli_path: &str, current_cli_args: &str) -> bool {
         self.configured_cli_path == current_cli_path.trim()
+            && self.configured_cli_args == current_cli_args.trim()
     }
 }
 
@@ -1820,26 +1827,35 @@ pub fn load_claude_connection_report(conn: &Connection) -> Option<ClaudeConnecti
 pub struct ClaudeModelStatusEntry {
     #[serde(default)]
     pub configured_cli_path: Option<String>,
+    #[serde(default)]
+    pub configured_cli_args: Option<String>,
     pub ok: bool,
     pub message: Option<String>,
     pub tested_at: String,
 }
 
 impl ClaudeModelStatusEntry {
-    pub fn matches_configured(&self, current_cli_path: &str) -> bool {
+    pub fn matches_configured(&self, current_cli_path: &str, current_cli_args: &str) -> bool {
         self.configured_cli_path
             .as_deref()
             .is_some_and(|path| path == current_cli_path.trim())
+            && self.configured_cli_args.as_deref().unwrap_or_default() == current_cli_args.trim()
     }
 }
 
 const CLAUDE_MODEL_STATUS_KEY: &str = "claude_model_status_v1";
 const CLAUDE_MODEL_STATUS_SEPARATOR: char = '\u{1f}';
 
-fn claude_model_status_key(configured_cli_path: &str, model: &str) -> String {
+fn claude_model_status_key(
+    configured_cli_path: &str,
+    configured_cli_args: &str,
+    model: &str,
+) -> String {
     format!(
-        "{}{}{}",
+        "{}{}{}{}{}",
         configured_cli_path.trim(),
+        CLAUDE_MODEL_STATUS_SEPARATOR,
+        configured_cli_args.trim(),
         CLAUDE_MODEL_STATUS_SEPARATOR,
         model.trim()
     )
@@ -1848,27 +1864,35 @@ fn claude_model_status_key(configured_cli_path: &str, model: &str) -> String {
 pub fn model_status_for_configured_path<'a>(
     statuses: &'a std::collections::HashMap<String, ClaudeModelStatusEntry>,
     configured_cli_path: &str,
+    configured_cli_args: &str,
     model: &str,
 ) -> Option<&'a ClaudeModelStatusEntry> {
     statuses
-        .get(&claude_model_status_key(configured_cli_path, model))
-        .filter(|entry| entry.matches_configured(configured_cli_path))
+        .get(&claude_model_status_key(
+            configured_cli_path,
+            configured_cli_args,
+            model,
+        ))
+        .filter(|entry| entry.matches_configured(configured_cli_path, configured_cli_args))
 }
 
 pub fn model_statuses_for_configured_path(
     statuses: &std::collections::HashMap<String, ClaudeModelStatusEntry>,
     configured_cli_path: &str,
+    configured_cli_args: &str,
 ) -> std::collections::HashMap<String, ClaudeModelStatusEntry> {
     let prefix = format!(
-        "{}{}",
+        "{}{}{}{}",
         configured_cli_path.trim(),
+        CLAUDE_MODEL_STATUS_SEPARATOR,
+        configured_cli_args.trim(),
         CLAUDE_MODEL_STATUS_SEPARATOR
     );
     statuses
         .iter()
         .filter_map(|(key, entry)| {
             key.strip_prefix(&prefix)
-                .filter(|_| entry.matches_configured(configured_cli_path))
+                .filter(|_| entry.matches_configured(configured_cli_path, configured_cli_args))
                 .map(|model| (model.to_string(), entry.clone()))
         })
         .collect()
@@ -1912,6 +1936,7 @@ pub fn upsert_claude_model_status(
     statuses.insert(
         claude_model_status_key(
             entry.configured_cli_path.as_deref().unwrap_or_default(),
+            entry.configured_cli_args.as_deref().unwrap_or_default(),
             model,
         ),
         entry.clone(),
@@ -1946,6 +1971,7 @@ pub fn prune_claude_model_statuses(conn: &Connection, custom_models: &str) -> Ap
 pub fn connection_proven_from(
     enabled: bool,
     configured_cli_path: &str,
+    configured_cli_args: &str,
     memory: Option<&ClaudeConnectionReport>,
     persisted: Option<&ClaudeConnectionReport>,
 ) -> bool {
@@ -1953,13 +1979,13 @@ pub fn connection_proven_from(
         return false;
     }
     if let Some(report) = memory {
-        if report.matches_configured(configured_cli_path) {
+        if report.matches_configured(configured_cli_path, configured_cli_args) {
             return report.status == ClaudeConnectionStatus::Connected;
         }
     }
     persisted.is_some_and(|report| {
         report.status == ClaudeConnectionStatus::Connected
-            && report.matches_configured(configured_cli_path)
+            && report.matches_configured(configured_cli_path, configured_cli_args)
     })
 }
 
@@ -2126,6 +2152,7 @@ pub fn save_claude_settings(
     conn: &Connection,
     enabled: bool,
     cli_path: &str,
+    custom_args: &str,
     custom_models: &str,
 ) -> AppResult<()> {
     let pairs = [
@@ -2138,6 +2165,7 @@ pub fn save_claude_settings(
             },
         ),
         ("claude_cli_path", cli_path.trim().to_string()),
+        ("claude_custom_args", custom_args.trim().to_string()),
         (
             "claude_custom_models",
             normalize_claude_custom_models(custom_models),
@@ -3833,7 +3861,14 @@ mod chat_backend_tests {
     #[test]
     fn general_settings_save_never_writes_claude_keys() {
         let conn = migrated_db();
-        save_claude_settings(&conn, true, "C:\\claude\\claude.exe", "glm-5.3").unwrap();
+        save_claude_settings(
+            &conn,
+            true,
+            "C:\\claude\\claude.exe",
+            "--skip-safe-check",
+            "glm-5.3",
+        )
+        .unwrap();
         let mut general = GeneralSettingsUpdate::from(&get_settings(&conn).unwrap());
         general.chat_model = "gpt-test".into();
         save_general_settings(&conn, &general).unwrap();
@@ -3842,6 +3877,7 @@ mod chat_backend_tests {
         assert_eq!(reloaded.chat_model, "gpt-test");
         assert!(reloaded.claude_agent_enabled);
         assert_eq!(reloaded.claude_cli_path, "C:\\claude\\claude.exe");
+        assert_eq!(reloaded.claude_custom_args, "--skip-safe-check");
         assert_eq!(reloaded.claude_custom_models, "glm-5.3");
     }
 
@@ -3871,10 +3907,10 @@ mod chat_backend_tests {
     #[test]
     fn interleaved_claude_and_general_saves_keep_claude_config() {
         let conn = migrated_db();
-        save_claude_settings(&conn, true, "C:\\claude\\claude.exe", "glm-5.3").unwrap();
+        save_claude_settings(&conn, true, "C:\\claude\\claude.exe", "", "glm-5.3").unwrap();
         let general = GeneralSettingsUpdate::from(&get_settings(&conn).unwrap());
         save_general_settings(&conn, &general).unwrap();
-        save_claude_settings(&conn, true, "C:\\claude\\new.exe", "glm-5.3").unwrap();
+        save_claude_settings(&conn, true, "C:\\claude\\new.exe", "", "glm-5.3").unwrap();
         let reloaded = get_settings(&conn).unwrap();
         assert_eq!(reloaded.claude_cli_path, "C:\\claude\\new.exe");
         assert!(reloaded.claude_agent_enabled);
@@ -3896,6 +3932,7 @@ mod chat_backend_tests {
         let settings = AppSettings::default();
         assert!(!settings.claude_agent_enabled);
         assert!(settings.claude_cli_path.is_empty());
+        assert!(settings.claude_custom_args.is_empty());
         assert!(settings.claude_custom_models.is_empty());
     }
 
@@ -3906,6 +3943,7 @@ mod chat_backend_tests {
         let report = ClaudeConnectionReport {
             status: ClaudeConnectionStatus::Connected,
             configured_cli_path: "C:\\claude\\claude.exe".into(),
+            configured_cli_args: String::new(),
             resolved_cli_path: "C:\\claude\\wrapper.cjs".into(),
             cli_version: "2.1.238".into(),
             effective_model: "glm-5.3[1m]".into(),
@@ -3935,6 +3973,7 @@ mod chat_backend_tests {
             "glm-5.3",
             &ClaudeModelStatusEntry {
                 configured_cli_path: Some("C:\\claude\\claude.exe".into()),
+                configured_cli_args: Some(String::new()),
                 ok: true,
                 message: None,
                 tested_at: "t1".into(),
@@ -3946,6 +3985,7 @@ mod chat_backend_tests {
             "broken",
             &ClaudeModelStatusEntry {
                 configured_cli_path: Some("C:\\claude\\claude.exe".into()),
+                configured_cli_args: Some(String::new()),
                 ok: false,
                 message: Some("no such model".into()),
                 tested_at: "t2".into(),
@@ -3955,18 +3995,21 @@ mod chat_backend_tests {
         let statuses = load_claude_model_statuses(&conn).unwrap();
         assert_eq!(statuses.len(), 2);
         assert!(
-            !model_status_for_configured_path(&statuses, "C:\\claude\\claude.exe", "broken")
+            !model_status_for_configured_path(&statuses, "C:\\claude\\claude.exe", "", "broken")
                 .unwrap()
                 .ok
         );
 
-        save_claude_settings(&conn, true, "C:\\claude\\claude.exe", "glm-5.3").unwrap();
+        save_claude_settings(&conn, true, "C:\\claude\\claude.exe", "", "glm-5.3").unwrap();
         let statuses = load_claude_model_statuses(&conn).unwrap();
         assert_eq!(statuses.len(), 1);
-        assert!(
-            model_status_for_configured_path(&statuses, "C:\\claude\\claude.exe", "glm-5.3")
-                .is_some()
-        );
+        assert!(model_status_for_configured_path(
+            &statuses,
+            "C:\\claude\\claude.exe",
+            "",
+            "glm-5.3"
+        )
+        .is_some());
     }
 
     #[test]
@@ -3977,6 +4020,7 @@ mod chat_backend_tests {
             "kimi",
             &ClaudeModelStatusEntry {
                 configured_cli_path: Some("C:\\claude\\saved.exe".into()),
+                configured_cli_args: Some(String::new()),
                 ok: false,
                 message: Some("unavailable".into()),
                 tested_at: "t1".into(),
@@ -3988,6 +4032,7 @@ mod chat_backend_tests {
             "kimi",
             &ClaudeModelStatusEntry {
                 configured_cli_path: Some("C:\\claude\\draft.exe".into()),
+                configured_cli_args: Some(String::new()),
                 ok: true,
                 message: None,
                 tested_at: "t2".into(),
@@ -3997,12 +4042,12 @@ mod chat_backend_tests {
 
         let statuses = load_claude_model_statuses(&conn).unwrap();
         assert!(
-            !model_status_for_configured_path(&statuses, "C:\\claude\\saved.exe", "kimi")
+            !model_status_for_configured_path(&statuses, "C:\\claude\\saved.exe", "", "kimi")
                 .unwrap()
                 .ok
         );
         assert!(
-            model_status_for_configured_path(&statuses, "C:\\claude\\draft.exe", "kimi")
+            model_status_for_configured_path(&statuses, "C:\\claude\\draft.exe", "", "kimi")
                 .unwrap()
                 .ok
         );
@@ -4016,6 +4061,7 @@ mod chat_backend_tests {
             "kimi",
             &ClaudeModelStatusEntry {
                 configured_cli_path: Some(String::new()),
+                configured_cli_args: Some(String::new()),
                 ok: true,
                 message: None,
                 tested_at: "t1".into(),
@@ -4025,7 +4071,7 @@ mod chat_backend_tests {
 
         let statuses = load_claude_model_statuses(&conn).unwrap();
         assert!(
-            model_status_for_configured_path(&statuses, "", "kimi")
+            model_status_for_configured_path(&statuses, "", "", "kimi")
                 .unwrap()
                 .ok
         );
@@ -4044,8 +4090,8 @@ mod chat_backend_tests {
         .unwrap();
 
         let statuses = load_claude_model_statuses(&conn).unwrap();
-        assert!(model_status_for_configured_path(&statuses, "", "kimi").is_none());
-        assert!(model_status_for_configured_path(&statuses, "/saved/claude", "kimi").is_none());
+        assert!(model_status_for_configured_path(&statuses, "", "", "kimi").is_none());
+        assert!(model_status_for_configured_path(&statuses, "/saved/claude", "", "kimi").is_none());
     }
 
     #[test]
@@ -4058,24 +4104,35 @@ mod chat_backend_tests {
         assert!(connection_proven_from(
             true,
             "C:\\claude\\claude.exe",
+            "",
             Some(&connected),
             None
         ));
         assert!(!connection_proven_from(
             false,
             "C:\\claude\\claude.exe",
+            "",
             Some(&connected),
             None
         ));
         assert!(!connection_proven_from(
             true,
             "D:\\other\\claude.exe",
+            "",
+            Some(&connected),
+            None
+        ));
+        assert!(!connection_proven_from(
+            true,
+            "C:\\claude\\claude.exe",
+            "--skip-safe-check",
             Some(&connected),
             None
         ));
         assert!(connection_proven_from(
             true,
             "C:\\claude\\claude.exe",
+            "",
             None,
             Some(&connected)
         ));
@@ -4087,6 +4144,7 @@ mod chat_backend_tests {
         assert!(!connection_proven_from(
             true,
             "C:\\claude\\claude.exe",
+            "",
             Some(&unavailable),
             Some(&connected)
         ));
@@ -4098,6 +4156,7 @@ mod chat_backend_tests {
         assert!(!connection_proven_from(
             true,
             "C:\\claude\\claude.exe",
+            "",
             Some(&last_connected),
             None
         ));

@@ -132,6 +132,9 @@ const messages: Record<Locale, MessageTree> = {
         customModels: "Custom models",
         customModelsDescription:
           "One model ID per row. Used by the model selector in chat.",
+        customStartupArgs: "Custom startup arguments",
+        customStartupArgsDescription:
+          "Optional arguments passed to every CLI launch. Quotes group values; no shell expansion is performed.",
         customModelsHint:
           "Optional — the default model appears here automatically after a connection test",
         addModel: "Add model",

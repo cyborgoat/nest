@@ -417,12 +417,16 @@ export type AppSettings = {
   resolved_knowledge_dir: string;
   claude_agent_enabled: boolean;
   claude_cli_path: string;
+  claude_custom_args: string;
   claude_custom_models: string;
 };
 
 export type GeneralSettingsUpdate = Omit<
   AppSettings,
-  "claude_agent_enabled" | "claude_cli_path" | "claude_custom_models"
+  | "claude_agent_enabled"
+  | "claude_cli_path"
+  | "claude_custom_args"
+  | "claude_custom_models"
 >;
 
 export type ClaudeConnectionStatus =
@@ -434,6 +438,7 @@ export type ClaudeConnectionStatus =
 export type ClaudeConnectionReport = {
   status: ClaudeConnectionStatus;
   configured_cli_path: string;
+  configured_cli_args: string;
   resolved_cli_path: string;
   cli_version: string;
   effective_model: string;
@@ -444,6 +449,7 @@ export type ClaudeConnectionReport = {
 export type ClaudeSettingsRequest = {
   enabled: boolean;
   cliPath: string;
+  customArgs: string;
   customModels: string;
 };
 
@@ -468,6 +474,7 @@ export type ClaudeModelTestResult = {
 
 export type ClaudeModelStatusEntry = {
   configured_cli_path: string | null;
+  configured_cli_args: string | null;
   ok: boolean;
   message: string | null;
   tested_at: string;

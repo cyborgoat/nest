@@ -30,7 +30,7 @@ The Hub service listens on `PORT` (from `.env`, typically `8787`). Configure the
 
 ### Claude Agent development notes
 
-- Claude Agent requires the Claude CLI installed and logged in (`claude` on PATH, or a path configured in Settings → Claude Agent). The desktop app spawns one CLI process per turn with `--mcp-config`, `--append-system-prompt`, and an explicit `--model`.
+- Claude Agent requires the Claude CLI installed and logged in (`claude` on PATH, or a path configured in Settings → Claude Agent). The desktop app spawns one hidden CLI process per turn with `--mcp-config`, `--append-system-prompt`, an explicit `--model`, and any custom startup arguments configured by the user.
 - Step 2 is implemented and acceptance-tested on native Windows. macOS packaging exists, but Claude Agent is not yet a supported macOS runtime; do not infer support from the generic `.dmg` release job.
 - On Windows, `npm run tauri dev` can pick up the Git-bundled `link.exe` and fail the Rust build. Install the Visual Studio C++ Build Tools and launch through a VS-enabled environment if that happens.
 - The loopback MCP server (`claude_mcp.rs`) binds `127.0.0.1:0` inside the app process; no extra ports need to be opened. Tool calls are authenticated with a per-turn bearer credential.
@@ -55,7 +55,7 @@ The effective knowledge view is `turn-local staged > pending proposal > disk/ind
 
 Claude tool activity has three stable sources: `nest_mcp`, `external_mcp`, and `claude_native`. A tool named `mcp__<server>__<tool>` outside the reserved `mcp__nest__*` namespace is external MCP activity; it must not produce Nest Sources, permissions, staging, or proposals. Ask launches with a strict MCP config, while Agent keeps user/project MCP discovery open and injects the authenticated `nest` server for the reserved name.
 
-The Settings connection test runs a single real headless Claude turn against an isolated temporary pack: it verifies the CLI launches, the loopback MCP server answers, and one `knowledge_list` call succeeds through Claude before the pack is cleaned up. Save and connect reuses an already-successful report for the same CLI path; it only re-tests when no matching report exists. A fake health call without a real CLI turn is not an acceptable replacement.
+The Settings connection test runs a single real headless Claude turn against an isolated temporary pack: it verifies the CLI launches, the loopback MCP server answers, and one `knowledge_list` call succeeds through Claude before the pack is cleaned up. Save and connect reuses an already-successful report for the same CLI path and custom startup arguments; it only re-tests when no matching report exists. A fake health call without a real CLI turn is not an acceptable replacement.
 
 ### Refreshing the bundled tutorial packs
 

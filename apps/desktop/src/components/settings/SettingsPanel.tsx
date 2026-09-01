@@ -62,6 +62,7 @@ const EMPTY: AppSettings = {
   resolved_knowledge_dir: "",
   claude_agent_enabled: false,
   claude_cli_path: "",
+  claude_custom_args: "",
   claude_custom_models: "",
 };
 
@@ -88,6 +89,7 @@ function persistKey(settings: AppSettings): string {
     resolved_knowledge_dir: _resolved,
     claude_agent_enabled: _claudeEnabled,
     claude_cli_path: _claudePath,
+    claude_custom_args: _claudeArgs,
     claude_custom_models: _claudeModels,
     ...rest
   } = settings;
@@ -98,6 +100,7 @@ function generalPayload(settings: AppSettings): GeneralSettingsUpdate {
   const {
     claude_agent_enabled: _claudeEnabled,
     claude_cli_path: _claudePath,
+    claude_custom_args: _claudeArgs,
     claude_custom_models: _claudeModels,
     ...general
   } = settings;
@@ -210,6 +213,7 @@ export function SettingsPanel() {
           : Boolean(data.proxy_url?.trim()),
       claude_agent_enabled: data.claude_agent_enabled ?? false,
       claude_cli_path: data.claude_cli_path ?? "",
+      claude_custom_args: data.claude_custom_args ?? "",
       claude_custom_models: data.claude_custom_models ?? "",
     };
     setForm(initial);

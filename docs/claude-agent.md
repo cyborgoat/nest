@@ -6,12 +6,13 @@ Nest supports two chat backends: the built-in **Nest Agent** (Rig + your OpenAI-
 
 1. Toggle **Enable Claude Agent**.
 2. Set the **CLI path**, or leave it empty and click **Auto-detect** (`claude.exe`, the npm `cli-wrapper.cjs`, and `claude` shims are resolved automatically). Manually entered paths accept renamed but equivalent CLI entry points — any `.exe`/`.cjs` file, or any `.cmd`/`.ps1` shim that resolves to the npm wrapper. A failed detect switches the placeholder to `Auto-detect Not Found`.
-3. Click **Test connection** (or **Save and connect**). The test verifies:
+3. If your CLI variant needs additional non-interactive flags, enter them in **Custom startup arguments**. For example, `--skip-safe-check` suppresses the trust prompt in compatible Claude-derived CLIs. Quoted values are supported; the arguments are passed directly without shell expansion.
+4. Click **Test connection** (or **Save and connect**). The test verifies:
    - the CLI launches and completes a real headless turn, and
    - the Nest MCP server responds through Claude: one `knowledge_list` call over a temporary probe pack succeeds.
 
-   The connection report shows the resolved CLI path, version, and effective model. Any failure returns an error with the failing step; probe residue is reported if cleanup could not complete. Save and connect reuses an already-successful report for the same CLI path instead of re-testing.
-4. **Custom models** lists model IDs (one per row, Enter adds a row). The current default model (from the latest successful test) appears read-only above your rows with a `[default]` badge; observed models from successful tests and chats are also selectable in chat without adding them here.
+   The connection report shows the resolved CLI path, version, and effective model. Any failure returns an error with the failing step; probe residue is reported if cleanup could not complete. Save and connect reuses an already-successful report for the same CLI path and startup arguments instead of re-testing.
+5. **Custom models** lists model IDs (one per row, Enter adds a row). The current default model (from the latest successful test) appears read-only above your rows with a `[default]` badge; observed models from successful tests and chats are also selectable in chat without adding them here.
 
 Disabling Claude Agent only affects new chats; conversations already bound to Claude stay bound.
 
@@ -70,6 +71,7 @@ Each Nest chat session UUID is also the Claude session ID. The first message sta
 - Stopping or deleting an active Claude chat first terminates the process and aborts its staged work, then performs bounded reconciliation. Direct changes already written by native tools are retained.
 - Interrupted proposal apply/rebase operations are claimed and journaled. Startup recovery completes or safely rolls back abandoned operations before normal editing continues.
 - `operation_busy` means another chat, connection test, save, reindex, Vault switch, or deletion owns the app-wide operation slot. Wait for it to finish or stop the active chat.
+- If a Claude-derived CLI reports that stdin is not a TTY while asking whether the project is trusted, add that CLI's non-interactive trust flag to **Custom startup arguments** and test the connection again.
 - An unavailable historical backend remains visible on its old session but cannot send. Start a new session with an available Agent.
 
 ## Bundled tutorial packs

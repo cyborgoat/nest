@@ -12,6 +12,7 @@ use tauri::State;
 pub struct ClaudeSettingsRequest {
     pub enabled: bool,
     pub cli_path: String,
+    pub custom_args: String,
     pub custom_models: String,
 }
 
@@ -28,7 +29,10 @@ pub struct ClaudeDetectionDto {
 }
 
 #[tauri::command]
-pub async fn claude_detect_cli(cli_path: Option<String>) -> AppResult<ClaudeDetectionDto> {
+pub async fn claude_detect_cli(
+    cli_path: Option<String>,
+    custom_args: Option<String>,
+) -> AppResult<ClaudeDetectionDto> {
     let configured = cli_path
         .as_deref()
         .map(str::trim)
@@ -36,8 +40,15 @@ pub async fn claude_detect_cli(cli_path: Option<String>) -> AppResult<ClaudeDete
         .map(std::path::PathBuf::from);
     let detections = claude_cli::detect_cli(configured.as_deref())
         .map_err(|error| AppError::msg(error.to_string()))?;
+    let custom_args = claude_cli::parse_custom_args(custom_args.as_deref().unwrap_or_default())?;
     for detection in &detections {
-        match claude_cli::probe_version(detection, claude_cli::PROBE_VERSION_TIMEOUT).await {
+        match claude_cli::probe_version_with_custom_args(
+            detection,
+            claude_cli::PROBE_VERSION_TIMEOUT,
+            &custom_args,
+        )
+        .await
+        {
             ProbeOutcome::Version(version) => {
                 return Ok(ClaudeDetectionDto {
                     configured_path: detection.configured_path.clone(),
@@ -84,6 +95,7 @@ pub fn claude_model_options(state: State<'_, SharedState>) -> AppResult<Vec<Clau
             !db::model_status_for_configured_path(
                 &statuses,
                 &settings.claude_cli_path,
+                &settings.claude_custom_args,
                 &option.model_id,
             )
             .is_some_and(|entry| !entry.ok)
@@ -99,22 +111,28 @@ pub fn claude_model_options(state: State<'_, SharedState>) -> AppResult<Vec<Clau
 pub fn claude_model_statuses(
     state: State<'_, SharedState>,
     cli_path: String,
+    custom_args: String,
 ) -> AppResult<std::collections::HashMap<String, db::ClaudeModelStatusEntry>> {
     let conn = state.db.lock();
     let statuses = db::load_claude_model_statuses(&conn)?;
-    Ok(db::model_statuses_for_configured_path(&statuses, &cli_path))
+    Ok(db::model_statuses_for_configured_path(
+        &statuses,
+        &cli_path,
+        &custom_args,
+    ))
 }
 
 #[tauri::command]
 pub async fn claude_test_connection(
     state: State<'_, SharedState>,
     cli_path: String,
+    custom_args: String,
 ) -> AppResult<ClaudeConnectionReport> {
     let _slot = state.inner().begin_operation(
         crate::state::OperationKind::ConnectionProbe,
         "claude_test_connection",
     )?;
-    let report = test_connection(&cli_path, None, &state).await;
+    let report = test_connection(&cli_path, &custom_args, None, &state).await;
     *state.claude_connection.lock() = Some(report.clone());
     Ok(report)
 }
@@ -131,6 +149,7 @@ pub struct ClaudeModelTestResult {
 pub async fn claude_test_model(
     state: State<'_, SharedState>,
     cli_path: String,
+    custom_args: String,
     model: String,
 ) -> AppResult<ClaudeModelTestResult> {
     let trimmed_model = model.trim().to_string();
@@ -146,7 +165,7 @@ pub async fn claude_test_model(
         crate::state::OperationKind::ConnectionProbe,
         "claude_test_model",
     )?;
-    let report = test_connection(&cli_path, Some(&trimmed_model), &state).await;
+    let report = test_connection(&cli_path, &custom_args, Some(&trimmed_model), &state).await;
     let message = report
         .message
         .as_deref()
@@ -166,6 +185,7 @@ pub async fn claude_test_model(
             &trimmed_model,
             &db::ClaudeModelStatusEntry {
                 configured_cli_path: Some(report.configured_cli_path.clone()),
+                configured_cli_args: Some(report.configured_cli_args.clone()),
                 ok: result.ok,
                 message: result.message.clone(),
                 tested_at: Utc::now().to_rfc3339(),
@@ -190,6 +210,7 @@ pub async fn claude_save_settings(
             &conn,
             request.enabled,
             &request.cli_path,
+            &request.custom_args,
             &request.custom_models,
         )?;
     }
@@ -198,12 +219,13 @@ pub async fn claude_save_settings(
         let mut report = ClaudeConnectionReport {
             status: ClaudeConnectionStatus::Disabled,
             configured_cli_path: request.cli_path.trim().to_string(),
+            configured_cli_args: request.custom_args.trim().to_string(),
             ..Default::default()
         };
         {
             let conn = state.db.lock();
             if let Some(last) = db::load_claude_connection_report(&conn)
-                .filter(|last| last.matches_configured(&request.cli_path))
+                .filter(|last| last.matches_configured(&request.cli_path, &request.custom_args))
             {
                 report.effective_model = last.effective_model.clone();
             }
@@ -220,12 +242,12 @@ pub async fn claude_save_settings(
         memory
             .filter(|report| {
                 report.status == ClaudeConnectionStatus::Connected
-                    && report.matches_configured(&trimmed)
+                    && report.matches_configured(&trimmed, &request.custom_args)
             })
             .or_else(|| {
                 persisted.filter(|report| {
                     report.status == ClaudeConnectionStatus::Connected
-                        && report.matches_configured(&trimmed)
+                        && report.matches_configured(&trimmed, &request.custom_args)
                 })
             })
     };
@@ -238,10 +260,12 @@ pub async fn claude_save_settings(
             report
         }
         None => {
-            let mut report = test_connection(&request.cli_path, None, &state).await;
+            let mut report =
+                test_connection(&request.cli_path, &request.custom_args, None, &state).await;
             if report.status != ClaudeConnectionStatus::Connected {
                 tokio::time::sleep(Duration::from_millis(750)).await;
-                report = test_connection(&request.cli_path, None, &state).await;
+                report =
+                    test_connection(&request.cli_path, &request.custom_args, None, &state).await;
             }
             if report.status == ClaudeConnectionStatus::Connected {
                 let conn = state.db.lock();
@@ -281,27 +305,34 @@ fn status_from_reports(
         let mut report = ClaudeConnectionReport {
             status: ClaudeConnectionStatus::Disabled,
             configured_cli_path: settings.claude_cli_path.clone(),
+            configured_cli_args: settings.claude_custom_args.clone(),
             ..Default::default()
         };
-        if let Some(last) =
-            persisted.filter(|last| last.matches_configured(&settings.claude_cli_path))
-        {
+        if let Some(last) = persisted.filter(|last| {
+            last.matches_configured(&settings.claude_cli_path, &settings.claude_custom_args)
+        }) {
             report.effective_model = last.effective_model.clone();
         }
         return report;
     }
     let configured = settings.claude_cli_path.trim();
-    if let Some(report) = memory.filter(|report| report.matches_configured(configured)) {
+    if let Some(report) =
+        memory.filter(|report| report.matches_configured(configured, &settings.claude_custom_args))
+    {
         return report.clone();
     }
     if let Some(mut report) = persisted
-        .filter(|report| report.matches_configured(configured))
+        .filter(|report| report.matches_configured(configured, &settings.claude_custom_args))
         .cloned()
     {
         report.status = ClaudeConnectionStatus::LastConnected;
         return report;
     }
-    unavailable_report(configured, "Run Test connection in Settings")
+    unavailable_report(
+        configured,
+        &settings.claude_custom_args,
+        "Run Test connection in Settings",
+    )
 }
 
 pub fn claude_connection_proven(state: &SharedState, settings: &db::AppSettings) -> bool {
@@ -313,6 +344,7 @@ pub fn claude_connection_proven(state: &SharedState, settings: &db::AppSettings)
     db::connection_proven_from(
         settings.claude_agent_enabled,
         &settings.claude_cli_path,
+        &settings.claude_custom_args,
         memory.as_ref(),
         persisted.as_ref(),
     )
@@ -320,6 +352,7 @@ pub fn claude_connection_proven(state: &SharedState, settings: &db::AppSettings)
 
 async fn test_connection(
     cli_path: &str,
+    custom_args: &str,
     model: Option<&str>,
     state: &SharedState,
 ) -> ClaudeConnectionReport {
@@ -331,30 +364,42 @@ async fn test_connection(
     };
     let detections = match claude_cli::detect_cli(configured.as_deref()) {
         Ok(detections) if !detections.is_empty() => detections,
-        _ => return unavailable_report(trimmed, "no Claude CLI candidate found"),
+        _ => return unavailable_report(trimmed, custom_args, "no Claude CLI candidate found"),
+    };
+    let parsed_args = match claude_cli::parse_custom_args(custom_args) {
+        Ok(args) => args,
+        Err(error) => return unavailable_report(trimmed, custom_args, &error.to_string()),
     };
     let detection = detections[0].clone();
-    connectivity_probe(&detection, trimmed, model, state).await
+    connectivity_probe(&detection, trimmed, custom_args, &parsed_args, model, state).await
 }
 
 async fn connectivity_probe(
     detection: &ClaudeDetection,
     configured_path: &str,
+    configured_args: &str,
+    custom_args: &[String],
     model: Option<&str>,
     state: &SharedState,
 ) -> ClaudeConnectionReport {
-    let probe =
-        crate::connection_probe::run_connectivity_probe(state.clone(), configured_path, model)
-            .await;
+    let probe = crate::connection_probe::run_connectivity_probe(
+        state.clone(),
+        configured_path,
+        custom_args,
+        model,
+    )
+    .await;
     if !probe.failures.is_empty() {
         return unavailable_report(
             configured_path,
+            configured_args,
             &format!("nest tool probe failed: {}", probe.failures.join("; ")),
         );
     }
     if !probe.cleanup_warnings.is_empty() {
         return unavailable_report(
             configured_path,
+            configured_args,
             &format!(
                 "nest tool probe left residue: {}",
                 probe.cleanup_warnings.join("; ")
@@ -364,6 +409,7 @@ async fn connectivity_probe(
     ClaudeConnectionReport {
         status: ClaudeConnectionStatus::Connected,
         configured_cli_path: configured_path.to_string(),
+        configured_cli_args: configured_args.trim().to_string(),
         resolved_cli_path: detection.resolved_path.clone(),
         cli_version: probe.cli_version,
         effective_model: probe.effective_model,
@@ -372,10 +418,11 @@ async fn connectivity_probe(
     }
 }
 
-fn unavailable_report(cli_path: &str, message: &str) -> ClaudeConnectionReport {
+fn unavailable_report(cli_path: &str, custom_args: &str, message: &str) -> ClaudeConnectionReport {
     ClaudeConnectionReport {
         status: ClaudeConnectionStatus::Unavailable,
         configured_cli_path: cli_path.to_string(),
+        configured_cli_args: custom_args.trim().to_string(),
         message: Some(message.to_string()),
         ..Default::default()
     }

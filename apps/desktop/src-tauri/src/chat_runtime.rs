@@ -246,7 +246,16 @@ async fn run_claude(request: ChatRunRequest) -> Result<ChatRunResult, crate::err
         system_instructions: Some(&instructions),
     };
     let cancel = state.begin_chat_cancel_arc();
-    let result = match claude_cli::run_turn(detection, turn_request, &events, &cancel).await {
+    let custom_args = claude_cli::parse_custom_args(&settings.claude_custom_args)?;
+    let result = match claude_cli::run_turn_with_custom_args(
+        detection,
+        turn_request,
+        &events,
+        &cancel,
+        &custom_args,
+    )
+    .await
+    {
         Ok(result) => result,
         Err(error) => {
             let _ = std::fs::remove_file(&mcp_config_path);
