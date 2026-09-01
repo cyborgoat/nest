@@ -19,6 +19,7 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(300);
 pub async fn run_connectivity_probe(
     state: SharedState,
     cli_path: &str,
+    custom_args: &[String],
     model: Option<&str>,
 ) -> ProbeOutcome {
     let detections =
@@ -158,7 +159,7 @@ pub async fn run_connectivity_probe(
 
     let turn = tokio::time::timeout(
         PROBE_TIMEOUT,
-        crate::claude_cli::run_turn(
+        crate::claude_cli::run_turn_with_custom_args(
             &detection,
             crate::claude_cli::ClaudeTurnRequest {
                 vault_root: &state.vault_path(),
@@ -172,6 +173,7 @@ pub async fn run_connectivity_probe(
             },
             &crate::claude_cli::TurnEvents::default(),
             &cancel,
+            custom_args,
         ),
     )
     .await;

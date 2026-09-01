@@ -170,6 +170,7 @@ fn claude_descriptor(
     let proven = db::connection_proven_from(
         settings.claude_agent_enabled,
         &settings.claude_cli_path,
+        &settings.claude_custom_args,
         memory.as_ref(),
         persisted_report,
     );
@@ -212,6 +213,7 @@ fn claude_descriptor(
                 !db::model_status_for_configured_path(
                     model_statuses,
                     &settings.claude_cli_path,
+                    &settings.claude_custom_args,
                     &option.model_id,
                 )
                 .is_some_and(|entry| !entry.ok)
@@ -323,6 +325,7 @@ mod tests {
         let report = db::ClaudeConnectionReport {
             status: db::ClaudeConnectionStatus::Connected,
             configured_cli_path: "C:\\claude\\claude.exe".to_string(),
+            configured_cli_args: String::new(),
             resolved_cli_path: String::new(),
             cli_version: String::new(),
             effective_model: "glm-5.3".to_string(),
@@ -332,7 +335,7 @@ mod tests {
         {
             let conn = state.db.lock();
             db::save_claude_connection_report(&conn, &report).unwrap();
-            db::save_claude_settings(&conn, true, "C:\\claude\\claude.exe", "glm-5.3\nkimi")
+            db::save_claude_settings(&conn, true, "C:\\claude\\claude.exe", "", "glm-5.3\nkimi")
                 .unwrap();
         }
         let (settings, statuses, persisted) = {
@@ -360,6 +363,7 @@ mod tests {
         let report = db::ClaudeConnectionReport {
             status: db::ClaudeConnectionStatus::Connected,
             configured_cli_path: "C:\\claude\\claude.exe".to_string(),
+            configured_cli_args: String::new(),
             resolved_cli_path: String::new(),
             cli_version: String::new(),
             effective_model: "glm-5.3".to_string(),
@@ -369,13 +373,14 @@ mod tests {
         {
             let conn = state.db.lock();
             db::save_claude_connection_report(&conn, &report).unwrap();
-            db::save_claude_settings(&conn, true, "C:\\claude\\claude.exe", "kimi\nbroken")
+            db::save_claude_settings(&conn, true, "C:\\claude\\claude.exe", "", "kimi\nbroken")
                 .unwrap();
             db::upsert_claude_model_status(
                 &conn,
                 "broken",
                 &db::ClaudeModelStatusEntry {
                     configured_cli_path: Some("C:\\claude\\claude.exe".to_string()),
+                    configured_cli_args: Some(String::new()),
                     ok: false,
                     message: Some("no such model".to_string()),
                     tested_at: String::new(),
@@ -387,6 +392,7 @@ mod tests {
                 "stale-removed",
                 &db::ClaudeModelStatusEntry {
                     configured_cli_path: Some("C:\\claude\\claude.exe".to_string()),
+                    configured_cli_args: Some(String::new()),
                     ok: true,
                     message: None,
                     tested_at: String::new(),
@@ -418,6 +424,7 @@ mod tests {
         let report = db::ClaudeConnectionReport {
             status: db::ClaudeConnectionStatus::Connected,
             configured_cli_path: "C:\\claude\\saved.exe".to_string(),
+            configured_cli_args: String::new(),
             resolved_cli_path: String::new(),
             cli_version: String::new(),
             effective_model: "glm-5.3".to_string(),
@@ -427,12 +434,13 @@ mod tests {
         {
             let conn = state.db.lock();
             db::save_claude_connection_report(&conn, &report).unwrap();
-            db::save_claude_settings(&conn, true, "C:\\claude\\saved.exe", "kimi").unwrap();
+            db::save_claude_settings(&conn, true, "C:\\claude\\saved.exe", "", "kimi").unwrap();
             db::upsert_claude_model_status(
                 &conn,
                 "kimi",
                 &db::ClaudeModelStatusEntry {
                     configured_cli_path: Some("C:\\claude\\draft.exe".to_string()),
+                    configured_cli_args: Some(String::new()),
                     ok: false,
                     message: Some("no such model".to_string()),
                     tested_at: String::new(),

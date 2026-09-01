@@ -1,4 +1,5 @@
 use crate::error::AppError;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -623,11 +624,57 @@ fn turn_args(
     args
 }
 
-fn spawn_command(detection: &ClaudeDetection, args: &[String]) -> tokio::process::Command {
+pub fn parse_custom_args(input: &str) -> Result<Vec<String>, ClaudeError> {
+    let mut args = Vec::new();
+    let mut current = String::new();
+    let mut quote = None;
+    let mut started = false;
+    let mut chars = input.chars().peekable();
+    while let Some(character) = chars.next() {
+        if let Some(delimiter) = quote {
+            if character == delimiter {
+                quote = None;
+            } else if character == '\\' && chars.peek().is_some_and(|next| *next == delimiter) {
+                current.push(chars.next().unwrap_or(delimiter));
+            } else {
+                current.push(character);
+            }
+            continue;
+        }
+        if character.is_whitespace() {
+            if started {
+                args.push(std::mem::take(&mut current));
+                started = false;
+            }
+        } else if character == '"' || character == '\'' {
+            quote = Some(character);
+            started = true;
+        } else {
+            current.push(character);
+            started = true;
+        }
+    }
+    if quote.is_some() {
+        return Err(ClaudeError::new(
+            ClaudeErrorCode::InvalidCliPath,
+            "custom CLI arguments contain an unclosed quote",
+        ));
+    }
+    if started {
+        args.push(current);
+    }
+    Ok(args)
+}
+
+fn spawn_command(
+    detection: &ClaudeDetection,
+    args: &[String],
+    custom_args: &[String],
+) -> tokio::process::Command {
     let mut command = match &detection.launch_target {
         ClaudeLaunchTarget::Executable { executable } => {
             let mut command = tokio::process::Command::new(executable);
-            command.args(args);
+            command.args(args).args(custom_args);
             command
         }
         ClaudeLaunchTarget::NodeScript {
@@ -635,10 +682,12 @@ fn spawn_command(detection: &ClaudeDetection, args: &[String]) -> tokio::process
             script,
         } => {
             let mut command = tokio::process::Command::new(node_executable);
-            command.arg(script).args(args);
+            command.arg(script).args(args).args(custom_args);
             command
         }
     };
+    #[cfg(windows)]
+    command.creation_flags(0x08000000);
     command
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -781,7 +830,15 @@ async fn cancel_notify(cancel: &CancelToken) {
 
 #[allow(dead_code)]
 pub async fn probe_version(detection: &ClaudeDetection, timeout: Duration) -> ProbeOutcome {
-    let command = spawn_command(detection, &version_args());
+    probe_version_with_custom_args(detection, timeout, &[]).await
+}
+
+pub async fn probe_version_with_custom_args(
+    detection: &ClaudeDetection,
+    timeout: Duration,
+    custom_args: &[String],
+) -> ProbeOutcome {
+    let command = spawn_command(detection, &version_args(), custom_args);
     let mut guard = match ChildGuard::spawn(command) {
         Ok(guard) => guard,
         Err(error) => {
@@ -835,7 +892,17 @@ pub async fn run_turn(
     events: &TurnEvents,
     cancel: &CancelToken,
 ) -> Result<ClaudeTurnResult, ClaudeTurnError> {
-    let primary = execute_single_turn(detection, &request, events, cancel).await;
+    run_turn_with_custom_args(detection, request, events, cancel, &[]).await
+}
+
+pub async fn run_turn_with_custom_args(
+    detection: &ClaudeDetection,
+    request: ClaudeTurnRequest<'_>,
+    events: &TurnEvents,
+    cancel: &CancelToken,
+    custom_args: &[String],
+) -> Result<ClaudeTurnResult, ClaudeTurnError> {
+    let primary = execute_single_turn(detection, &request, events, cancel, custom_args).await;
     match primary {
         Ok(result) => Ok(result),
         Err(ClaudeTurnError::Process {
@@ -847,7 +914,9 @@ pub async fn run_turn(
                 mode: TurnMode::Resume,
                 ..request.clone()
             };
-            match execute_single_turn(detection, &fallback_request, events, cancel).await {
+            match execute_single_turn(detection, &fallback_request, events, cancel, custom_args)
+                .await
+            {
                 Ok(mut result) => {
                     result.used_fallback_resume = true;
                     Ok(result)
@@ -870,6 +939,7 @@ async fn execute_single_turn(
     request: &ClaudeTurnRequest<'_>,
     events: &TurnEvents,
     cancel: &CancelToken,
+    custom_args: &[String],
 ) -> Result<ClaudeTurnResult, ClaudeTurnError> {
     let args = turn_args(
         request.mode,
@@ -879,7 +949,7 @@ async fn execute_single_turn(
         request.mcp_config_path,
         request.system_instructions,
     );
-    let mut command = spawn_command(detection, &args);
+    let mut command = spawn_command(detection, &args, custom_args);
     command.current_dir(request.vault_root);
     let mut guard = ChildGuard::spawn(command).map_err(|error| ClaudeTurnError::SpawnFailed {
         message: error.to_string(),
@@ -1055,6 +1125,10 @@ fn tool_target(input: Option<&serde_json::Value>) -> Option<String> {
         let clipped: String = query.chars().take(48).collect();
         return Some(clipped);
     }
+    if let Some(command) = input.get("command").and_then(|value| value.as_str()) {
+        let clipped: String = command.chars().take(80).collect();
+        return Some(clipped);
+    }
     None
 }
 
@@ -1117,6 +1191,15 @@ struct ParserState {
     assistant_text: Option<String>,
     assistant_thinking: Option<String>,
     result: Option<ParsedResultMessage>,
+    pending_tools: HashMap<u64, PendingToolCall>,
+    emitted_tool_ids: HashSet<String>,
+}
+
+#[derive(Default)]
+struct PendingToolCall {
+    id: Option<String>,
+    name: String,
+    input_json: String,
 }
 
 #[derive(Debug, Clone)]
@@ -1262,23 +1345,61 @@ impl StreamParser {
         let Some(event) = value.get("event") else {
             return Ok(None);
         };
-        if event.get("type").and_then(|value| value.as_str()) == Some("content_block_start")
+        let event_type = event.get("type").and_then(|value| value.as_str());
+        let index = event.get("index").and_then(|value| value.as_u64());
+        if event_type == Some("content_block_start")
             && event
-                .get("content_block")
-                .and_then(|block| block.get("type"))
+                .pointer("/content_block/type")
                 .and_then(|value| value.as_str())
                 == Some("tool_use")
         {
-            let name = event
-                .pointer("/content_block/name")
-                .and_then(|value| value.as_str())
-                .unwrap_or("unknown_tool");
+            if let Some(index) = index {
+                let block = event
+                    .get("content_block")
+                    .unwrap_or(&serde_json::Value::Null);
+                self.state.pending_tools.insert(
+                    index,
+                    PendingToolCall {
+                        id: block
+                            .get("id")
+                            .and_then(|value| value.as_str())
+                            .map(str::to_string),
+                        name: block
+                            .get("name")
+                            .and_then(|value| value.as_str())
+                            .unwrap_or("unknown_tool")
+                            .to_string(),
+                        input_json: block
+                            .get("input")
+                            .filter(|input| {
+                                !input.as_object().is_some_and(|value| value.is_empty())
+                            })
+                            .map(serde_json::Value::to_string)
+                            .unwrap_or_default(),
+                    },
+                );
+            }
+            return Ok(None);
+        }
+        if event_type == Some("content_block_stop") {
+            let Some(pending) = index.and_then(|index| self.state.pending_tools.remove(&index))
+            else {
+                return Ok(None);
+            };
+            if pending
+                .id
+                .as_ref()
+                .is_some_and(|id| !self.state.emitted_tool_ids.insert(id.clone()))
+            {
+                return Ok(None);
+            }
+            let input = serde_json::from_str(&pending.input_json).ok();
             return Ok(Some(ParserEvent::ToolCall {
-                name: name.to_string(),
-                target: None,
+                name: pending.name,
+                target: tool_target(input.as_ref()),
             }));
         }
-        if event.get("type").and_then(|value| value.as_str()) != Some("content_block_delta") {
+        if event_type != Some("content_block_delta") {
             return Ok(None);
         }
         let Some(delta) = event.get("delta") else {
@@ -1306,6 +1427,19 @@ impl StreamParser {
                 }
                 self.state.streamed_thinking.push_str(thinking);
                 Ok(Some(ParserEvent::Thinking(thinking.to_string())))
+            }
+            Some("input_json_delta") => {
+                if let Some(pending) =
+                    index.and_then(|index| self.state.pending_tools.get_mut(&index))
+                {
+                    pending.input_json.push_str(
+                        delta
+                            .get("partial_json")
+                            .and_then(|value| value.as_str())
+                            .unwrap_or_default(),
+                    );
+                }
+                Ok(None)
             }
             _ => Ok(None),
         }
@@ -1338,6 +1472,10 @@ impl StreamParser {
                     }
                 }
                 Some("tool_use") if tool_call.is_none() => {
+                    let id = block.get("id").and_then(|value| value.as_str());
+                    if id.is_some_and(|id| !self.state.emitted_tool_ids.insert(id.to_string())) {
+                        continue;
+                    }
                     let name = block
                         .get("name")
                         .and_then(|value| value.as_str())
@@ -2320,13 +2458,17 @@ mod parser_tests {
     }
 
     #[test]
-    fn tool_use_in_stream_block_start_emits_tool_call() {
+    fn tool_use_in_stream_block_stop_emits_tool_call() {
         let mut parser = StreamParser::new(SESSION);
         feed_init(&mut parser);
         let block = format!(
             r#"{{"type":"stream_event","event":{{"type":"content_block_start","index":2,"content_block":{{"type":"tool_use","id":"tu1","name":"mcp__nest__knowledge_read","input":{{}}}}}},"session_id":"{SESSION}"}}"#
         );
-        let event = parser.ingest_line(&block).unwrap();
+        assert_eq!(parser.ingest_line(&block).unwrap(), None);
+        let stop = format!(
+            r#"{{"type":"stream_event","event":{{"type":"content_block_stop","index":2}},"session_id":"{SESSION}"}}"#
+        );
+        let event = parser.ingest_line(&stop).unwrap();
         assert_eq!(
             event,
             Some(ParserEvent::ToolCall {
@@ -2334,6 +2476,51 @@ mod parser_tests {
                 target: None,
             })
         );
+    }
+
+    #[test]
+    fn streamed_and_assistant_tool_events_emit_one_enriched_call() {
+        let mut parser = StreamParser::new(SESSION);
+        feed_init(&mut parser);
+        let start = format!(
+            r#"{{"type":"stream_event","event":{{"type":"content_block_start","index":0,"content_block":{{"type":"tool_use","id":"tu1","name":"Bash","input":{{}}}}}},"session_id":"{SESSION}"}}"#
+        );
+        let delta = format!(
+            r#"{{"type":"stream_event","event":{{"type":"content_block_delta","index":0,"delta":{{"type":"input_json_delta","partial_json":"{{\"command\":\"echo NEST_PROBE\"}}"}}}},"session_id":"{SESSION}"}}"#
+        );
+        let assistant = format!(
+            r#"{{"type":"assistant","message":{{"content":[{{"type":"tool_use","id":"tu1","name":"Bash","input":{{"command":"echo NEST_PROBE"}}}}]}},"session_id":"{SESSION}"}}"#
+        );
+        let stop = format!(
+            r#"{{"type":"stream_event","event":{{"type":"content_block_stop","index":0}},"session_id":"{SESSION}"}}"#
+        );
+
+        assert_eq!(parser.ingest_line(&start).unwrap(), None);
+        assert_eq!(parser.ingest_line(&delta).unwrap(), None);
+        assert_eq!(
+            parser.ingest_line(&assistant).unwrap(),
+            Some(ParserEvent::ToolCall {
+                name: "Bash".to_string(),
+                target: Some("echo NEST_PROBE".to_string()),
+            })
+        );
+        assert_eq!(parser.ingest_line(&stop).unwrap(), None);
+    }
+
+    #[test]
+    fn custom_arguments_support_quotes_without_shell_expansion() {
+        assert_eq!(
+            parse_custom_args(r#"--skip-safe-check --profile "work account" --path C:\tools\cli"#)
+                .unwrap(),
+            vec![
+                "--skip-safe-check",
+                "--profile",
+                "work account",
+                "--path",
+                r"C:\tools\cli",
+            ]
+        );
+        assert!(parse_custom_args("--profile \"unfinished").is_err());
     }
 
     #[test]
@@ -2448,7 +2635,7 @@ const args = process.argv.slice(2);
 const prompt = fs.readFileSync(0, 'utf8');
 const sid = {sid_helper};
 const mode = args.includes('--session-id') ? 'new' : (args.includes('--resume') ? 'resume' : 'none');
-const flags = (args.includes('--max-turns') ? 'MAX ' : '') + (args.includes('--model') ? 'MODEL ' : '') + (args.includes('--continue') ? 'CONT ' : '');
+const flags = (args.includes('--max-turns') ? 'MAX ' : '') + (args.includes('--model') ? 'MODEL ' : '') + (args.includes('--continue') ? 'CONT ' : '') + (args.includes('--skip-safe-check') ? 'CUSTOM ' : '');
 const lines = [];
 lines.push(JSON.stringify({{type:'system',subtype:'init',session_id:sid,model:'m',claude_code_version:'v'}}));
 lines.push(JSON.stringify({{type:'result',subtype:'success',session_id:sid,result:'{prefix}:' + mode + ':' + prompt + ':' + flags.trim()}}));
@@ -2568,6 +2755,34 @@ fs.writeFileSync('attempts.txt', String(attempts + 1));
         };
         let result = run(&detection, request).await.unwrap();
         assert_eq!(result.answer, "mode:new:from stdin:");
+    }
+
+    #[tokio::test]
+    async fn turn_passes_custom_arguments_to_the_cli() {
+        let fx = Fixture::new("turn-custom-args");
+        let detection = fx.write_fake_cli(&args_echo_script("mode"));
+        let request = ClaudeTurnRequest {
+            vault_root: &fx.vault_root(),
+            session_id: SESSION,
+            mode: TurnMode::NewSession,
+            prompt: "from stdin",
+            model: None,
+            chat_mode: crate::knowledge_workspace::CapabilityMode::Agent,
+            mcp_config_path: None,
+            system_instructions: None,
+        };
+        let cancel = never_cancel();
+        let events = TurnEvents::default();
+        let result = run_turn_with_custom_args(
+            &detection,
+            request,
+            &events,
+            &cancel,
+            &["--skip-safe-check".to_string()],
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.answer, "mode:new:from stdin:CUSTOM");
     }
 
     #[tokio::test]

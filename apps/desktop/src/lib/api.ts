@@ -116,15 +116,23 @@ export const api = {
     }),
   settingsSet: (settings: GeneralSettingsUpdate) =>
     invoke<void>("settings_set", { settings }),
-  claudeDetectCli: (cliPath?: string) =>
-    invoke<ClaudeDetectionDto>("claude_detect_cli", { cliPath }),
-  claudeTestConnection: (cliPath: string) =>
-    invoke<ClaudeConnectionReport>("claude_test_connection", { cliPath }),
-  claudeTestModel: (cliPath: string, model: string) =>
-    invoke<ClaudeModelTestResult>("claude_test_model", { cliPath, model }),
-  claudeModelStatuses: (cliPath: string) =>
+  claudeDetectCli: (cliPath?: string, customArgs = "") =>
+    invoke<ClaudeDetectionDto>("claude_detect_cli", { cliPath, customArgs }),
+  claudeTestConnection: (cliPath: string, customArgs = "") =>
+    invoke<ClaudeConnectionReport>("claude_test_connection", {
+      cliPath,
+      customArgs,
+    }),
+  claudeTestModel: (cliPath: string, customArgs: string, model: string) =>
+    invoke<ClaudeModelTestResult>("claude_test_model", {
+      cliPath,
+      customArgs,
+      model,
+    }),
+  claudeModelStatuses: (cliPath: string, customArgs = "") =>
     invoke<Record<string, ClaudeModelStatusEntry>>("claude_model_statuses", {
       cliPath,
+      customArgs,
     }),
   claudeSaveSettings: (request: ClaudeSettingsRequest) =>
     invoke<ClaudeConnectionReport>("claude_save_settings", { request }),

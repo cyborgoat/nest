@@ -21,6 +21,7 @@ vi.mock("@/lib/api", () => ({
       resolved_knowledge_dir: "",
       claude_agent_enabled: true,
       claude_cli_path: "G:\\Apps\\nodejs\\node_global\\claude.cmd",
+      claude_custom_args: "",
       claude_custom_models: "glm-5.3",
     }),
     settingsPreviewKnowledgeDir: vi.fn(),
@@ -32,6 +33,7 @@ vi.mock("@/lib/api", () => ({
       .mockResolvedValue({
         status: "connected",
         configured_cli_path: "",
+        configured_cli_args: "",
         resolved_cli_path: "",
         cli_version: "2.1.238",
         effective_model: "glm-5.3[1m]",
@@ -44,6 +46,7 @@ vi.mock("@/lib/api", () => ({
     claudeConnectionStatus: vi.fn().mockResolvedValue({
       status: "connected",
       configured_cli_path: "",
+      configured_cli_args: "",
       resolved_cli_path: "",
       cli_version: "2.1.238",
       effective_model: "glm-5.3[1m]",

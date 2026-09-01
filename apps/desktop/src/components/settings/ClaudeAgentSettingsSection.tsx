@@ -26,6 +26,7 @@ import { GeneralGroup } from "./GeneralGroup";
 type ClaudeDraft = {
   enabled: boolean;
   cliPath: string;
+  customArgs: string;
   customModels: string;
 };
 
@@ -37,6 +38,7 @@ function useClaudeAgentSettings(settingsQuery: {
   const [draft, setDraft] = useState<ClaudeDraft>({
     enabled: false,
     cliPath: "",
+    customArgs: "",
     customModels: "",
   });
   const [modelRows, setModelRows] = useState<string[]>([""]);
@@ -55,6 +57,7 @@ function useClaudeAgentSettings(settingsQuery: {
     setDraft({
       enabled: settingsQuery.data.claude_agent_enabled ?? false,
       cliPath: settingsQuery.data.claude_cli_path ?? "",
+      customArgs: settingsQuery.data.claude_custom_args ?? "",
       customModels,
     });
     setModelRows(parseModelRows(customModels));
@@ -67,8 +70,13 @@ function useClaudeAgentSettings(settingsQuery: {
   });
 
   const statusesQuery = useQuery({
-    queryKey: [...queryKeys.claudeModelStatuses, draft.cliPath.trim()],
-    queryFn: () => api.claudeModelStatuses(draft.cliPath.trim()),
+    queryKey: [
+      ...queryKeys.claudeModelStatuses,
+      draft.cliPath.trim(),
+      draft.customArgs.trim(),
+    ],
+    queryFn: () =>
+      api.claudeModelStatuses(draft.cliPath.trim(), draft.customArgs.trim()),
   });
 
   const serializedModels = serializeModelRows(modelRows);
@@ -76,13 +84,18 @@ function useClaudeAgentSettings(settingsQuery: {
     hydrated &&
     (draft.enabled !== (settingsQuery.data?.claude_agent_enabled ?? false) ||
       draft.cliPath !== (settingsQuery.data?.claude_cli_path ?? "") ||
+      draft.customArgs !== (settingsQuery.data?.claude_custom_args ?? "") ||
       serializedModels !==
         (settingsQuery.data?.claude_custom_models ?? ""));
 
   const markDirty = () => setStale(true);
 
   const detect = useMutation({
-    mutationFn: () => api.claudeDetectCli(draft.cliPath.trim() || undefined),
+    mutationFn: () =>
+      api.claudeDetectCli(
+        draft.cliPath.trim() || undefined,
+        draft.customArgs.trim(),
+      ),
     onSuccess: (result) => {
       setDetection(result);
       setDetectFailed(false);
@@ -96,7 +109,8 @@ function useClaudeAgentSettings(settingsQuery: {
   });
 
   const test = useMutation({
-    mutationFn: () => api.claudeTestConnection(draft.cliPath),
+    mutationFn: () =>
+      api.claudeTestConnection(draft.cliPath, draft.customArgs),
     onSuccess: (report) => {
       setTestResult(report);
       setDetectFailed(false);
@@ -120,11 +134,13 @@ function useClaudeAgentSettings(settingsQuery: {
   const testModel = useMutation({
     mutationFn: ({
       cliPath,
+      customArgs,
       model,
     }: {
       cliPath: string;
+      customArgs: string;
       model: string;
-    }) => api.claudeTestModel(cliPath, model),
+    }) => api.claudeTestModel(cliPath, customArgs, model),
     onMutate: ({ model }) => {
       setTestingModel(model.trim());
     },
@@ -147,6 +163,7 @@ function useClaudeAgentSettings(settingsQuery: {
       api.claudeSaveSettings({
         enabled: draft.enabled,
         cliPath: draft.cliPath,
+        customArgs: draft.customArgs,
         customModels: serializedModels,
       }),
     onSuccess: (report) => {
@@ -185,7 +202,8 @@ function useClaudeAgentSettings(settingsQuery: {
   });
 
   const matchingTestResult =
-    testResult?.configured_cli_path === draft.cliPath.trim()
+    testResult?.configured_cli_path === draft.cliPath.trim() &&
+    testResult.configured_cli_args === draft.customArgs.trim()
       ? testResult
       : null;
 
@@ -193,14 +211,16 @@ function useClaudeAgentSettings(settingsQuery: {
     stale || matchingTestResult
       ? null
       : connectionQuery.data &&
-          connectionQuery.data.configured_cli_path === draft.cliPath.trim()
+          connectionQuery.data.configured_cli_path === draft.cliPath.trim() &&
+          connectionQuery.data.configured_cli_args === draft.customArgs.trim()
         ? connectionQuery.data
         : null;
 
   const defaultModelReport =
     matchingTestResult ??
     (connectionQuery.data &&
-    connectionQuery.data.configured_cli_path === draft.cliPath.trim()
+    connectionQuery.data.configured_cli_path === draft.cliPath.trim() &&
+    connectionQuery.data.configured_cli_args === draft.customArgs.trim()
       ? connectionQuery.data
       : null);
   const defaultModel = (defaultModelReport?.effective_model ?? "").trim();
@@ -215,6 +235,7 @@ function useClaudeAgentSettings(settingsQuery: {
   const persistedRowStatuses: ModelRowStatuses = {};
   for (const [model, entry] of Object.entries(statusesQuery.data ?? {})) {
     if (entry.configured_cli_path !== draft.cliPath.trim()) continue;
+    if ((entry.configured_cli_args ?? "") !== draft.customArgs.trim()) continue;
     persistedRowStatuses[model] = {
       ok: entry.ok,
       message: entry.ok
@@ -230,7 +251,11 @@ function useClaudeAgentSettings(settingsQuery: {
     if (!model || save.isPending) return;
     save.mutate(undefined, {
       onSuccess: () => {
-        testModel.mutate({ cliPath: draft.cliPath, model });
+        testModel.mutate({
+          cliPath: draft.cliPath,
+          customArgs: draft.customArgs,
+          model,
+        });
       },
     });
   };
@@ -491,13 +516,33 @@ export function ClaudeAgentSettingsSection({
           onTestRow={(index) => {
             const model = modelRows[index]?.trim();
             if (!model) return;
-            testModel.mutate({ cliPath: draft.cliPath, model });
+            testModel.mutate({
+              cliPath: draft.cliPath,
+              customArgs: draft.customArgs,
+              model,
+            });
           }}
           onSaveRow={saveRowAndTest}
           onChange={(rows) => {
             setModelRows(rows);
             markDirty();
           }}
+        />
+      </Field>
+      <Field
+        label={t("settings.claude.customStartupArgs")}
+        description={t("settings.claude.customStartupArgsDescription")}
+      >
+        <Input
+          value={draft.customArgs}
+          onChange={(event) => {
+            setDraft((prev) => ({ ...prev, customArgs: event.target.value }));
+            clearPathFeedback();
+            markDirty();
+          }}
+          placeholder="--skip-safe-check"
+          disabled={featureDisabled || localOperationPending}
+          className="font-mono text-xs"
         />
       </Field>
     </GeneralGroup>

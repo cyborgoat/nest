@@ -296,9 +296,10 @@ export function ChatPanel() {
 
   const reconnectClaude = useMutation({
     mutationFn: () => {
-      const cliPath =
-        claudeConnectionQuery.data?.configured_cli_path ?? "";
-      return api.claudeTestConnection(cliPath);
+      const cliPath = claudeConnectionQuery.data?.configured_cli_path ?? "";
+      const customArgs =
+        claudeConnectionQuery.data?.configured_cli_args ?? "";
+      return api.claudeTestConnection(cliPath, customArgs);
     },
     onSuccess: (report) => {
       if (report.status === "connected") {
@@ -311,6 +312,10 @@ export function ChatPanel() {
             cliPath:
               report.configured_cli_path ||
               settings?.claude_cli_path ||
+              "",
+            customArgs:
+              report.configured_cli_args ||
+              settings?.claude_custom_args ||
               "",
             customModels: settings?.claude_custom_models ?? "",
           })
@@ -683,6 +688,9 @@ export function ChatPanel() {
               className="min-w-0"
             >
               <AssistantBubble>
+                {streamThinking && (
+                  <ThinkingDisclosure content={streamThinking} isStreaming />
+                )}
                 {liveFileActivities.length > 0 && (
                   <LiveFileActivities activities={liveFileActivities} />
                 )}
@@ -698,19 +706,11 @@ export function ChatPanel() {
                         className="ml-0.5 inline-block h-[1em] w-1.5 translate-y-[0.1em] animate-pulse rounded-sm bg-foreground/50 align-baseline"
                       />
                     </p>
-                    {streamThinking && (
-                      <ThinkingDisclosure content={streamThinking} isStreaming />
-                    )}
                   </>
                 ) : (
-                  <>
-                    <AgentStatusIndicator
-                      activity={agentActivity ?? { kind: "generating" }}
-                    />
-                    {streamThinking && (
-                      <ThinkingDisclosure content={streamThinking} isStreaming />
-                    )}
-                  </>
+                  <AgentStatusIndicator
+                    activity={agentActivity ?? { kind: "generating" }}
+                  />
                 )}
               </AssistantBubble>
             </MessageScroller.Item>
