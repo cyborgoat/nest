@@ -132,6 +132,8 @@ const messages: Record<Locale, MessageTree> = {
         customModels: "Custom models",
         customModelsDescription:
           "One model ID per row. Used by the model selector in chat.",
+        customModelsHint:
+          "Optional — the default model appears here automatically after a connection test",
         addModel: "Add model",
         modelRowLabel: "Model {{index}}",
         removeModelRow: "Remove model {{index}}",
@@ -139,9 +141,14 @@ const messages: Record<Locale, MessageTree> = {
         detectionSucceeded: "Claude CLI {{version}} · {{strategy}}",
         detectionFailed: "No Claude CLI found on PATH or npm locations",
         detectionFailedPlaceholder: "Auto-detect Not Found",
-        detectedModels: "Detected models",
-        detectedModelsDescription:
-          "Models observed from successful tests and chats. Selectable in chat without adding them above.",
+        defaultModelLabel: "Default model",
+        defaultModelAction: "default",
+        testModel: "Test",
+        testModelTitle: "Run a one-turn connectivity test with this model",
+        testingModel: "Testing model",
+        modelAvailable: "Model available",
+        modelUnavailable: "Model unavailable",
+        modelTestedAt: "Connection test passed at {{time}}",
         couldNotDetect: "Could not detect Claude CLI",
         couldNotTest: "Could not test Claude connection",
         couldNotSave: "Could not save Claude settings",

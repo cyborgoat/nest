@@ -34,6 +34,14 @@ export type SelectionCapsules = {
 export const NEST_LABEL = "Nest Agent";
 export const CLAUDE_LABEL = "Claude";
 
+export function isBackendUsable(descriptor: BackendDescriptor): boolean {
+  return (
+    descriptor.enabled &&
+    (descriptor.availability === "ready" ||
+      descriptor.availability === "last_verified")
+  );
+}
+
 export function deriveCapsules(params: {
   descriptors: BackendDescriptor[];
   activeBackendId: ChatBackend;
@@ -45,12 +53,10 @@ export function deriveCapsules(params: {
   const backends = params.descriptors
     .filter(
       (descriptor) =>
-        descriptor.enabled || descriptor.id === params.activeBackendId,
+        isBackendUsable(descriptor) || descriptor.id === params.activeBackendId,
     )
     .map((descriptor) => {
-      const disabled =
-        descriptor.availability !== "ready" &&
-        descriptor.availability !== "last_verified";
+      const disabled = !isBackendUsable(descriptor);
       return {
         id: descriptor.id,
         label: descriptor.label,

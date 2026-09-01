@@ -5,14 +5,13 @@ Nest supports two chat backends: the built-in **Nest Agent** (Rig + your OpenAI-
 ## Setup (Settings → Claude Agent)
 
 1. Toggle **Enable Claude Agent**.
-2. Set the **CLI path**, or leave it empty and click **Auto-detect** (`claude.exe`, the npm `cli-wrapper.cjs`, and `claude` shims are resolved automatically). A failed detect switches the placeholder to `Auto-detect Not Found`.
-3. Click **Save and connect**. Saving verifies:
-   - the CLI starts and reports a version,
-   - a real headless round trip completes, and
-   - all six Nest knowledge tools work end to end in a temporary probe pack: turn 1 runs create → list → read → replace and applies the proposal; after indexing, turn 2 resumes the same Claude session and runs search → read → delete, then applies and cleans up.
+2. Set the **CLI path**, or leave it empty and click **Auto-detect** (`claude.exe`, the npm `cli-wrapper.cjs`, and `claude` shims are resolved automatically). Manually entered paths accept renamed but equivalent CLI entry points — any `.exe`/`.cjs` file, or any `.cmd`/`.ps1` shim that resolves to the npm wrapper. A failed detect switches the placeholder to `Auto-detect Not Found`.
+3. Click **Test connection** (or **Save and connect**). The test verifies:
+   - the CLI launches and completes a real headless turn, and
+   - the Nest MCP server responds through Claude: one `knowledge_list` call over a temporary probe pack succeeds.
 
-   Any failure returns an error with the failing step; the probe residue is reported if cleanup could not complete. Unsaved edits show a banner and pulse the Save button.
-4. **Custom models** lists model IDs (one per row, Enter adds a row). Models observed from successful tests and chats appear read-only under **Detected models** and are selectable in chat without adding them here.
+   The connection report shows the resolved CLI path, version, and effective model. Any failure returns an error with the failing step; probe residue is reported if cleanup could not complete. Save and connect reuses an already-successful report for the same CLI path instead of re-testing.
+4. **Custom models** lists model IDs (one per row, Enter adds a row). The current default model (from the latest successful test) appears read-only above your rows with a `[default]` badge; observed models from successful tests and chats are also selectable in chat without adding them here.
 
 Disabling Claude Agent only affects new chats; conversations already bound to Claude stay bound.
 

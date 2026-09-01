@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   capsuleFromModelSelection,
   deriveCapsules,
+  isBackendUsable,
   modelSelectionFromCapsule,
 } from "./chat-selection";
 
@@ -35,6 +36,19 @@ function descriptor(
   };
 }
 
+describe("isBackendUsable", () => {
+  it("accepts only enabled ready or last-verified backends", () => {
+    expect(isBackendUsable(descriptor("nest"))).toBe(true);
+    expect(
+      isBackendUsable(descriptor("claude", { availability: "last_verified" })),
+    ).toBe(true);
+    expect(
+      isBackendUsable(descriptor("claude", { availability: "unavailable" })),
+    ).toBe(false);
+    expect(isBackendUsable(descriptor("claude", { enabled: false }))).toBe(false);
+  });
+});
+
 describe("deriveCapsules", () => {
   it("only offers enabled descriptors unless the disabled backend is active", () => {
     const disabled = descriptor("claude", {
@@ -56,6 +70,29 @@ describe("deriveCapsules", () => {
     });
     expect(active.backends[1].disabled).toBe(true);
     expect(active.backends[1].disabledReason).toBe("disabled");
+  });
+
+  it("hides enabled but disconnected backends unless they are active", () => {
+    const disconnected = descriptor("claude", {
+      availability: "unavailable",
+      reason_code: "connection_unverified",
+    });
+    const capsules = deriveCapsules({
+      descriptors: [descriptor("nest"), disconnected],
+      activeBackendId: "nest",
+      boundBackend: null,
+    });
+    expect(capsules.backends.map((backend) => backend.id)).toEqual(["nest"]);
+    const bound = deriveCapsules({
+      descriptors: [descriptor("nest"), disconnected],
+      activeBackendId: "claude",
+      boundBackend: "claude",
+    });
+    expect(bound.backends.map((backend) => backend.id)).toEqual([
+      "nest",
+      "claude",
+    ]);
+    expect(bound.backends[1].disabled).toBe(true);
   });
 
   it("derives model and mode capsules entirely from the active descriptor", () => {

@@ -39,6 +39,8 @@ vi.mock("@/lib/api", () => ({
         message: null,
       }),
     claudeSaveSettings: vi.fn(),
+    claudeModelStatuses: vi.fn().mockResolvedValue({}),
+    appOperationStatus: vi.fn().mockResolvedValue(null),
     claudeConnectionStatus: vi.fn().mockResolvedValue({
       status: "connected",
       configured_cli_path: "",
@@ -50,7 +52,7 @@ vi.mock("@/lib/api", () => ({
     }),
     claudeModelOptions: vi.fn().mockResolvedValue([
       { model_id: "", source: "default" },
-      { model_id: "glm-5.3[1m]", source: "observed" },
+      { model_id: "glm-5.3[1m]", source: "custom" },
     ]),
     vaultListTree: vi.fn().mockResolvedValue([]),
     hubListInstalled: vi.fn().mockResolvedValue([]),
@@ -89,6 +91,8 @@ describe("SettingsPanel with live settings data", () => {
   it("renders the Claude section with connected data", () => {
     const { container } = renderPanel();
     expect(container.innerHTML).toContain("Claude Agent");
-    expect(container.innerHTML).toContain("glm-5.3");
+    expect(container.innerHTML).toContain(
+      "the default model appears here automatically",
+    );
   });
 });
