@@ -12,7 +12,7 @@ on:
         type: string
 
 concurrency:
-  group: release-${{ github.ref_name }}
+  group: release-${{ inputs.release_tag || github.ref_name }}
   cancel-in-progress: false
 
 permissions:
@@ -26,20 +26,42 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
-      release_is_draft: ${{ steps.release.outputs.release_is_draft }}
     steps:
       - uses: actions/checkout@v5
         with:
           ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+
+      - name: Verify release tag source
+        run: |
+          git fetch --no-tags origin main:refs/remotes/origin/main
+
+          if ! git cat-file -e "refs/tags/${RELEASE_TAG}^{commit}"; then
+            echo "::error::${RELEASE_TAG} is not an existing tag."
+            exit 1
+          fi
+
+          if ! git merge-base --is-ancestor "refs/tags/${RELEASE_TAG}^{commit}" refs/remotes/origin/main; then
+            echo "::error::${RELEASE_TAG} must point to a commit on the repository's main branch."
+            exit 1
+          fi
 
       - name: Read version and verify version files agree
         id: version
         run: |
           TAURI_V=$(jq -r .version apps/desktop/src-tauri/tauri.conf.json)
           PKG_V=$(jq -r .version apps/desktop/package.json)
-          CARGO_V=$(grep -m1 '^version' apps/desktop/src-tauri/Cargo.toml | sed 's/version *= *"\(.*\)"/\1/')
-          if [ "$TAURI_V" != "$PKG_V" ] || [ "$TAURI_V" != "$CARGO_V" ]; then
-            echo "::error::Version mismatch: tauri.conf.json=$TAURI_V, package.json=$PKG_V, Cargo.toml=$CARGO_V. All three must match."
+          PKG_LOCK_V=$(jq -r .version apps/desktop/package-lock.json)
+          PKG_LOCK_ROOT_V=$(jq -r '.packages[""].version' apps/desktop/package-lock.json)
+          CARGO_V=$(awk -F '"' '/^version = / { print $2; exit }' apps/desktop/src-tauri/Cargo.toml)
+          CARGO_LOCK_V=$(awk -F '"' '$0 == "name = \"nest\"" { found = 1; next } found && /^version = / { print $2; exit }' apps/desktop/src-tauri/Cargo.lock)
+
+          if [ "$TAURI_V" != "$PKG_V" ] || \
+             [ "$TAURI_V" != "$PKG_LOCK_V" ] || \
+             [ "$TAURI_V" != "$PKG_LOCK_ROOT_V" ] || \
+             [ "$TAURI_V" != "$CARGO_V" ] || \
+             [ "$TAURI_V" != "$CARGO_LOCK_V" ]; then
+            echo "::error::Version mismatch: tauri.conf.json=$TAURI_V, package.json=$PKG_V, package-lock.json=$PKG_LOCK_V/$PKG_LOCK_ROOT_V, Cargo.toml=$CARGO_V, Cargo.lock=$CARGO_LOCK_V."
             exit 1
           fi
 
@@ -51,23 +73,83 @@ jobs:
 
           echo "version=$TAURI_V" >> "$GITHUB_OUTPUT"
 
-      - name: Detect release draft state
-        id: release
+      - name: Verify release is not already published
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="${{ env.RELEASE_TAG }}"
-
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            RELEASE_IS_DRAFT=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)
-          else
-            RELEASE_IS_DRAFT=true
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            RELEASE_IS_DRAFT=$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)
+            if [ "$RELEASE_IS_DRAFT" != "true" ]; then
+              echo "::error::Release $RELEASE_TAG is already published. Create a new version and tag instead of replacing published assets."
+              exit 1
+            fi
           fi
 
-          echo "release_is_draft=$RELEASE_IS_DRAFT" >> "$GITHUB_OUTPUT"
+  verify-ui:
+    needs: gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: apps/desktop
+
+      - name: Lint frontend
+        run: npm run lint
+        working-directory: apps/desktop
+
+      - name: Test frontend
+        run: npm test
+        working-directory: apps/desktop
+
+      - name: Build frontend
+        run: npm run build
+        working-directory: apps/desktop
+
+  verify-rust:
+    needs: gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Check formatting
+        run: cargo fmt --check
+        working-directory: apps/desktop/src-tauri
+
+      - name: Lint Rust
+        run: cargo clippy --all-targets -- -D warnings
+        working-directory: apps/desktop/src-tauri
+
+      - name: Test Rust
+        run: cargo test
+        working-directory: apps/desktop/src-tauri
 
   build:
-    needs: gate
+    needs: [gate, verify-ui, verify-rust]
     strategy:
       fail-fast: false
       matrix:
@@ -76,6 +158,10 @@ jobs:
             runner: macos-15
             rust_target: aarch64-apple-darwin
             args: --target aarch64-apple-darwin --bundles dmg
+          - name: macOS (Intel)
+            runner: macos-15-intel
+            rust_target: x86_64-apple-darwin
+            args: --target x86_64-apple-darwin --bundles dmg
           - name: Windows (x64)
             runner: windows-latest
             rust_target: x86_64-pc-windows-msvc
@@ -116,7 +202,7 @@ jobs:
           releaseName: Nest ${{ env.RELEASE_TAG }}
           releaseBody: |
             Unsigned builds. macOS: right-click > Open (or run `xattr -dr com.apple.quarantine /Applications/Nest.app`) on first launch. Windows: choose "More info" > "Run anyway" on the SmartScreen prompt.
-          releaseDraft: ${{ needs.gate.outputs.release_is_draft }}
+          releaseDraft: true
           prerelease: false
           generateReleaseNotes: true
           releaseAssetNamePattern: Nest_${{ env.RELEASE_TAG }}_[platform]_[arch][setup][ext]
@@ -127,7 +213,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Publish release
-        if: needs.gate.outputs.release_is_draft == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
