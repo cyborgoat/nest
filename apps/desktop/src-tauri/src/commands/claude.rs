@@ -7,8 +7,6 @@ use serde::Deserialize;
 use std::time::Duration;
 use tauri::State;
 
-const MIN_CONNECTION_TIMEOUT: Duration = Duration::from_secs(120);
-
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClaudeSettingsRequest {
@@ -73,34 +71,38 @@ pub struct ClaudeModelOptionDto {
 
 #[tauri::command]
 pub fn claude_model_options(state: State<'_, SharedState>) -> AppResult<Vec<ClaudeModelOptionDto>> {
-    let settings = {
+    let (settings, statuses) = {
         let conn = state.db.lock();
-        db::get_settings(&conn)?
+        (
+            db::get_settings(&conn)?,
+            db::load_claude_model_statuses(&conn)?,
+        )
     };
-    let mut observed = {
-        let conn = state.db.lock();
-        db::observed_claude_models(&conn, &settings.claude_cli_path)?
-    };
-    if let Some(memory) = state.claude_connection.lock().as_ref() {
-        if memory.status == ClaudeConnectionStatus::Connected
-            && memory.matches_configured(&settings.claude_cli_path)
-            && !memory.effective_model.trim().is_empty()
-        {
-            let model = memory.effective_model.trim().to_string();
-            if !observed.iter().any(|m| m == &model) {
-                observed.insert(0, model);
-            }
-        }
-    }
-    Ok(
-        db::claude_model_options(&observed, &settings.claude_custom_models)
-            .into_iter()
-            .map(|option| ClaudeModelOptionDto {
-                model_id: option.model_id,
-                source: option.source.as_str().to_string(),
-            })
-            .collect(),
-    )
+    Ok(db::claude_model_options(&settings.claude_custom_models)
+        .into_iter()
+        .filter(|option| {
+            !db::model_status_for_configured_path(
+                &statuses,
+                &settings.claude_cli_path,
+                &option.model_id,
+            )
+            .is_some_and(|entry| !entry.ok)
+        })
+        .map(|option| ClaudeModelOptionDto {
+            model_id: option.model_id,
+            source: option.source.as_str().to_string(),
+        })
+        .collect())
+}
+
+#[tauri::command]
+pub fn claude_model_statuses(
+    state: State<'_, SharedState>,
+    cli_path: String,
+) -> AppResult<std::collections::HashMap<String, db::ClaudeModelStatusEntry>> {
+    let conn = state.db.lock();
+    let statuses = db::load_claude_model_statuses(&conn)?;
+    Ok(db::model_statuses_for_configured_path(&statuses, &cli_path))
 }
 
 #[tauri::command]
@@ -112,9 +114,65 @@ pub async fn claude_test_connection(
         crate::state::OperationKind::ConnectionProbe,
         "claude_test_connection",
     )?;
-    let report = test_connection(&cli_path, &state).await;
+    let report = test_connection(&cli_path, None, &state).await;
     *state.claude_connection.lock() = Some(report.clone());
     Ok(report)
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ClaudeModelTestResult {
+    pub model: String,
+    pub ok: bool,
+    pub message: Option<String>,
+    pub effective_model: Option<String>,
+}
+
+#[tauri::command]
+pub async fn claude_test_model(
+    state: State<'_, SharedState>,
+    cli_path: String,
+    model: String,
+) -> AppResult<ClaudeModelTestResult> {
+    let trimmed_model = model.trim().to_string();
+    if trimmed_model.is_empty() {
+        return Ok(ClaudeModelTestResult {
+            model: trimmed_model,
+            ok: false,
+            message: Some("model id is empty".to_string()),
+            effective_model: None,
+        });
+    }
+    let _slot = state.inner().begin_operation(
+        crate::state::OperationKind::ConnectionProbe,
+        "claude_test_model",
+    )?;
+    let report = test_connection(&cli_path, Some(&trimmed_model), &state).await;
+    let message = report
+        .message
+        .as_deref()
+        .map(shorten_probe_failure)
+        .map(|value| value.to_string());
+    let result = ClaudeModelTestResult {
+        ok: report.status == ClaudeConnectionStatus::Connected,
+        message,
+        effective_model: (!report.effective_model.trim().is_empty())
+            .then(|| report.effective_model.trim().to_string()),
+        model: trimmed_model.clone(),
+    };
+    {
+        let conn = state.db.lock();
+        db::upsert_claude_model_status(
+            &conn,
+            &trimmed_model,
+            &db::ClaudeModelStatusEntry {
+                configured_cli_path: Some(report.configured_cli_path.clone()),
+                ok: result.ok,
+                message: result.message.clone(),
+                tested_at: Utc::now().to_rfc3339(),
+            },
+        )?;
+    }
+    Ok(result)
 }
 
 #[tauri::command]
@@ -137,21 +195,61 @@ pub async fn claude_save_settings(
     }
     if !request.enabled {
         *state.claude_connection.lock() = None;
-        return Ok(ClaudeConnectionReport {
+        let mut report = ClaudeConnectionReport {
             status: ClaudeConnectionStatus::Disabled,
             configured_cli_path: request.cli_path.trim().to_string(),
             ..Default::default()
-        });
+        };
+        {
+            let conn = state.db.lock();
+            if let Some(last) = db::load_claude_connection_report(&conn)
+                .filter(|last| last.matches_configured(&request.cli_path))
+            {
+                report.effective_model = last.effective_model.clone();
+            }
+        }
+        return Ok(report);
     }
-    let mut report = test_connection(&request.cli_path, &state).await;
-    if report.status != ClaudeConnectionStatus::Connected {
-        tokio::time::sleep(std::time::Duration::from_millis(750)).await;
-        report = test_connection(&request.cli_path, &state).await;
-    }
-    if report.status == ClaudeConnectionStatus::Connected {
-        let conn = state.db.lock();
-        db::save_claude_connection_report(&conn, &report)?;
-    }
+    let trimmed = request.cli_path.trim().to_string();
+    let proven = {
+        let memory = state.claude_connection.lock().clone();
+        let persisted = {
+            let conn = state.db.lock();
+            db::load_claude_connection_report(&conn)
+        };
+        memory
+            .filter(|report| {
+                report.status == ClaudeConnectionStatus::Connected
+                    && report.matches_configured(&trimmed)
+            })
+            .or_else(|| {
+                persisted.filter(|report| {
+                    report.status == ClaudeConnectionStatus::Connected
+                        && report.matches_configured(&trimmed)
+                })
+            })
+    };
+    let report = match proven {
+        Some(report) => {
+            {
+                let conn = state.db.lock();
+                db::save_claude_connection_report(&conn, &report)?;
+            }
+            report
+        }
+        None => {
+            let mut report = test_connection(&request.cli_path, None, &state).await;
+            if report.status != ClaudeConnectionStatus::Connected {
+                tokio::time::sleep(Duration::from_millis(750)).await;
+                report = test_connection(&request.cli_path, None, &state).await;
+            }
+            if report.status == ClaudeConnectionStatus::Connected {
+                let conn = state.db.lock();
+                db::save_claude_connection_report(&conn, &report)?;
+            }
+            report
+        }
+    };
     *state.claude_connection.lock() = Some(report.clone());
     Ok(report)
 }
@@ -160,37 +258,50 @@ pub async fn claude_save_settings(
 pub fn claude_connection_status(
     state: State<'_, SharedState>,
 ) -> AppResult<ClaudeConnectionReport> {
-    let settings = {
+    let (settings, persisted) = {
         let conn = state.db.lock();
-        db::get_settings(&conn)?
+        (
+            db::get_settings(&conn)?,
+            db::load_claude_connection_report(&conn),
+        )
     };
+    Ok(status_from_reports(
+        &settings,
+        persisted.as_ref(),
+        state.claude_connection.lock().as_ref(),
+    ))
+}
+
+fn status_from_reports(
+    settings: &db::AppSettings,
+    persisted: Option<&ClaudeConnectionReport>,
+    memory: Option<&ClaudeConnectionReport>,
+) -> ClaudeConnectionReport {
     if !settings.claude_agent_enabled {
-        return Ok(ClaudeConnectionReport {
+        let mut report = ClaudeConnectionReport {
             status: ClaudeConnectionStatus::Disabled,
             configured_cli_path: settings.claude_cli_path.clone(),
             ..Default::default()
-        });
+        };
+        if let Some(last) =
+            persisted.filter(|last| last.matches_configured(&settings.claude_cli_path))
+        {
+            report.effective_model = last.effective_model.clone();
+        }
+        return report;
     }
     let configured = settings.claude_cli_path.trim();
-    if let Some(report) = state.claude_connection.lock().as_ref() {
-        if report.matches_configured(configured) {
-            return Ok(report.clone());
-        }
+    if let Some(report) = memory.filter(|report| report.matches_configured(configured)) {
+        return report.clone();
     }
-    let persisted = {
-        let conn = state.db.lock();
-        db::load_claude_connection_report(&conn)
-    };
-    if let Some(mut report) = persisted {
-        if report.matches_configured(configured) {
-            report.status = ClaudeConnectionStatus::LastConnected;
-            return Ok(report);
-        }
+    if let Some(mut report) = persisted
+        .filter(|report| report.matches_configured(configured))
+        .cloned()
+    {
+        report.status = ClaudeConnectionStatus::LastConnected;
+        return report;
     }
-    Ok(unavailable_report(
-        configured,
-        "Run Test connection in Settings",
-    ))
+    unavailable_report(configured, "Run Test connection in Settings")
 }
 
 pub fn claude_connection_proven(state: &SharedState, settings: &db::AppSettings) -> bool {
@@ -207,7 +318,11 @@ pub fn claude_connection_proven(state: &SharedState, settings: &db::AppSettings)
     )
 }
 
-async fn test_connection(cli_path: &str, state: &SharedState) -> ClaudeConnectionReport {
+async fn test_connection(
+    cli_path: &str,
+    model: Option<&str>,
+    state: &SharedState,
+) -> ClaudeConnectionReport {
     let trimmed = cli_path.trim();
     let configured = if trimmed.is_empty() {
         None
@@ -215,67 +330,45 @@ async fn test_connection(cli_path: &str, state: &SharedState) -> ClaudeConnectio
         Some(std::path::PathBuf::from(trimmed))
     };
     let detections = match claude_cli::detect_cli(configured.as_deref()) {
-        Ok(detections) => detections,
-        Err(error) => return unavailable_report(trimmed, &error.to_string()),
+        Ok(detections) if !detections.is_empty() => detections,
+        _ => return unavailable_report(trimmed, "no Claude CLI candidate found"),
     };
-
-    for detection in &detections {
-        match claude_cli::probe_version(detection, claude_cli::PROBE_VERSION_TIMEOUT).await {
-            ProbeOutcome::Version(_) => {
-                if let Some(report) = minimal_round_trip(detection, trimmed, state).await {
-                    return report;
-                }
-            }
-            ProbeOutcome::Failed(_) => continue,
-        }
-    }
-    unavailable_report(trimmed, "no CLI candidate completed the connection test")
+    let detection = detections[0].clone();
+    connectivity_probe(&detection, trimmed, model, state).await
 }
 
-async fn minimal_round_trip(
+async fn connectivity_probe(
     detection: &ClaudeDetection,
     configured_path: &str,
+    model: Option<&str>,
     state: &SharedState,
-) -> Option<ClaudeConnectionReport> {
-    let temp_dir = std::env::temp_dir();
-    let probe_session = uuid::Uuid::new_v4().to_string();
-    let outcome =
-        claude_cli::probe_connection(detection, &probe_session, &temp_dir, MIN_CONNECTION_TIMEOUT)
+) -> ClaudeConnectionReport {
+    let probe =
+        crate::connection_probe::run_connectivity_probe(state.clone(), configured_path, model)
             .await;
-    match outcome {
-        Ok(result) => {
-            let probe = crate::connection_probe::run_six_tool_probe(
-                state.clone(),
-                None,
-                Some(configured_path.to_string()),
-            )
-            .await;
-            if !probe.failures.is_empty() {
-                return Some(unavailable_report(
-                    configured_path,
-                    &format!("nest tool probe failed: {}", probe.failures.join("; ")),
-                ));
-            }
-            if !probe.cleanup_warnings.is_empty() {
-                return Some(unavailable_report(
-                    configured_path,
-                    &format!(
-                        "nest tool probe left residue: {}",
-                        probe.cleanup_warnings.join("; ")
-                    ),
-                ));
-            }
-            Some(ClaudeConnectionReport {
-                status: ClaudeConnectionStatus::Connected,
-                configured_cli_path: configured_path.to_string(),
-                resolved_cli_path: result.resolved_path,
-                cli_version: result.cli_version,
-                effective_model: result.effective_model,
-                tested_at: Utc::now().to_rfc3339(),
-                message: None,
-            })
-        }
-        Err(message) => Some(unavailable_report(configured_path, &message)),
+    if !probe.failures.is_empty() {
+        return unavailable_report(
+            configured_path,
+            &format!("nest tool probe failed: {}", probe.failures.join("; ")),
+        );
+    }
+    if !probe.cleanup_warnings.is_empty() {
+        return unavailable_report(
+            configured_path,
+            &format!(
+                "nest tool probe left residue: {}",
+                probe.cleanup_warnings.join("; ")
+            ),
+        );
+    }
+    ClaudeConnectionReport {
+        status: ClaudeConnectionStatus::Connected,
+        configured_cli_path: configured_path.to_string(),
+        resolved_cli_path: detection.resolved_path.clone(),
+        cli_version: probe.cli_version,
+        effective_model: probe.effective_model,
+        tested_at: Utc::now().to_rfc3339(),
+        message: None,
     }
 }
 
@@ -285,5 +378,144 @@ fn unavailable_report(cli_path: &str, message: &str) -> ClaudeConnectionReport {
         configured_cli_path: cli_path.to_string(),
         message: Some(message.to_string()),
         ..Default::default()
+    }
+}
+
+fn shorten_probe_failure(message: &str) -> String {
+    let cleaned = message
+        .trim_start_matches("nest tool probe failed: ")
+        .trim_start_matches("probe turn failed: ");
+    let cleaned = match cleaned.find("API Error: ") {
+        Some(at) => &cleaned[at..],
+        None => cleaned,
+    };
+    let first = cleaned.split(';').next().unwrap_or(cleaned).trim();
+    let limited: String = first.chars().take(160).collect();
+    if first.chars().count() > 160 {
+        format!("{limited}…")
+    } else {
+        limited
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shorten_probe_failure_extracts_api_error_segment() {
+        let raw = "nest tool probe failed: probe turn failed: claude_protocol_error: \
+                   success: API Error: 400 [1214][modelCode\u{ff1a}\u{4e0d}\u{5b58}\u{5e58}][20260826]; second part";
+        let shortened = shorten_probe_failure(raw);
+        assert!(shortened.starts_with("API Error: 400"));
+        assert!(!shortened.contains("nest tool probe"));
+        assert!(!shortened.contains("second part"));
+    }
+
+    #[test]
+    fn shorten_probe_failure_keeps_plain_message_and_caps_length() {
+        assert_eq!(
+            shorten_probe_failure("probe turn failed: cancelled"),
+            "cancelled"
+        );
+        let long = "x".repeat(300);
+        let shortened = shorten_probe_failure(&long);
+        assert!(shortened.chars().count() <= 161);
+        assert!(shortened.ends_with('…'));
+    }
+
+    fn test_state() -> SharedState {
+        std::sync::Arc::new(
+            crate::state::AppState::new(
+                std::env::temp_dir().join(format!("nest-claude-cmd-{}", uuid::Uuid::new_v4())),
+            )
+            .unwrap(),
+        )
+    }
+
+    fn settings_for(enabled: bool, cli: &str) -> db::AppSettings {
+        db::AppSettings {
+            claude_agent_enabled: enabled,
+            claude_cli_path: cli.to_string(),
+            ..Default::default()
+        }
+    }
+
+    fn connected_report(cli: &str, model: &str) -> ClaudeConnectionReport {
+        ClaudeConnectionReport {
+            status: ClaudeConnectionStatus::Connected,
+            configured_cli_path: cli.to_string(),
+            effective_model: model.to_string(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn disabled_status_keeps_last_effective_model_for_matching_path() {
+        let state = test_state();
+        {
+            let conn = state.db.lock();
+            db::save_claude_connection_report(
+                &conn,
+                &connected_report("C:\\claude.exe", "glm-5.3"),
+            )
+            .unwrap();
+        }
+        let persisted = {
+            let conn = state.db.lock();
+            db::load_claude_connection_report(&conn)
+        };
+        let report = status_from_reports(
+            &settings_for(false, "C:\\claude.exe"),
+            persisted.as_ref(),
+            None,
+        );
+        assert_eq!(report.status, ClaudeConnectionStatus::Disabled);
+        assert_eq!(report.effective_model, "glm-5.3");
+    }
+
+    #[test]
+    fn disabled_status_drops_model_from_a_different_path() {
+        let state = test_state();
+        {
+            let conn = state.db.lock();
+            db::save_claude_connection_report(
+                &conn,
+                &connected_report("C:\\claude.exe", "glm-5.3"),
+            )
+            .unwrap();
+        }
+        let persisted = {
+            let conn = state.db.lock();
+            db::load_claude_connection_report(&conn)
+        };
+        let report = status_from_reports(
+            &settings_for(false, "D:\\other.exe"),
+            persisted.as_ref(),
+            None,
+        );
+        assert_eq!(report.status, ClaudeConnectionStatus::Disabled);
+        assert_eq!(report.effective_model, "");
+    }
+
+    #[test]
+    fn enabled_status_prefers_memory_then_persisted() {
+        let memory = connected_report("C:\\claude.exe", "glm-5.3");
+        let persisted = connected_report("C:\\claude.exe", "old-model");
+        let report = status_from_reports(
+            &settings_for(true, "C:\\claude.exe"),
+            Some(&persisted),
+            Some(&memory),
+        );
+        assert_eq!(report.status, ClaudeConnectionStatus::Connected);
+        assert_eq!(report.effective_model, "glm-5.3");
+
+        let report = status_from_reports(
+            &settings_for(true, "C:\\claude.exe"),
+            Some(&persisted),
+            None,
+        );
+        assert_eq!(report.status, ClaudeConnectionStatus::LastConnected);
+        assert_eq!(report.effective_model, "old-model");
     }
 }

@@ -1762,7 +1762,6 @@ pub struct ClaudeModelOption {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClaudeModelSource {
     Default,
-    Observed,
     Custom,
 }
 
@@ -1770,28 +1769,17 @@ impl ClaudeModelSource {
     pub fn as_str(&self) -> &'static str {
         match self {
             ClaudeModelSource::Default => "default",
-            ClaudeModelSource::Observed => "observed",
             ClaudeModelSource::Custom => "custom",
         }
     }
 }
 
-pub fn claude_model_options(observed: &[String], custom_models: &str) -> Vec<ClaudeModelOption> {
+pub fn claude_model_options(custom_models: &str) -> Vec<ClaudeModelOption> {
     let mut options = vec![ClaudeModelOption {
         model_id: String::new(),
         source: ClaudeModelSource::Default,
     }];
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for model in observed {
-        let trimmed = model.trim();
-        if trimmed.is_empty() || !seen.insert(trimmed.to_string()) {
-            continue;
-        }
-        options.push(ClaudeModelOption {
-            model_id: trimmed.to_string(),
-            source: ClaudeModelSource::Observed,
-        });
-    }
     for line in custom_models.lines() {
         let trimmed = line.trim();
         if trimmed.is_empty() || seen.contains(trimmed) {
@@ -1804,42 +1792,6 @@ pub fn claude_model_options(observed: &[String], custom_models: &str) -> Vec<Cla
         });
     }
     options
-}
-
-pub const OBSERVED_MODEL_LIMIT: usize = 20;
-
-pub fn observed_claude_models(
-    conn: &Connection,
-    configured_cli_path: &str,
-) -> AppResult<Vec<String>> {
-    let mut models: Vec<String> = Vec::new();
-    if let Some(report) = load_claude_connection_report(conn) {
-        if report.matches_configured(configured_cli_path)
-            && report.status == ClaudeConnectionStatus::Connected
-            && !report.effective_model.trim().is_empty()
-        {
-            models.push(report.effective_model.trim().to_string());
-        }
-    }
-    let mut stmt = conn.prepare(
-        "SELECT DISTINCT effective_model FROM chat_turns
-         WHERE backend_id = 'claude'
-           AND status = 'succeeded'
-           AND effective_model IS NOT NULL
-           AND effective_model != ''
-         ORDER BY finished_at DESC",
-    )?;
-    let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
-    for row in rows {
-        let model = row?;
-        if !models.iter().any(|m| m == &model) {
-            models.push(model);
-        }
-        if models.len() >= OBSERVED_MODEL_LIMIT {
-            break;
-        }
-    }
-    Ok(models)
 }
 
 pub fn save_claude_connection_report(
@@ -1862,6 +1814,133 @@ pub fn load_claude_connection_report(conn: &Connection) -> Option<ClaudeConnecti
     )
     .ok()
     .and_then(|value| serde_json::from_str(&value).ok())
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct ClaudeModelStatusEntry {
+    #[serde(default)]
+    pub configured_cli_path: Option<String>,
+    pub ok: bool,
+    pub message: Option<String>,
+    pub tested_at: String,
+}
+
+impl ClaudeModelStatusEntry {
+    pub fn matches_configured(&self, current_cli_path: &str) -> bool {
+        self.configured_cli_path
+            .as_deref()
+            .is_some_and(|path| path == current_cli_path.trim())
+    }
+}
+
+const CLAUDE_MODEL_STATUS_KEY: &str = "claude_model_status_v1";
+const CLAUDE_MODEL_STATUS_SEPARATOR: char = '\u{1f}';
+
+fn claude_model_status_key(configured_cli_path: &str, model: &str) -> String {
+    format!(
+        "{}{}{}",
+        configured_cli_path.trim(),
+        CLAUDE_MODEL_STATUS_SEPARATOR,
+        model.trim()
+    )
+}
+
+pub fn model_status_for_configured_path<'a>(
+    statuses: &'a std::collections::HashMap<String, ClaudeModelStatusEntry>,
+    configured_cli_path: &str,
+    model: &str,
+) -> Option<&'a ClaudeModelStatusEntry> {
+    statuses
+        .get(&claude_model_status_key(configured_cli_path, model))
+        .filter(|entry| entry.matches_configured(configured_cli_path))
+}
+
+pub fn model_statuses_for_configured_path(
+    statuses: &std::collections::HashMap<String, ClaudeModelStatusEntry>,
+    configured_cli_path: &str,
+) -> std::collections::HashMap<String, ClaudeModelStatusEntry> {
+    let prefix = format!(
+        "{}{}",
+        configured_cli_path.trim(),
+        CLAUDE_MODEL_STATUS_SEPARATOR
+    );
+    statuses
+        .iter()
+        .filter_map(|(key, entry)| {
+            key.strip_prefix(&prefix)
+                .filter(|_| entry.matches_configured(configured_cli_path))
+                .map(|model| (model.to_string(), entry.clone()))
+        })
+        .collect()
+}
+
+pub fn load_claude_model_statuses(
+    conn: &Connection,
+) -> AppResult<std::collections::HashMap<String, ClaudeModelStatusEntry>> {
+    let value = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = ?1",
+            params![CLAUDE_MODEL_STATUS_KEY],
+            |row| row.get::<_, String>(0),
+        )
+        .ok();
+    match value {
+        Some(json) => Ok(serde_json::from_str(&json).unwrap_or_default()),
+        None => Ok(std::collections::HashMap::new()),
+    }
+}
+
+pub fn save_claude_model_statuses(
+    conn: &Connection,
+    statuses: &std::collections::HashMap<String, ClaudeModelStatusEntry>,
+) -> AppResult<()> {
+    conn.execute(
+        "INSERT INTO settings(key, value) VALUES (?1, ?2)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![CLAUDE_MODEL_STATUS_KEY, serde_json::to_string(statuses)?],
+    )?;
+    Ok(())
+}
+
+pub fn upsert_claude_model_status(
+    conn: &Connection,
+    model: &str,
+    entry: &ClaudeModelStatusEntry,
+) -> AppResult<()> {
+    let mut statuses = load_claude_model_statuses(conn)?;
+    statuses.remove(model.trim());
+    statuses.insert(
+        claude_model_status_key(
+            entry.configured_cli_path.as_deref().unwrap_or_default(),
+            model,
+        ),
+        entry.clone(),
+    );
+    save_claude_model_statuses(conn, &statuses)
+}
+
+pub fn prune_claude_model_statuses(conn: &Connection, custom_models: &str) -> AppResult<()> {
+    let mut statuses = load_claude_model_statuses(conn)?;
+    if statuses.is_empty() {
+        return Ok(());
+    }
+    let kept: std::collections::HashSet<String> = custom_models
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect();
+    let before = statuses.len();
+    statuses.retain(|key, _| {
+        let model = key
+            .rsplit_once(CLAUDE_MODEL_STATUS_SEPARATOR)
+            .map_or(key.as_str(), |(_, model)| model);
+        kept.contains(model)
+    });
+    if statuses.len() != before {
+        save_claude_model_statuses(conn, &statuses)?;
+    }
+    Ok(())
 }
 
 pub fn connection_proven_from(
@@ -2064,7 +2143,8 @@ pub fn save_claude_settings(
             normalize_claude_custom_models(custom_models),
         ),
     ];
-    upsert_settings(conn, &pairs)
+    upsert_settings(conn, &pairs)?;
+    prune_claude_model_statuses(conn, &normalize_claude_custom_models(custom_models))
 }
 
 #[allow(dead_code)]
@@ -3837,88 +3917,135 @@ mod chat_backend_tests {
     }
 
     #[test]
-    fn model_options_merge_dedupes_with_observed_priority() {
-        let options = claude_model_options(
-            &["glm-5.3[1m]".to_string(), "  ".to_string()],
-            "glm-5.3[1m]\nclaude-sonnet-4-5\nclaude-sonnet-4-5",
-        );
+    fn model_options_show_default_then_custom_deduped() {
+        let options = claude_model_options("glm-5.3[1m]\nclaude-sonnet-4-5\nclaude-sonnet-4-5\n  ");
         assert_eq!(options.len(), 3);
         assert_eq!(options[0].source, ClaudeModelSource::Default);
         assert_eq!(options[1].model_id, "glm-5.3[1m]");
-        assert_eq!(options[1].source, ClaudeModelSource::Observed);
+        assert_eq!(options[1].source, ClaudeModelSource::Custom);
         assert_eq!(options[2].model_id, "claude-sonnet-4-5");
         assert_eq!(options[2].source, ClaudeModelSource::Custom);
     }
 
     #[test]
-    fn model_options_with_no_observations_show_default_and_custom() {
-        let options = claude_model_options(&[], "a\nb");
-        assert_eq!(options.len(), 3);
-        assert_eq!(options[0].source, ClaudeModelSource::Default);
-        assert_eq!(options[2].model_id, "b");
-    }
-
-    #[test]
-    fn observed_models_dedup_report_and_turns() {
+    fn model_status_roundtrip_and_prune_on_save() {
         let conn = migrated_db();
-        let session = create_session(&conn, "New chat").unwrap();
-        let report = ClaudeConnectionReport {
-            status: ClaudeConnectionStatus::Connected,
-            configured_cli_path: "C:\\claude\\claude.exe".into(),
-            effective_model: "glm-5.3[1m]".into(),
-            ..Default::default()
-        };
-        save_claude_connection_report(&conn, &report).unwrap();
-
-        insert_test_turn(&conn, &session.id, "turn-1", "succeeded", Some("glm-4.7"));
-        insert_test_turn(
+        upsert_claude_model_status(
             &conn,
-            &session.id,
-            "turn-2",
-            "succeeded",
-            Some("glm-5.3[1m]"),
+            "glm-5.3",
+            &ClaudeModelStatusEntry {
+                configured_cli_path: Some("C:\\claude\\claude.exe".into()),
+                ok: true,
+                message: None,
+                tested_at: "t1".into(),
+            },
+        )
+        .unwrap();
+        upsert_claude_model_status(
+            &conn,
+            "broken",
+            &ClaudeModelStatusEntry {
+                configured_cli_path: Some("C:\\claude\\claude.exe".into()),
+                ok: false,
+                message: Some("no such model".into()),
+                tested_at: "t2".into(),
+            },
+        )
+        .unwrap();
+        let statuses = load_claude_model_statuses(&conn).unwrap();
+        assert_eq!(statuses.len(), 2);
+        assert!(
+            !model_status_for_configured_path(&statuses, "C:\\claude\\claude.exe", "broken")
+                .unwrap()
+                .ok
         );
-        insert_test_turn(&conn, &session.id, "turn-3", "failed", Some("glm-x"));
 
-        let observed = observed_claude_models(&conn, "C:\\claude\\claude.exe").unwrap();
-        assert_eq!(observed, vec!["glm-5.3[1m]", "glm-4.7"]);
+        save_claude_settings(&conn, true, "C:\\claude\\claude.exe", "glm-5.3").unwrap();
+        let statuses = load_claude_model_statuses(&conn).unwrap();
+        assert_eq!(statuses.len(), 1);
+        assert!(
+            model_status_for_configured_path(&statuses, "C:\\claude\\claude.exe", "glm-5.3")
+                .is_some()
+        );
     }
 
     #[test]
-    fn observed_models_ignore_report_for_other_cli_path() {
+    fn model_statuses_preserve_results_for_each_cli_path() {
         let conn = migrated_db();
-        let report = ClaudeConnectionReport {
-            status: ClaudeConnectionStatus::Connected,
-            configured_cli_path: "C:\\claude\\claude.exe".into(),
-            effective_model: "glm-5.3[1m]".into(),
-            ..Default::default()
-        };
-        save_claude_connection_report(&conn, &report).unwrap();
-        let observed = observed_claude_models(&conn, "D:\\other\\claude.exe").unwrap();
-        assert!(observed.is_empty());
+        upsert_claude_model_status(
+            &conn,
+            "kimi",
+            &ClaudeModelStatusEntry {
+                configured_cli_path: Some("C:\\claude\\saved.exe".into()),
+                ok: false,
+                message: Some("unavailable".into()),
+                tested_at: "t1".into(),
+            },
+        )
+        .unwrap();
+        upsert_claude_model_status(
+            &conn,
+            "kimi",
+            &ClaudeModelStatusEntry {
+                configured_cli_path: Some("C:\\claude\\draft.exe".into()),
+                ok: true,
+                message: None,
+                tested_at: "t2".into(),
+            },
+        )
+        .unwrap();
+
+        let statuses = load_claude_model_statuses(&conn).unwrap();
+        assert!(
+            !model_status_for_configured_path(&statuses, "C:\\claude\\saved.exe", "kimi")
+                .unwrap()
+                .ok
+        );
+        assert!(
+            model_status_for_configured_path(&statuses, "C:\\claude\\draft.exe", "kimi")
+                .unwrap()
+                .ok
+        );
     }
 
-    fn insert_test_turn(
-        conn: &Connection,
-        session_id: &str,
-        turn_id: &str,
-        status: &str,
-        effective_model: Option<&str>,
-    ) {
-        let message_id = format!("{turn_id}-msg");
-        conn.execute(
-            "INSERT INTO chat_messages (id, session_id, role, content, citations_json, created_at)
-             VALUES (?1, ?2, 'user', 'q', '', ?3)",
-            params![message_id, session_id, "2026-01-01T00:00:00Z"],
+    #[test]
+    fn model_status_supports_the_empty_auto_detect_path() {
+        let conn = migrated_db();
+        upsert_claude_model_status(
+            &conn,
+            "kimi",
+            &ClaudeModelStatusEntry {
+                configured_cli_path: Some(String::new()),
+                ok: true,
+                message: None,
+                tested_at: "t1".into(),
+            },
         )
         .unwrap();
+
+        let statuses = load_claude_model_statuses(&conn).unwrap();
+        assert!(
+            model_status_for_configured_path(&statuses, "", "kimi")
+                .unwrap()
+                .ok
+        );
+    }
+
+    #[test]
+    fn legacy_model_status_without_a_cli_path_is_ignored() {
+        let conn = migrated_db();
         conn.execute(
-            "INSERT INTO chat_turns (id, session_id, user_message_id, backend_id,
-                requested_model_kind, mode, selection_revision, status, started_at, finished_at, effective_model)
-             VALUES (?1, ?2, ?3, 'claude', 'default', 'ask', 0, ?4, ?5, ?6, ?7)",
-            params![turn_id, session_id, message_id, status, "2026-01-01T00:00:00Z", "2026-01-01T00:00:01Z", effective_model],
+            "INSERT INTO settings(key, value) VALUES (?1, ?2)",
+            rusqlite::params![
+                CLAUDE_MODEL_STATUS_KEY,
+                r#"{"kimi":{"ok":false,"message":"old","tested_at":"t0"}}"#
+            ],
         )
         .unwrap();
+
+        let statuses = load_claude_model_statuses(&conn).unwrap();
+        assert!(model_status_for_configured_path(&statuses, "", "kimi").is_none());
+        assert!(model_status_for_configured_path(&statuses, "/saved/claude", "kimi").is_none());
     }
 
     #[test]

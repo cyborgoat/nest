@@ -1,4 +1,4 @@
-import { ArrowUp, ChevronDown, FileText, Folder, Square, X } from "lucide-react";
+import { ArrowUp, Ban, ChevronDown, FileText, Folder, Square, X } from "lucide-react";
 import type { ChatMode } from "@nest/shared";
 import {
   useEffect,
@@ -27,6 +27,8 @@ type Props = {
   candidates: Candidate[];
   isGenerating?: boolean;
   controlsDisabled?: boolean;
+  blocked?: boolean;
+  blockedReason?: string | null;
   onSend: (text: string, focusPaths: string[]) => void;
   onStop?: () => void;
   canSend: boolean;
@@ -49,6 +51,8 @@ export function MentionComposer({
   candidates,
   isGenerating = false,
   controlsDisabled = false,
+  blocked = false,
+  blockedReason = null,
   onSend,
   onStop,
   canSend,
@@ -228,7 +232,10 @@ export function MentionComposer({
     <div className="relative">
       <div
         className={cn(
-          "relative min-h-[76px] rounded-lg border border-border bg-card px-2.5 pt-2.5 pb-10 shadow-sm transition-colors focus-within:border-primary/50 focus-within:ring-1 focus-within:ring-primary/15",
+          "relative min-h-[76px] rounded-lg border bg-card px-2.5 pt-2.5 pb-10 shadow-sm transition-colors focus-within:border-primary/50 focus-within:ring-1 focus-within:ring-primary/15",
+          blocked
+            ? "border-destructive/50"
+            : "border-border",
         )}
       >
         {refs.length > 0 && (
@@ -266,7 +273,7 @@ export function MentionComposer({
           <CapsuleSelect
             ariaLabel="Chat agent"
             value={activeBackendId}
-            disabled={isGenerating || controlsDisabled}
+            disabled={isGenerating || controlsDisabled || !canChangeBackend}
             onChange={onBackendChange}
             options={backends.map((b) => ({
               value: b.id,
@@ -277,7 +284,7 @@ export function MentionComposer({
             lockedTitle={
               canChangeBackend
                 ? undefined
-                : "Backend is bound to this chat. Switching creates a new chat."
+                : "Agent is fixed once the chat has started."
             }
           />
           <CapsuleSelect
@@ -319,7 +326,7 @@ export function MentionComposer({
           <textarea
             ref={textareaRef}
             value={text}
-            disabled={isGenerating || controlsDisabled}
+            disabled={isGenerating || controlsDisabled || blocked}
             placeholder={mode === "agent" ? "Describe a change…" : "Ask anything…"}
             rows={2}
             className="relative block w-full resize-none bg-transparent pr-8 text-sm leading-5 text-transparent caret-foreground outline-none selection:bg-primary/20 selection:text-foreground placeholder:text-muted-foreground"
@@ -358,6 +365,17 @@ export function MentionComposer({
             title="Stop"
           >
             <Square className="size-3 fill-current" />
+          </Button>
+        ) : blocked ? (
+          <Button
+            size="icon-sm"
+            variant="outline"
+            className="absolute right-2 bottom-2 size-6 border-destructive/50 text-destructive"
+            disabled
+            aria-label="Chat unavailable"
+            title={blockedReason ?? "Chat unavailable"}
+          >
+            <Ban className="size-3" />
           </Button>
         ) : (
           <Button
