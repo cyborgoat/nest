@@ -115,7 +115,7 @@ Hub end-to-end tests use `examples/knowledge-packs` as their only registry fixtu
 
 ## Releases
 
-`.github/workflows/release.yml` builds unsigned installers — macOS `.dmg` (Apple Silicon + Intel) and Windows `.msi`/NSIS `.exe` — for a `v*` tag and publishes the GitHub Release for that tag when all builds succeed.
+`.github/workflows/release.yml` builds unsigned installers — macOS `.dmg` (Apple Silicon) and Windows `.msi`/NSIS `.exe` — for a `v*` tag and publishes the GitHub Release for that tag when all builds succeed. Branch pushes and pull requests are verified separately by `.github/workflows/ci.yml`; tag pushes do not duplicate those checks in the release workflow.
 
 To cut a release:
 
@@ -127,7 +127,7 @@ To cut a release:
    - `apps/desktop/src-tauri/Cargo.lock`
 2. Commit and push the version bump.
 3. After the release commit reaches `main`, create and push an annotated tag `v{version}` (for example `git tag -a v1.2.3 -m "Release v1.2.3" && git push origin v1.2.3`).
-4. The workflow runs the desktop frontend and Rust checks, creates or reuses draft release `v{version}`, uploads installers from all runners, then publishes the release.
+4. The workflow validates the tag/version, creates or reuses draft release `v{version}`, uploads installers from the Apple Silicon macOS and Windows runners, then publishes the release.
 
 Notes:
 

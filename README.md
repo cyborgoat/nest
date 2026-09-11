@@ -65,7 +65,7 @@ Public catalog and download routes remain anonymous. Accounts are only needed to
 
 ## Releases
 
-Desktop installers (macOS `.dmg` for Apple Silicon + Intel, Windows `.msi`/`.exe`) are built by GitHub Actions from version tags (`v*`) on `main`. Bump the app version in `apps/desktop` (all three of `src-tauri/tauri.conf.json`, `package.json`, `src-tauri/Cargo.toml`, plus their generated lockfiles) and push the matching tag `v{version}` to build installers and publish release `v{version}` automatically. See [Development → Releases](docs/development.md#releases).
+Desktop installers (macOS `.dmg` for Apple Silicon and Windows `.msi`/`.exe`) are built by GitHub Actions from version tags (`v*`) on `main`. Bump the app version in `apps/desktop` (all three of `src-tauri/tauri.conf.json`, `package.json`, `src-tauri/Cargo.toml`, plus their generated lockfiles) and push the matching tag `v{version}` to build installers and publish release `v{version}` automatically. See [Development → Releases](docs/development.md#releases).
 
 ## Documentation
 
