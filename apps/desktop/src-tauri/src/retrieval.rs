@@ -1,7 +1,6 @@
 //! Hybrid retrieval: local FastEmbed vectors + FTS5 lexical search.
 
 use crate::db::{self, Citation, InstalledPack};
-use crate::embeddings;
 use crate::error::AppResult;
 use crate::indexer::OVERLAP_CHARS;
 use crate::state::SharedState;
@@ -38,7 +37,7 @@ pub async fn retrieve(
     );
 
     // Vector hits first — no Sync connection held across await.
-    if let Ok(model) = embeddings::load_embedding_model() {
+    if let Ok(model) = state.embedding_model().await {
         if let Ok(hits) =
             vector_store::vector_search(app_data_dir, model, query, top_k, retrieval_prefixes).await
         {

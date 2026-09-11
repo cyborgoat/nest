@@ -12,9 +12,9 @@ import {
   CheckCircle2,
   Cloud,
   FolderOpen,
-  LoaderCircle,
   Network,
   Palette,
+  PlugZap,
   XCircle,
 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -34,7 +34,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PanelHeader } from "@/components/ui/panel-header";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { ClaudeAgentSettingsSection } from "@/components/settings/ClaudeAgentSettingsSection";
 import { GeneralGroup } from "@/components/settings/GeneralGroup";
 import { api } from "@/lib/api";
@@ -472,45 +478,59 @@ export function SettingsPanel() {
                     label={t("settings.hubBaseUrl")}
                     description={t("settings.hubBaseUrlDescription")}
                   >
-                    <Input
-                      ref={hubBaseUrlRef}
-                      value={form.hub_base_url}
-                      onChange={(e) => update("hub_base_url", e.target.value)}
-                      placeholder="http://127.0.0.1:8787"
-                    />
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      {hubTestResult ? (
-                        <p
-                          className={
-                            hubTestResult.online
-                              ? "flex items-center gap-1.5 text-xs text-primary"
-                              : "flex items-center gap-1.5 text-xs text-destructive"
-                          }
-                        >
-                          {hubTestResult.online ? (
-                            <CheckCircle2 className="size-3.5 shrink-0" />
-                          ) : (
-                            <XCircle className="size-3.5 shrink-0" />
-                          )}
-                          {hubTestResult.message}
-                        </p>
-                      ) : (
-                        <span />
-                      )}
-                      <Button
-                        type="button"
-                        size="sm"
-                        disabled={testHubConnection.isPending}
-                        onClick={() => testHubConnection.mutate()}
-                      >
-                        {testHubConnection.isPending && (
-                          <LoaderCircle className="size-3.5 animate-spin" />
-                        )}
-                        {testHubConnection.isPending
-                          ? t("settings.testing")
-                          : t("settings.testConnection")}
-                      </Button>
+                    <div className="flex min-w-0 items-center gap-2">
+                      <Input
+                        ref={hubBaseUrlRef}
+                        value={form.hub_base_url}
+                        onChange={(e) => update("hub_base_url", e.target.value)}
+                        placeholder="http://127.0.0.1:8787"
+                        className="min-w-0 flex-1"
+                      />
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="settings"
+                            size="icon-sm"
+                            disabled={testHubConnection.isPending}
+                            onClick={() => testHubConnection.mutate()}
+                            aria-label={
+                              testHubConnection.isPending
+                                ? t("settings.testing")
+                                : t("settings.testConnection")
+                            }
+                          >
+                            {testHubConnection.isPending ? (
+                              <Spinner />
+                            ) : (
+                              <PlugZap
+                                className="size-3.5"
+                                aria-hidden="true"
+                              />
+                            )}
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top">
+                          {t("settings.testConnection")}
+                        </TooltipContent>
+                      </Tooltip>
                     </div>
+                    {hubTestResult && (
+                      <p
+                        className={
+                          hubTestResult.online
+                            ? "flex items-center gap-1.5 text-xs text-primary"
+                            : "flex items-center gap-1.5 text-xs text-destructive"
+                        }
+                      >
+                        {hubTestResult.online ? (
+                          <CheckCircle2 className="size-3.5 shrink-0" />
+                        ) : (
+                          <XCircle className="size-3.5 shrink-0" />
+                        )}
+                        {hubTestResult.message}
+                      </p>
+                    )}
                   </Field>
                 </GeneralGroup>
                 <GeneralGroup icon={FolderOpen} title="Knowledge vault">
@@ -518,7 +538,7 @@ export function SettingsPanel() {
                     label={t("settings.knowledgeDirectory")}
                     description={t("settings.knowledgeDirectoryDescription")}
                   >
-                    <div className="flex min-w-0 gap-2">
+                    <div className="flex min-w-0 items-center gap-2">
                       <Input
                         value={displayKnowledgePath}
                         readOnly
@@ -527,7 +547,8 @@ export function SettingsPanel() {
                       />
                       <Button
                         type="button"
-                        variant="outline"
+                        variant="settings"
+                        size="settings"
                         className="shrink-0"
                         onClick={() => void pickKnowledgeDir()}
                       >
@@ -545,7 +566,7 @@ export function SettingsPanel() {
                         <Button
                           type="button"
                           variant="ghost"
-                          size="sm"
+                          size="settings"
                           onClick={() => void prepareKnowledgeDirChange("")}
                         >
                           {t("settings.resetToDefault")}
@@ -640,10 +661,10 @@ export function SettingsPanel() {
                       placeholder="openai/gpt-4o-mini"
                     />
                   </Field>
+                  <div ref={claudeSectionRef}>
+                    <ClaudeAgentSettingsSection settingsQuery={settingsQuery} />
+                  </div>
                 </GeneralGroup>
-                <div ref={claudeSectionRef}>
-                  <ClaudeAgentSettingsSection settingsQuery={settingsQuery} />
-                </div>
 
                 <GeneralGroup icon={Network} title={t("settings.network")}>
                   <div className="flex items-start justify-between gap-4 rounded-lg bg-muted/40 px-3 py-3">
@@ -660,6 +681,7 @@ export function SettingsPanel() {
                     </div>
                     <Switch
                       id="proxy-enabled"
+                      className="data-[state=checked]:border-neutral-800 data-[state=checked]:bg-neutral-800"
                       checked={Boolean(form.proxy_enabled)}
                       onCheckedChange={(checked) =>
                         update("proxy_enabled", checked)
@@ -692,18 +714,22 @@ export function SettingsPanel() {
                       {indexQuery.data?.message
                         ? ` — ${indexQuery.data.message}`
                         : ""}
+                      {indexQuery.data?.is_indexing &&
+                      (indexQuery.data?.total_chunks ?? 0) > 0
+                        ? ` (${indexQuery.data.processed_chunks} / ${indexQuery.data.total_chunks})`
+                        : ""}
                     </p>
                     <Button
                       type="button"
-                      size="sm"
-                      variant="outline"
+                      variant="settings"
+                      size="settings"
                       disabled={
                         syncIndex.isPending || indexQuery.data?.is_indexing
                       }
                       onClick={() => syncIndex.mutate()}
                     >
                       {(syncIndex.isPending || indexQuery.data?.is_indexing) && (
-                        <LoaderCircle className="size-3.5 animate-spin" />
+                        <Spinner data-icon="inline-start" />
                       )}
                       {syncIndex.isPending || indexQuery.data?.is_indexing
                         ? t("settings.syncing")
@@ -755,12 +781,16 @@ export function SettingsPanel() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="sm:items-center">
-            <AlertDialogCancel disabled={changeVault.isPending}>
+            <AlertDialogCancel
+              className="h-7 px-2.5 text-xs"
+              disabled={changeVault.isPending}
+            >
               Cancel
             </AlertDialogCancel>
             <Button
               type="button"
               variant="destructive"
+              size="settings"
               disabled={!pendingVaultChange || changeVault.isPending}
               onClick={() => {
                 if (!pendingVaultChange) return;
@@ -774,6 +804,8 @@ export function SettingsPanel() {
             </Button>
             <Button
               type="button"
+              variant="settings"
+              size="settings"
               disabled={!pendingVaultChange || changeVault.isPending}
               onClick={() => {
                 if (!pendingVaultChange) return;

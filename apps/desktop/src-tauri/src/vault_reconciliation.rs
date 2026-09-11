@@ -230,10 +230,11 @@ async fn reconcile_with_policy(
 ) -> AppResult<ReconcileReport> {
     let result = async {
         let (mut report, current, changed) = inspect_vault(state)?;
-        let needs_reindex = force_reindex || changed || load_health(state).reindex_required;
+        let force_index = force_reindex || load_health(state).reindex_required;
+        let needs_reindex = force_index || changed;
         if needs_reindex {
             set_reindex_required(state, "workspace reconciliation is rebuilding the index")?;
-            crate::indexing::schedule_and_wait(state, timeout).await?;
+            crate::indexing::schedule_and_wait(state, timeout, force_index).await?;
             save_manifest(state, &current)?;
             clear_reindex_required(state)?;
         }

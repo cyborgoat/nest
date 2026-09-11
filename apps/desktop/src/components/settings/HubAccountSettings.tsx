@@ -128,6 +128,8 @@ function HubAccountSettings() {
         footnote="Your local library remains available while Hub is unavailable."
       >
         <Button
+          variant="settings"
+          size="settings"
           disabled={auth.isFetching || settings.isFetching}
           onClick={() => void Promise.all([auth.refetch(), settings.refetch()])}
         >
@@ -156,7 +158,7 @@ function HubAccountSettings() {
           </Badge>
           <Button
             variant="ghost"
-            size="sm"
+            size="settings"
             disabled={logout.isPending}
             onClick={() => logout.mutate()}
           >
@@ -190,6 +192,8 @@ function HubAccountSettings() {
               />
               <Button
                 type="button"
+                variant="settings"
+                size="settings"
                 className="shrink-0"
                 disabled={
                   updateProfile.isPending ||
@@ -229,7 +233,8 @@ function HubAccountSettings() {
             </div>
             <Button
               type="button"
-              variant="outline"
+              variant="settings"
+              size="settings"
               disabled={accountManaged}
               onClick={() => setPasswordOpen(true)}
             >
@@ -249,7 +254,13 @@ function HubAccountSettings() {
         description="Add your team's Hub URL so Nest knows where to authenticate your account."
         footnote="An account is optional for local packs and public downloads."
       >
-        <Button onClick={openHubSettingsTab}>Configure Hub</Button>
+        <Button
+          variant="settings"
+          size="settings"
+          onClick={openHubSettingsTab}
+        >
+          Configure Hub
+        </Button>
       </EmptyState>
     );
   } else {
@@ -261,7 +272,11 @@ function HubAccountSettings() {
         description="Sign in or create an account to publish packs and access restricted knowledge."
         footnote="Your local library remains fully available without an account."
       >
-        <Button onClick={() => setDialogOpen(true)}>
+        <Button
+          variant="settings"
+          size="settings"
+          onClick={() => setDialogOpen(true)}
+        >
           <LogIn className="size-4" />
           Sign in or create account
         </Button>
@@ -386,6 +401,8 @@ function PasswordDialog({
           )}
           <Button
             type="submit"
+            variant="settings"
+            size="settings"
             className="w-full"
             disabled={
               change.isPending || !currentPassword || !confirmed
@@ -571,6 +588,8 @@ function HubAuthDialog({
             )}
             <Button
               type="submit"
+              variant="settings"
+              size="settings"
               className="w-full"
               disabled={
                 busy ||
@@ -610,7 +629,13 @@ function ForgotPasswordDialog({
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
-          <Button onClick={() => onOpenChange(false)}>Got it</Button>
+          <Button
+            variant="settings"
+            size="settings"
+            onClick={() => onOpenChange(false)}
+          >
+            Got it
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

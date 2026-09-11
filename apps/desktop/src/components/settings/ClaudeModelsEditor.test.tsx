@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import "@testing-library/jest-dom/vitest";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useState } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { I18nProvider } from "@/lib/i18n";
 import { ClaudeModelsEditor } from "./ClaudeModelsEditor";
 import {
@@ -30,7 +30,7 @@ function renderEditor(initial: string[]) {
 
 function inputs(): HTMLInputElement[] {
   return screen
-    .getAllByRole("textbox")
+    .queryAllByRole("textbox")
     .filter((el): el is HTMLInputElement => el instanceof HTMLInputElement);
 }
 
@@ -45,8 +45,8 @@ describe("parseModelRows / serializeModelRows", () => {
     expect(serializeModelRows(rows)).toBe("glm-5.3\nclaude-sonnet-4-5");
   });
 
-  it("empty string becomes one empty row", () => {
-    expect(parseModelRows("")).toEqual([""]);
+  it("empty string becomes an empty custom-model list", () => {
+    expect(parseModelRows("")).toEqual([]);
   });
 
   it("serialize trims, drops empty rows, dedupes keeping first order", () => {
@@ -71,9 +71,9 @@ describe("isDuplicateRow", () => {
 });
 
 describe("ClaudeModelsEditor", () => {
-  it("shows a single empty row for an empty list", () => {
-    renderEditor([""]);
-    expect(rowValues()).toEqual([""]);
+  it("shows no custom row for an empty list", () => {
+    renderEditor([]);
+    expect(rowValues()).toEqual([]);
   });
 
   it("shows the current default model as a read-only first row", () => {
@@ -90,8 +90,12 @@ describe("ClaudeModelsEditor", () => {
     );
     expect(rowValues()).toEqual(["claude-sonnet-4-5", "glm-5.3", ""]);
     expect(inputs()[0]).toBeDisabled();
-    const defaultAction = screen.getByRole("button", { name: "default" });
-    expect(defaultAction).toBeDisabled();
+    expect(inputs()[0].parentElement?.children).toHaveLength(3);
+    expect(inputs()[1].parentElement?.children).toHaveLength(3);
+    expect(inputs()[0].parentElement?.lastElementChild).toHaveClass("size-7");
+    expect(
+      screen.getByLabelText("Model available").closest(".size-7"),
+    ).toBeInTheDocument();
     expect(
       screen.getAllByRole("button", { name: /remove model/i }),
     ).toHaveLength(2);
@@ -105,43 +109,21 @@ describe("ClaudeModelsEditor", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("renders a per-row test button that fires onTestRow", () => {
-    const onTestRow = vi.fn();
+  it("does not render per-model test or default action buttons", () => {
     render(
       <I18nProvider locale="en">
-        <ClaudeModelsEditor
-          rows={["glm-5.3", ""]}
-          onTestRow={onTestRow}
-          onChange={() => {}}
-        />
+        <TooltipProvider>
+          <ClaudeModelsEditor
+            rows={["glm-5.3", "kimi"]}
+            defaultModel="claude-sonnet-4-5"
+            onChange={() => {}}
+          />
+        </TooltipProvider>
       </I18nProvider>,
     );
-    const testButtons = screen.getAllByRole("button", { name: "Test" });
-    expect(testButtons).toHaveLength(2);
-    expect(testButtons[0]).toBeEnabled();
-    expect(testButtons[1]).toBeDisabled();
-    fireEvent.click(testButtons[0]);
-    expect(onTestRow).toHaveBeenCalledWith(0);
-  });
-
-  it("shows Save on unsaved rows and fires onSaveRow", () => {
-    const onTestRow = vi.fn();
-    const onSaveRow = vi.fn();
-    render(
-      <I18nProvider locale="en">
-        <ClaudeModelsEditor
-          rows={["glm-5.3", "kimi"]}
-          savedModels={new Set(["glm-5.3"])}
-          onTestRow={onTestRow}
-          onSaveRow={onSaveRow}
-          onChange={() => {}}
-        />
-      </I18nProvider>,
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Test" }));
-    expect(onTestRow).toHaveBeenCalledWith(0);
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    expect(onSaveRow).toHaveBeenCalledWith(1);
+    expect(screen.queryByRole("button", { name: "Test" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "default" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
   });
 
   it("shows failure messages only via tooltip on the status icon", () => {
@@ -154,7 +136,6 @@ describe("ClaudeModelsEditor", () => {
               "glm-5.3": { ok: false, message: "API Error: 400" },
               kimi: { ok: true, message: "passed at t1" },
             }}
-            onTestRow={() => {}}
             onChange={() => {}}
           />
         </TooltipProvider>
@@ -191,12 +172,20 @@ describe("ClaudeModelsEditor", () => {
     expect(rowValues()).toEqual(["glm-5.3", ""]);
   });
 
-  it("removing the last non-empty row keeps one empty row", () => {
+  it("can remove the first and only custom-model row", () => {
     renderEditor(["glm-5.3"]);
     fireEvent.click(
       screen.getAllByRole("button", { name: /remove model/i })[0],
     );
-    expect(rowValues()).toEqual([""]);
+    expect(rowValues()).toEqual([]);
+  });
+
+  it("can remove the first custom-model row when others remain", () => {
+    renderEditor(["a", "b"]);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Remove model 1" }),
+    );
+    expect(rowValues()).toEqual(["b"]);
   });
 
   it("removing a middle row keeps the others", () => {

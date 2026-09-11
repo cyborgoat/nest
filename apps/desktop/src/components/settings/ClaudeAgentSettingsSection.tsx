@@ -4,14 +4,20 @@ import type {
   ClaudeConnectionReport,
   ClaudeDetectionDto,
 } from "@nest/shared";
-import { AlertCircle, CheckCircle2, LoaderCircle, Sparkles, XCircle } from "lucide-react";
+import { CheckCircle2, PlugZap, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { queryKeys } from "@/lib/query-keys";
@@ -21,13 +27,18 @@ import {
   type ModelRowStatuses,
 } from "./ClaudeModelsEditor";
 import { parseModelRows, serializeModelRows } from "./model-rows";
-import { GeneralGroup } from "./GeneralGroup";
 
 type ClaudeDraft = {
   enabled: boolean;
   cliPath: string;
   customArgs: string;
   customModels: string;
+};
+
+type SaveOptions = {
+  silent?: boolean;
+  revision?: string;
+  snapshot?: ClaudeDraft;
 };
 
 function useClaudeAgentSettings(settingsQuery: {
@@ -42,6 +53,10 @@ function useClaudeAgentSettings(settingsQuery: {
     customModels: "",
   });
   const [modelRows, setModelRows] = useState<string[]>([""]);
+  const [savedDraft, setSavedDraft] = useState<ClaudeDraft | null>(null);
+  const [failedAutoSaveRevision, setFailedAutoSaveRevision] = useState<
+    string | null
+  >(null);
   const [hydrated, setHydrated] = useState(false);
   const [testResult, setTestResult] = useState<ClaudeConnectionReport | null>(
     null,
@@ -49,17 +64,18 @@ function useClaudeAgentSettings(settingsQuery: {
   const [stale, setStale] = useState(false);
   const [detection, setDetection] = useState<ClaudeDetectionDto | null>(null);
   const [detectFailed, setDetectFailed] = useState(false);
-  const [testingModel, setTestingModel] = useState<string | null>(null);
 
   useEffect(() => {
     if (!settingsQuery.data || hydrated) return;
     const customModels = settingsQuery.data.claude_custom_models ?? "";
-    setDraft({
+    const initialDraft = {
       enabled: settingsQuery.data.claude_agent_enabled ?? false,
       cliPath: settingsQuery.data.claude_cli_path ?? "",
       customArgs: settingsQuery.data.claude_custom_args ?? "",
       customModels,
-    });
+    };
+    setDraft(initialDraft);
+    setSavedDraft(initialDraft);
     setModelRows(parseModelRows(customModels));
     setHydrated(true);
   }, [settingsQuery.data, hydrated]);
@@ -67,6 +83,7 @@ function useClaudeAgentSettings(settingsQuery: {
   const connectionQuery = useQuery({
     queryKey: queryKeys.claudeConnection,
     queryFn: api.claudeConnectionStatus,
+    enabled: hydrated && draft.enabled,
   });
 
   const statusesQuery = useQuery({
@@ -77,16 +94,22 @@ function useClaudeAgentSettings(settingsQuery: {
     ],
     queryFn: () =>
       api.claudeModelStatuses(draft.cliPath.trim(), draft.customArgs.trim()),
+    enabled: hydrated && draft.enabled,
   });
 
   const serializedModels = serializeModelRows(modelRows);
+  const currentSnapshot = {
+    ...draft,
+    customModels: serializedModels,
+  };
+  const revision = JSON.stringify(currentSnapshot);
   const dirty =
     hydrated &&
-    (draft.enabled !== (settingsQuery.data?.claude_agent_enabled ?? false) ||
-      draft.cliPath !== (settingsQuery.data?.claude_cli_path ?? "") ||
-      draft.customArgs !== (settingsQuery.data?.claude_custom_args ?? "") ||
-      serializedModels !==
-        (settingsQuery.data?.claude_custom_models ?? ""));
+    savedDraft !== null &&
+    (draft.enabled !== savedDraft.enabled ||
+      draft.cliPath !== savedDraft.cliPath ||
+      draft.customArgs !== savedDraft.customArgs ||
+      serializedModels !== savedDraft.customModels);
 
   const markDirty = () => setStale(true);
 
@@ -131,47 +154,34 @@ function useClaudeAgentSettings(settingsQuery: {
     },
   });
 
-  const testModel = useMutation({
-    mutationFn: ({
-      cliPath,
-      customArgs,
-      model,
-    }: {
-      cliPath: string;
-      customArgs: string;
-      model: string;
-    }) => api.claudeTestModel(cliPath, customArgs, model),
-    onMutate: ({ model }) => {
-      setTestingModel(model.trim());
-    },
-    onSuccess: () => {
-      setTestingModel(null);
-      void queryClient.invalidateQueries({
-        queryKey: queryKeys.claudeModelStatuses,
-      });
-      void queryClient.invalidateQueries({
-        queryKey: queryKeys.chatBackendDescriptors,
-      });
-    },
-    onError: () => {
-      setTestingModel(null);
-    },
-  });
-
   const save = useMutation({
-    mutationFn: () =>
-      api.claudeSaveSettings({
-        enabled: draft.enabled,
-        cliPath: draft.cliPath,
-        customArgs: draft.customArgs,
-        customModels: serializedModels,
-      }),
-    onSuccess: (report) => {
-      setTestResult(
-        report.status === "connected" ? report : null,
-      );
+    mutationFn: (options?: SaveOptions) => {
+      const snapshot = options?.snapshot ?? currentSnapshot;
+      return api.claudeSaveSettings({
+        enabled: snapshot.enabled,
+        cliPath: snapshot.cliPath,
+        customArgs: snapshot.customArgs,
+        customModels: snapshot.customModels,
+      });
+    },
+    onSuccess: (report, options) => {
+      const snapshot = options?.snapshot ?? currentSnapshot;
+      setSavedDraft(snapshot);
+      setFailedAutoSaveRevision(null);
+      setTestResult(report.status === "connected" ? report : null);
       setStale(false);
       setDetectFailed(false);
+      queryClient.setQueryData<AppSettings>(queryKeys.settings, (current) =>
+        current
+          ? {
+              ...current,
+              claude_agent_enabled: snapshot.enabled,
+              claude_cli_path: snapshot.cliPath,
+              claude_custom_args: snapshot.customArgs,
+              claude_custom_models: snapshot.customModels,
+            }
+          : current,
+      );
       void queryClient.invalidateQueries({ queryKey: queryKeys.settings });
       void queryClient.invalidateQueries({
         queryKey: queryKeys.claudeConnection,
@@ -183,6 +193,9 @@ function useClaudeAgentSettings(settingsQuery: {
       void queryClient.invalidateQueries({
         queryKey: queryKeys.chatBackendDescriptors,
       });
+      if (options?.silent) {
+        return;
+      }
       if (report.status === "connected") {
         toast.success(t("settings.claude.statusConnected"));
       } else if (report.status === "disabled") {
@@ -194,12 +207,46 @@ function useClaudeAgentSettings(settingsQuery: {
         });
       }
     },
-    onError: (e: unknown) => {
+    onError: (e: unknown, options) => {
+      if (options?.silent) {
+        setFailedAutoSaveRevision(options.revision ?? null);
+      }
       toast.error(t("settings.claude.couldNotSave"), {
         description: e instanceof Error ? e.message : String(e),
       });
     },
   });
+
+  const autoSave = save.mutate;
+  useEffect(() => {
+    if (
+      !hydrated ||
+      !dirty ||
+      save.isPending ||
+      failedAutoSaveRevision === revision
+    ) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      autoSave({
+        silent: true,
+        revision,
+        snapshot: JSON.parse(revision) as ClaudeDraft,
+      });
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [
+    autoSave,
+    dirty,
+    draft.cliPath,
+    draft.customArgs,
+    draft.enabled,
+    failedAutoSaveRevision,
+    hydrated,
+    revision,
+    save.isPending,
+    serializedModels,
+  ]);
 
   const matchingTestResult =
     testResult?.configured_cli_path === draft.cliPath.trim() &&
@@ -225,13 +272,6 @@ function useClaudeAgentSettings(settingsQuery: {
       : null);
   const defaultModel = (defaultModelReport?.effective_model ?? "").trim();
 
-  const savedModels = new Set(
-    (settingsQuery.data?.claude_custom_models ?? "")
-      .split("\n")
-      .map((model) => model.trim())
-      .filter((model) => model !== ""),
-  );
-
   const persistedRowStatuses: ModelRowStatuses = {};
   for (const [model, entry] of Object.entries(statusesQuery.data ?? {})) {
     if (entry.configured_cli_path !== draft.cliPath.trim()) continue;
@@ -246,20 +286,6 @@ function useClaudeAgentSettings(settingsQuery: {
     };
   }
 
-  const saveRowAndTest = (index: number) => {
-    const model = modelRows[index]?.trim();
-    if (!model || save.isPending) return;
-    save.mutate(undefined, {
-      onSuccess: () => {
-        testModel.mutate({
-          cliPath: draft.cliPath,
-          customArgs: draft.customArgs,
-          model,
-        });
-      },
-    });
-  };
-
   const clearPathFeedback = () => {
     setDetection(null);
     setDetectFailed(false);
@@ -273,13 +299,8 @@ function useClaudeAgentSettings(settingsQuery: {
     setModelRows,
     detect,
     test,
-    testModel,
-    testingModel,
     persistedRowStatuses,
-    savedModels,
-    saveRowAndTest,
     save,
-    dirty,
     markDirty,
     testResult: matchingTestResult,
     persistedStatus,
@@ -303,13 +324,8 @@ export function ClaudeAgentSettingsSection({
     setModelRows,
     detect,
     test,
-    testModel,
-    testingModel,
     persistedRowStatuses,
-    savedModels,
-    saveRowAndTest,
     save,
-    dirty,
     markDirty,
     testResult,
     persistedStatus,
@@ -325,50 +341,18 @@ export function ClaudeAgentSettingsSection({
     displayReport?.status === "last_connected";
   const featureDisabled = !draft.enabled;
   const localOperationPending =
-    detect.isPending || test.isPending || testModel.isPending || save.isPending;
-  const mergedRowStatuses =
-    testingModel != null
-      ? { ...persistedRowStatuses, [testingModel]: "testing" as const }
-      : persistedRowStatuses;
+    detect.isPending || test.isPending || save.isPending;
 
   return (
-    <GeneralGroup
-      icon={Sparkles}
-      title={t("settings.claude.group")}
-      help={<p>{t("settings.claude.groupDescription")}</p>}
-      action={
-        <Button
-          type="button"
-          size="sm"
-          variant={dirty ? "default" : "outline"}
-          className={cn("shrink-0", dirty && "animate-pulse")}
-          disabled={localOperationPending}
-          onClick={() => save.mutate()}
-        >
-          {save.isPending && (
-            <LoaderCircle className="size-3.5 animate-spin" />
-          )}
-          {save.isPending
-            ? t("settings.claude.saving")
-            : draft.enabled
-              ? t("settings.claude.saveAndConnect")
-              : t("settings.claude.save")}
-        </Button>
-      }
-    >
-      {dirty && (
-        <div className="flex items-start gap-2.5 rounded-lg border border-primary/40 bg-primary/[0.08] px-3 py-2.5 shadow-sm">
-          <AlertCircle className="mt-0.5 size-4 shrink-0 text-primary" />
-          <div className="min-w-0">
-            <p className="text-sm font-semibold text-primary">
-              {t("settings.claude.unsavedChanges")}
-            </p>
-            <p className="text-xs text-muted-foreground">
-              {t("settings.claude.unsavedChangesDescription")}
-            </p>
-          </div>
+    <div className="space-y-4 border-t border-border/60 pt-4">
+      <div className="space-y-1">
+        <div className="min-w-0 space-y-1">
+          <h5 className="text-sm font-medium">{t("settings.claude.group")}</h5>
+          <p className="text-xs text-muted-foreground">
+            {t("settings.claude.groupDescription")}
+          </p>
         </div>
-      )}
+      </div>
       <div className="flex items-start justify-between gap-4 rounded-lg bg-muted/40 px-3 py-3">
         <div className="min-w-0 space-y-1">
           <Label htmlFor="claude-enabled" className="text-sm font-medium">
@@ -380,6 +364,7 @@ export function ClaudeAgentSettingsSection({
         </div>
         <Switch
           id="claude-enabled"
+          className="data-[state=checked]:border-neutral-800 data-[state=checked]:bg-neutral-800"
           checked={draft.enabled}
           onCheckedChange={(checked) => {
             setDraft((prev) => ({ ...prev, enabled: checked }));
@@ -389,11 +374,13 @@ export function ClaudeAgentSettingsSection({
           disabled={localOperationPending}
         />
       </div>
+      {draft.enabled && (
+        <div className="space-y-4">
       <Field
         label={t("settings.claude.cliPath")}
         description={t("settings.claude.cliPathDescription")}
       >
-        <div className="flex min-w-0 gap-2">
+        <div className="flex min-w-0 items-center gap-2">
           <Input
             value={draft.cliPath}
             onChange={(e) => {
@@ -414,14 +401,13 @@ export function ClaudeAgentSettingsSection({
           />
           <Button
             type="button"
-            variant="outline"
+            variant="settings"
+            size="settings"
             className="shrink-0"
             disabled={featureDisabled || localOperationPending}
             onClick={() => detect.mutate()}
           >
-            {detect.isPending && (
-              <LoaderCircle className="size-4 animate-spin" />
-            )}
+            {detect.isPending && <Spinner data-icon="inline-start" />}
             {detect.isPending
               ? t("settings.claude.detecting")
               : t("settings.claude.autoDetect")}
@@ -446,23 +432,34 @@ export function ClaudeAgentSettingsSection({
       <Field
         label={t("settings.claude.testConnection")}
         description={t("settings.claude.testConnectionDescription")}
+        action={
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="settings"
+                size="icon-sm"
+                disabled={featureDisabled || localOperationPending}
+                onClick={() => test.mutate()}
+                aria-label={
+                  test.isPending
+                    ? t("settings.testing")
+                    : t("settings.claude.testConnection")
+                }
+              >
+                {test.isPending ? (
+                  <Spinner />
+                ) : (
+                  <PlugZap className="size-3.5" aria-hidden="true" />
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              {t("settings.claude.testConnection")}
+            </TooltipContent>
+          </Tooltip>
+        }
       >
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={featureDisabled || localOperationPending}
-            onClick={() => test.mutate()}
-          >
-            {test.isPending && (
-              <LoaderCircle className="size-3.5 animate-spin" />
-            )}
-            {test.isPending
-              ? t("settings.testing")
-              : t("settings.claude.testConnection")}
-          </Button>
-        </div>
         {displayReport && (
           <div className="space-y-1 rounded-md border bg-muted/30 px-3 py-2">
             <p
@@ -511,18 +508,7 @@ export function ClaudeAgentSettingsSection({
           rows={modelRows}
           disabled={featureDisabled || localOperationPending}
           defaultModel={defaultModel}
-          savedModels={savedModels}
-          rowStatuses={mergedRowStatuses}
-          onTestRow={(index) => {
-            const model = modelRows[index]?.trim();
-            if (!model) return;
-            testModel.mutate({
-              cliPath: draft.cliPath,
-              customArgs: draft.customArgs,
-              model,
-            });
-          }}
-          onSaveRow={saveRowAndTest}
+          rowStatuses={persistedRowStatuses}
           onChange={(rows) => {
             setModelRows(rows);
             markDirty();
@@ -545,6 +531,8 @@ export function ClaudeAgentSettingsSection({
           className="font-mono text-xs"
         />
       </Field>
-    </GeneralGroup>
+        </div>
+      )}
+    </div>
   );
 }

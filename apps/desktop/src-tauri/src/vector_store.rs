@@ -1,11 +1,16 @@
 //! SQLite-vec vector store for Nest knowledge chunks (sibling nest-vectors.db).
 
+use crate::embeddings::EmbeddingModel;
 use crate::error::{AppError, AppResult};
+use rig::embeddings::Embedding;
+#[cfg(test)]
 use rig::embeddings::EmbeddingsBuilder;
 use rig::vector_store::request::{SearchFilter, VectorSearchRequest};
-use rig::vector_store::{InsertDocuments, VectorStoreIndex};
+#[cfg(test)]
+use rig::vector_store::InsertDocuments;
+use rig::vector_store::VectorStoreIndex;
 use rig::Embed;
-use rig_fastembed::EmbeddingModel;
+use rig::OneOrMany;
 use rig_sqlite::{
     Column, ColumnValue, SqliteDistanceMetric, SqliteSearchFilter, SqliteVectorStore,
     SqliteVectorStoreTable,
@@ -101,6 +106,7 @@ async fn open_vec_conn(app_data_dir: &Path) -> AppResult<Connection> {
         .map_err(|e| AppError::msg(format!("Failed to open vector DB: {e}")))
 }
 
+#[cfg(test)]
 pub async fn rebuild_vector_index(
     app_data_dir: &Path,
     embedding_model: EmbeddingModel,
@@ -133,6 +139,84 @@ pub async fn rebuild_vector_index(
         .map_err(|e| AppError::msg(format!("Failed to insert vectors: {e}")))?;
 
     Ok(())
+}
+
+fn purge_file_vectors_with_conn(
+    conn: &rusqlite::Connection,
+    file_path: &str,
+) -> rusqlite::Result<()> {
+    let rowids = conn
+        .prepare("SELECT rowid FROM knowledge_chunks WHERE file_path = ?1")?
+        .query_map([file_path], |row| row.get::<_, i64>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    for rowid in rowids {
+        let embedding_rowids = conn
+            .prepare(
+                "SELECT embedding_rowid FROM knowledge_chunks_embedding_map
+                 WHERE document_rowid = ?1",
+            )?
+            .query_map([rowid], |row| row.get::<_, i64>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        for embedding_rowid in embedding_rowids {
+            conn.execute(
+                "DELETE FROM knowledge_chunks_embeddings WHERE rowid = ?1",
+                [embedding_rowid],
+            )?;
+        }
+        conn.execute(
+            "DELETE FROM knowledge_chunks_embedding_map WHERE document_rowid = ?1",
+            [rowid],
+        )?;
+        conn.execute("DELETE FROM knowledge_chunks WHERE rowid = ?1", [rowid])?;
+    }
+    Ok(())
+}
+
+async fn purge_file_vectors(conn: &Connection, file_path: String) -> AppResult<()> {
+    conn.call(move |conn| {
+        let transaction = conn.transaction()?;
+        purge_file_vectors_with_conn(&transaction, &file_path)?;
+        transaction.commit()?;
+        Ok(())
+    })
+    .await
+    .map_err(|error| AppError::msg(format!("Failed to purge file vectors: {error}")))
+}
+
+pub async fn replace_file_vectors(
+    app_data_dir: &Path,
+    embedding_model: EmbeddingModel,
+    file_path: &str,
+    documents: Vec<(KnowledgeChunk, OneOrMany<Embedding>)>,
+) -> AppResult<()> {
+    let conn = open_vec_conn(app_data_dir).await?;
+    let store_conn = conn.clone();
+    let store: SqliteVectorStore<_, KnowledgeChunk> = SqliteVectorStore::with_distance_metric(
+        store_conn,
+        &embedding_model,
+        SqliteDistanceMetric::Cosine,
+    )
+    .await
+    .map_err(|error| AppError::msg(format!("Vector store init failed: {error}")))?;
+    let file_path = file_path.to_string();
+    conn.call(move |conn| {
+        let transaction = conn.transaction()?;
+        purge_file_vectors_with_conn(&transaction, &file_path)?;
+        store.add_rows_with_txn(&transaction, documents)?;
+        transaction.commit()?;
+        Ok(())
+    })
+    .await
+    .map_err(|error| AppError::msg(format!("Failed to replace file vectors: {error}")))?;
+    Ok(())
+}
+
+pub async fn remove_file_vectors(app_data_dir: &Path, file_path: &str) -> AppResult<()> {
+    if !vectors_db_path(app_data_dir).exists() {
+        return Ok(());
+    }
+    let conn = open_vec_conn(app_data_dir).await?;
+    purge_file_vectors(&conn, file_path.to_string()).await
 }
 
 pub async fn vector_search(
@@ -200,6 +284,7 @@ pub async fn vector_search(
 mod tests {
     use super::*;
     use crate::embeddings::load_embedding_model;
+    use rig::embeddings::EmbeddingModel as _;
 
     #[test]
     fn vectors_db_path_is_a_sibling_file_under_app_data() {
@@ -291,7 +376,7 @@ mod tests {
 
         let results = vector_search(
             &root,
-            model,
+            model.clone(),
             "domesticated pet animal",
             5,
             &["docs/cats.md".to_string()],
@@ -301,6 +386,33 @@ mod tests {
 
         assert!(!results.is_empty());
         assert_eq!(results[0].1.file_path, "docs/cats.md");
+
+        let replacement = KnowledgeChunk {
+            id: "3".to_string(),
+            file_path: "docs/cats.md".to_string(),
+            title: "Large cats".to_string(),
+            content: "Tigers are large striped wild cats.".to_string(),
+        };
+        let embedding = model.embed_text(&replacement.content).await.unwrap();
+        replace_file_vectors(
+            &root,
+            model.clone(),
+            "docs/cats.md",
+            vec![(replacement, OneOrMany::one(embedding))],
+        )
+        .await
+        .expect("per-file replacement should succeed");
+        let replaced = vector_search(
+            &root,
+            model,
+            "striped tiger",
+            5,
+            &["docs/cats.md".to_string()],
+        )
+        .await
+        .unwrap();
+        assert_eq!(replaced.len(), 1);
+        assert_eq!(replaced[0].1.id, "3", "the prior file vector was purged");
 
         let _ = tokio::fs::remove_dir_all(root).await;
     }

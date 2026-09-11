@@ -25,9 +25,8 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "proce
 walkdir = "2"
 zip = "2"
 parking_lot = "0.12"
-rig = { version = "0.40", features = ["derive"] }
-rig-fastembed = { version = "0.40", default-features = false, features = ["ort-download-binaries"] }
-fastembed = { version = "=4.9.1", default-features = false, features = ["ort-download-binaries"] }
+rig = { package = "rig-core", version = "0.40", default-features = false, features = ["derive", "reqwest", "rustls"] }
+fastembed = { version = "=5.15.0", default-features = false, features = ["ort-download-binaries"] }
 rig-sqlite = "0.40"
 sqlite-vec = "0.1.9"
 tokio-rusqlite = { version = "0.6", features = ["bundled"] }
@@ -37,4 +36,5 @@ tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 base64 = "0.22"
 include_dir = "0.7"
+blake3 = "1"
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }

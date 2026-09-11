@@ -614,6 +614,9 @@ export type IndexStatus = {
   is_indexing: boolean;
   last_indexed_at: string | null;
   message: string | null;
+  phase: "idle" | "scanning" | "embedding" | "committing" | "failed";
+  processed_chunks: number;
+  total_chunks: number;
 };
 
 export type HubConnectionStatus = {

@@ -12,6 +12,8 @@ export const buttonVariants = cva(
         secondary: "bg-muted text-foreground hover:bg-muted/80",
         outline: "border border-border bg-card hover:bg-muted",
         ghost: "hover:bg-muted",
+        settings:
+          "bg-neutral-800 text-white hover:bg-neutral-700 disabled:bg-neutral-800 disabled:text-white/50 disabled:opacity-100",
         destructive:
           "bg-destructive text-destructive-foreground hover:bg-destructive/90",
       },
@@ -22,6 +24,7 @@ export const buttonVariants = cva(
         icon: "h-8 w-8",
         "icon-sm": "h-7 w-7",
         "icon-xs": "h-6 w-6",
+        settings: "h-7 rounded-md px-2.5 text-xs",
       },
     },
     defaultVariants: {

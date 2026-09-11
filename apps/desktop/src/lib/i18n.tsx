@@ -112,14 +112,7 @@ const messages: Record<Locale, MessageTree> = {
         detecting: "Detecting…",
         testConnection: "Test connection",
         testConnectionDescription:
-          "Runs a real CLI round trip. Saving applies the current draft.",
-        saveAndConnect: "Save and connect",
-        save: "Save",
-        saving: "Saving…",
-        notSaved: "Tested, not saved",
-        unsavedChanges: "Unsaved changes",
-        unsavedChangesDescription:
-          "Apply your changes with Save for them to take effect in chat.",
+          "Runs a real CLI round trip. Settings are saved automatically.",
         stale: "Settings changed since the last test",
         statusConnected: "Connected",
         statusDisabled: "Claude Agent disabled",

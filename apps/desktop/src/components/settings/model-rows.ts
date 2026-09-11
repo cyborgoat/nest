@@ -1,6 +1,6 @@
 export function parseModelRows(value: string | null | undefined): string[] {
-  const rows = (value ?? "").split("\n").map((row) => row);
-  return rows.length === 0 ? [""] : rows;
+  const serialized = value ?? "";
+  return serialized === "" ? [] : serialized.split("\n");
 }
 
 export function serializeModelRows(rows: string[]): string {

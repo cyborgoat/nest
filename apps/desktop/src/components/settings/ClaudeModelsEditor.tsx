@@ -1,4 +1,4 @@
-import { CheckCircle2, LoaderCircle, Plus, X, XCircle } from "lucide-react";
+import { CheckCircle2, Plus, X, XCircle } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,7 +10,7 @@ import {
 import { useI18n } from "@/lib/i18n";
 import { isDuplicateRow } from "./model-rows";
 
-export type ModelRowStatus = "idle" | "testing" | "ok" | "fail";
+export type ModelRowStatus = "idle" | "ok" | "fail";
 export type ModelRowOutcome = { ok: boolean; message: string | null };
 export type ModelRowStatuses = Record<string, ModelRowStatus | ModelRowOutcome>;
 
@@ -18,19 +18,13 @@ export function ClaudeModelsEditor({
   rows,
   disabled = false,
   defaultModel = "",
-  savedModels,
   rowStatuses,
-  onTestRow,
-  onSaveRow,
   onChange,
 }: {
   rows: string[];
   disabled?: boolean;
   defaultModel?: string;
-  savedModels?: Set<string>;
   rowStatuses?: ModelRowStatuses;
-  onTestRow?: (index: number) => void;
-  onSaveRow?: (index: number) => void;
   onChange: (rows: string[]) => void;
 }) {
   const { t } = useI18n();
@@ -51,11 +45,7 @@ export function ClaudeModelsEditor({
   };
 
   const removeRow = (index: number) => {
-    const next = rows.filter((_, i) => i !== index);
-    if (next.length === 0) {
-      next.push("");
-    }
-    onChange(next);
+    onChange(rows.filter((_, i) => i !== index));
   };
 
   const addRow = () => {
@@ -76,12 +66,6 @@ export function ClaudeModelsEditor({
     return status.message;
   };
 
-  const actionFor = (row: string): "test" | "save" => {
-    const trimmed = row.trim();
-    if (trimmed === "") return "test";
-    return savedModels?.has(trimmed) === false ? "save" : "test";
-  };
-
   return (
     <div className="space-y-2">
       {defaultModel.trim() !== "" && (
@@ -90,14 +74,10 @@ export function ClaudeModelsEditor({
           value={defaultModel}
           disabled
           status="ok"
-          actionLabel={t("settings.claude.defaultModelAction")}
-          actionDisabled
-          removeDisabled
         />
       )}
       {rows.map((row, index) => {
         const duplicate = isDuplicateRow(rows, index);
-        const action = actionFor(row);
         return (
           <ModelRow
             key={index}
@@ -115,19 +95,6 @@ export function ClaudeModelsEditor({
             duplicate={duplicate}
             status={statusOf(row)}
             statusMessage={statusMessageOf(row)}
-            actionLabel={
-              action === "save"
-                ? t("settings.claude.save")
-                : t("settings.claude.testModel")
-            }
-            onAction={() => {
-              if (row.trim() === "") return;
-              if (action === "save") {
-                onSaveRow?.(index);
-              } else {
-                onTestRow?.(index);
-              }
-            }}
             onRemove={() => removeRow(index)}
             inputRef={index === rows.length - 1 ? lastRowRef : undefined}
             onChange={(value) => updateRow(index, value)}
@@ -144,8 +111,8 @@ export function ClaudeModelsEditor({
       })}
       <Button
         type="button"
-        variant="outline"
-        size="sm"
+        variant="settings"
+        size="settings"
         disabled={disabled}
         onClick={addRow}
       >
@@ -165,11 +132,7 @@ function ModelRow({
   duplicate,
   status,
   statusMessage,
-  actionLabel,
-  actionDisabled,
-  removeDisabled,
   inputRef,
-  onAction,
   onRemove,
   onChange,
   onKeyDown,
@@ -182,31 +145,20 @@ function ModelRow({
   duplicate?: boolean;
   status: ModelRowStatus;
   statusMessage?: string | null;
-  actionLabel: string;
-  actionDisabled?: boolean;
-  removeDisabled?: boolean;
   inputRef?: React.Ref<HTMLInputElement>;
-  onAction?: () => void;
   onRemove?: () => void;
   onChange?: (value: string) => void;
   onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
 }) {
   const { t } = useI18n();
   const statusTitle =
-    status === "testing"
-      ? t("settings.claude.testingModel")
-      : status === "ok"
-        ? (statusMessage ?? t("settings.claude.modelAvailable"))
-        : status === "fail"
-          ? (statusMessage ?? t("settings.claude.modelUnavailable"))
-          : undefined;
+    status === "ok"
+      ? (statusMessage ?? t("settings.claude.modelAvailable"))
+      : status === "fail"
+        ? (statusMessage ?? t("settings.claude.modelUnavailable"))
+        : undefined;
   const statusIcon =
-    status === "testing" ? (
-      <LoaderCircle
-        className="size-3.5 animate-spin text-primary"
-        aria-label={t("settings.claude.testingModel")}
-      />
-    ) : status === "ok" ? (
+    status === "ok" ? (
       <CheckCircle2
         className="size-3.5 text-success"
         aria-label={t("settings.claude.modelAvailable")}
@@ -217,9 +169,24 @@ function ModelRow({
         aria-label={t("settings.claude.modelUnavailable")}
       />
     ) : null;
+  const statusContent = statusTitle ? (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="flex items-center">{statusIcon}</span>
+      </TooltipTrigger>
+      <TooltipContent
+        side="top"
+        className="max-w-72 whitespace-normal break-words text-left"
+      >
+        {statusTitle}
+      </TooltipContent>
+    </Tooltip>
+  ) : (
+    statusIcon
+  );
   return (
     <div className="min-w-0 space-y-1">
-      <div className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-2">
+      <div className="flex min-w-0 items-center gap-2">
         <Input
           ref={inputRef}
           value={value}
@@ -229,48 +196,33 @@ function ModelRow({
           onKeyDown={onKeyDown}
           aria-label={label}
           placeholder={placeholder}
-          className="min-w-0 font-mono text-xs"
+          className="min-w-0 flex-1 font-mono text-xs"
         />
-        <span className="flex w-4 shrink-0 items-center justify-center">
-          {statusTitle ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="flex items-center">{statusIcon}</span>
-              </TooltipTrigger>
-              <TooltipContent
-                side="top"
-                className="max-w-72 whitespace-normal break-words text-left"
-              >
-                {statusTitle}
-              </TooltipContent>
-            </Tooltip>
-          ) : (
-            statusIcon
-          )}
-        </span>
-        <Button
-          type="button"
-          variant="outline"
-          className="h-7 w-[68px] shrink-0 overflow-hidden px-1 text-xs"
-          disabled={disabled || actionDisabled || value.trim() === ""}
-          onClick={onAction}
-          title={t("settings.claude.testModelTitle")}
-        >
-          <span className="truncate">
-            {status === "testing" ? t("settings.testing") : actionLabel}
-          </span>
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          className="shrink-0"
-          disabled={disabled || removeDisabled}
-          onClick={onRemove}
-          aria-label={removeLabel ?? label}
-        >
-          <X className="size-3.5" />
-        </Button>
+        {onRemove ? (
+          <>
+            <span className="flex w-4 shrink-0 items-center justify-center">
+              {statusContent}
+            </span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              className="shrink-0"
+              disabled={disabled}
+              onClick={onRemove}
+              aria-label={removeLabel ?? label}
+            >
+              <X className="size-3.5" />
+            </Button>
+          </>
+        ) : (
+          <>
+            <span className="w-4 shrink-0" aria-hidden="true" />
+            <span className="flex size-7 shrink-0 items-center justify-center">
+              {statusContent}
+            </span>
+          </>
+        )}
       </div>
       {duplicate && (
         <p className="text-xs text-destructive">

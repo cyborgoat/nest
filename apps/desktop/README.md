@@ -15,7 +15,7 @@ npm run tauri dev
 - **Chat** — RAG over active packs; `@` mention files/folders to focus; session tabs, history, pin/archive
 - **Settings** — General (vault, appearance, LLM, Hub, network) and Account (sign-in, profile, password) tabs; General auto-saves
 
-Pack mutations queue background indexing and return before FastEmbed model loading, so import/download dialogs are not held open by indexing. Hub accounts are optional and needed only for publishing or restricted packs.
+Pack mutations queue debounced incremental indexing and return before FastEmbed work begins, so import/download dialogs are not held open. Embedding runs through a shared two-thread model in small paced batches to keep large imports responsive. Hub accounts are optional and needed only for publishing or restricted packs.
 
 See the [root README](../../README.md) and [docs/](../../docs/) for architecture, pack registry, chat sessions, and development checks.
 

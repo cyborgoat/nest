@@ -87,28 +87,87 @@ describe("ClaudeAgentSettingsSection", () => {
       message: null,
     });
     apiMocks.claudeModelStatuses.mockResolvedValue({});
+    apiMocks.claudeSaveSettings.mockResolvedValue(
+      report({
+        status: "disabled",
+        configured_cli_path: "",
+        configured_cli_args: "",
+        resolved_cli_path: "",
+        cli_version: "",
+        effective_model: "",
+        tested_at: "",
+      }),
+    );
   });
 
   afterEach(cleanup);
 
-  it("renders the Claude configuration controls", () => {
+  it("hides Claude configuration controls while the feature is disabled", () => {
     const { container } = renderSection(undefined);
     const html = container.innerHTML;
     expect(html).toContain("Claude Agent");
     expect(html).toContain("Enable Claude Agent");
-    expect(html).toContain("Auto-detect");
-    expect(html).toContain("Test connection");
-    expect(html).toContain("Custom models");
-    expect(html).toContain("Custom startup arguments");
-    expect(html).toContain("--skip-safe-check");
-    expect(html).toContain("empty = auto-detect");
-    expect(html).toContain("Add model");
+    expect(html).not.toContain("Auto-detect");
+    expect(html).not.toContain("Test connection");
+    expect(html).not.toContain("Custom models");
+    expect(html).not.toContain("Custom startup arguments");
+    expect(apiMocks.claudeConnectionStatus).not.toHaveBeenCalled();
+    expect(apiMocks.claudeModelStatuses).not.toHaveBeenCalled();
   });
 
-  it("shows the plain Save action while the toggle is off", () => {
-    const html = renderSection(undefined).container.innerHTML;
-    expect(html).toContain("Save");
-    expect(html).not.toContain("Save and connect");
+  it("reveals Claude configuration controls when enabled", async () => {
+    renderSection(undefined);
+    fireEvent.click(screen.getByRole("switch", { name: "Enable Claude Agent" }));
+
+    expect(await screen.findByText("CLI path")).toBeInTheDocument();
+    const autoDetect = screen.getByRole("button", { name: "Auto-detect" });
+    expect(autoDetect).toHaveClass(
+      "h-7",
+      "bg-neutral-800",
+      "disabled:opacity-100",
+    );
+    expect(autoDetect.parentElement).toHaveClass("items-center");
+    expect(
+      screen.getByRole("switch", { name: "Enable Claude Agent" }),
+    ).toHaveClass(
+      "data-[state=checked]:border-neutral-800",
+      "data-[state=checked]:bg-neutral-800",
+    );
+    const testConnection = screen.getByRole("button", {
+      name: "Test connection",
+    });
+    expect(testConnection).not.toHaveTextContent("Test connection");
+    expect(testConnection.querySelector(".lucide-plug-zap")).toBeInTheDocument();
+    expect(testConnection.parentElement?.parentElement).toHaveClass(
+      "items-center",
+      "justify-between",
+    );
+    expect(screen.getByText("Custom models")).toBeInTheDocument();
+    expect(screen.getByText("Custom startup arguments")).toBeInTheDocument();
+  });
+
+  it("automatically saves changes without showing a save button", async () => {
+    renderSection({
+      ...enabledSettings,
+      claude_agent_enabled: false,
+      claude_cli_path: "",
+      claude_custom_models: "",
+      claude_custom_args: "",
+    });
+    fireEvent.click(screen.getByRole("switch", { name: "Enable Claude Agent" }));
+
+    expect(screen.queryByRole("button", { name: /^Save/ })).not.toBeInTheDocument();
+    await waitFor(
+      () => {
+        expect(apiMocks.claudeSaveSettings).toHaveBeenCalledWith({
+          enabled: true,
+          cliPath: "",
+          customArgs: "",
+          customModels: "",
+        });
+      },
+      { timeout: 1_500 },
+    );
   });
 
   it("does not claim a connection before any test result exists", () => {
@@ -117,10 +176,23 @@ describe("ClaudeAgentSettingsSection", () => {
     expect(html).not.toContain("Not connected");
   });
 
-  it("uses the default placeholder before any detection attempt", () => {
-    const { container } = renderSection(undefined);
-    expect(container.innerHTML).not.toContain("Auto-detect Not Found");
-    expect(container.innerHTML).toContain("empty = auto-detect");
+  it("uses the default placeholder before any detection attempt", async () => {
+    renderSection(enabledSettings);
+    const input = await screen.findByPlaceholderText(/empty = auto-detect/);
+    expect(input).toBeInTheDocument();
+    expect(screen.queryByText("Auto-detect Not Found")).not.toBeInTheDocument();
+  });
+
+  it("shows a spinner while auto-detection is running", async () => {
+    apiMocks.claudeDetectCli.mockImplementation(() => new Promise(() => {}));
+    renderSection(enabledSettings);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Auto-detect" }),
+    );
+
+    expect(await screen.findByRole("status", { name: "Loading" })).toBeInTheDocument();
+    expect(screen.getByText("Detecting…").closest("button")).toBeDisabled();
   });
 
   it("clears a connection result when the CLI path changes", async () => {
@@ -142,26 +214,4 @@ describe("ClaudeAgentSettingsSection", () => {
     });
   });
 
-  it("disables Claude settings while a model test is running", async () => {
-    apiMocks.claudeConnectionStatus.mockResolvedValue(report());
-    apiMocks.claudeModelStatuses.mockResolvedValue({
-      kimi: {
-        configured_cli_path: "/saved/claude",
-        configured_cli_args: "--skip-safe-check",
-        ok: true,
-        message: null,
-        tested_at: "2026-08-29T00:00:00Z",
-      },
-    });
-    apiMocks.claudeTestModel.mockImplementation(() => new Promise(() => {}));
-    renderSection(enabledSettings);
-
-    fireEvent.click(await screen.findByRole("button", { name: "Test" }));
-
-    await waitFor(() => {
-      expect(screen.getByPlaceholderText(/claude\.exe/)).toBeDisabled();
-      expect(screen.getByLabelText("Model 1")).toBeDisabled();
-      expect(screen.getByRole("button", { name: "Save and connect" })).toBeDisabled();
-    });
-  });
 });

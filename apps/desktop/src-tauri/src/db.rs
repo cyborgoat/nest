@@ -171,6 +171,19 @@ pub struct IndexStatus {
     pub is_indexing: bool,
     pub last_indexed_at: Option<String>,
     pub message: Option<String>,
+    pub phase: String,
+    pub processed_chunks: u32,
+    pub total_chunks: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct IndexedFile {
+    pub file_path: String,
+    pub content_hash: String,
+    pub size_bytes: u64,
+    pub modified_ns: u64,
+    pub chunker_version: u32,
+    pub embedding_version: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -587,7 +600,19 @@ fn migrate(conn: &Connection) -> AppResult<()> {
             indexed_files INTEGER NOT NULL DEFAULT 0,
             indexed_chunks INTEGER NOT NULL DEFAULT 0,
             last_indexed_at TEXT,
-            message TEXT
+            message TEXT,
+            phase TEXT NOT NULL DEFAULT 'idle',
+            processed_chunks INTEGER NOT NULL DEFAULT 0,
+            total_chunks INTEGER NOT NULL DEFAULT 0
+        );
+
+        CREATE TABLE IF NOT EXISTS indexed_files (
+            file_path TEXT PRIMARY KEY,
+            content_hash TEXT NOT NULL,
+            size_bytes INTEGER NOT NULL,
+            modified_ns INTEGER NOT NULL,
+            chunker_version INTEGER NOT NULL,
+            embedding_version TEXT NOT NULL
         );
 
         INSERT OR IGNORE INTO index_meta (id, indexed_files, indexed_chunks) VALUES (1, 0, 0);
@@ -603,6 +628,29 @@ fn migrate(conn: &Connection) -> AppResult<()> {
     ensure_sync_state_description_column(conn)?;
     ensure_sync_state_pending_columns(conn)?;
     ensure_sync_state_patch_columns(conn)?;
+    ensure_index_meta_columns(conn)?;
+    Ok(())
+}
+
+fn ensure_index_meta_columns(conn: &Connection) -> AppResult<()> {
+    if !table_has_column(conn, "index_meta", "phase")? {
+        conn.execute(
+            "ALTER TABLE index_meta ADD COLUMN phase TEXT NOT NULL DEFAULT 'idle'",
+            [],
+        )?;
+    }
+    if !table_has_column(conn, "index_meta", "processed_chunks")? {
+        conn.execute(
+            "ALTER TABLE index_meta ADD COLUMN processed_chunks INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+    }
+    if !table_has_column(conn, "index_meta", "total_chunks")? {
+        conn.execute(
+            "ALTER TABLE index_meta ADD COLUMN total_chunks INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+    }
     Ok(())
 }
 
@@ -1102,15 +1150,17 @@ pub fn insert_chunk(
     Ok(())
 }
 
-pub fn set_index_progress(
+pub fn set_index_work_progress(
     conn: &Connection,
-    files: u32,
-    chunks: u32,
-    message: Option<&str>,
+    phase: &str,
+    processed_chunks: u32,
+    total_chunks: u32,
+    message: &str,
 ) -> AppResult<()> {
     conn.execute(
-        "UPDATE index_meta SET indexed_files = ?1, indexed_chunks = ?2, message = ?3 WHERE id = 1",
-        params![files, chunks, message],
+        "UPDATE index_meta SET phase = ?1, processed_chunks = ?2, total_chunks = ?3,
+         message = ?4 WHERE id = 1",
+        params![phase, processed_chunks, total_chunks, message],
     )?;
     Ok(())
 }
@@ -1122,7 +1172,8 @@ pub fn set_index_complete(
     message: &str,
 ) -> AppResult<()> {
     conn.execute(
-        "UPDATE index_meta SET indexed_files = ?1, indexed_chunks = ?2, last_indexed_at = ?3, message = ?4 WHERE id = 1",
+        "UPDATE index_meta SET indexed_files = ?1, indexed_chunks = ?2, last_indexed_at = ?3,
+         message = ?4, phase = 'idle', processed_chunks = 0, total_chunks = 0 WHERE id = 1",
         params![files, chunks, Utc::now().to_rfc3339(), message],
     )?;
     Ok(())
@@ -1130,7 +1181,7 @@ pub fn set_index_complete(
 
 pub fn set_index_message(conn: &Connection, message: &str) -> AppResult<()> {
     conn.execute(
-        "UPDATE index_meta SET message = ?1 WHERE id = 1",
+        "UPDATE index_meta SET message = ?1, phase = 'failed' WHERE id = 1",
         params![message],
     )?;
     Ok(())
@@ -1138,7 +1189,8 @@ pub fn set_index_message(conn: &Connection, message: &str) -> AppResult<()> {
 
 pub fn get_index_status(conn: &Connection, is_indexing: bool) -> AppResult<IndexStatus> {
     conn.query_row(
-        "SELECT indexed_files, indexed_chunks, last_indexed_at, message FROM index_meta WHERE id = 1",
+        "SELECT indexed_files, indexed_chunks, last_indexed_at, message, phase,
+                processed_chunks, total_chunks FROM index_meta WHERE id = 1",
         [],
         |row| {
             Ok(IndexStatus {
@@ -1147,10 +1199,106 @@ pub fn get_index_status(conn: &Connection, is_indexing: bool) -> AppResult<Index
                 is_indexing,
                 last_indexed_at: row.get(2)?,
                 message: row.get(3)?,
+                phase: row.get(4)?,
+                processed_chunks: row.get::<_, i64>(5)? as u32,
+                total_chunks: row.get::<_, i64>(6)? as u32,
             })
         },
     )
     .map_err(Into::into)
+}
+
+pub fn list_indexed_files(conn: &Connection) -> AppResult<Vec<IndexedFile>> {
+    let mut statement = conn.prepare(
+        "SELECT file_path, content_hash, size_bytes, modified_ns, chunker_version,
+                embedding_version FROM indexed_files",
+    )?;
+    let files = statement
+        .query_map([], |row| {
+            Ok(IndexedFile {
+                file_path: row.get(0)?,
+                content_hash: row.get(1)?,
+                size_bytes: row.get::<_, i64>(2)? as u64,
+                modified_ns: row.get::<_, i64>(3)? as u64,
+                chunker_version: row.get::<_, i64>(4)? as u32,
+                embedding_version: row.get(5)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(AppError::from)?;
+    Ok(files)
+}
+
+pub fn replace_indexed_file(
+    conn: &Connection,
+    file: &IndexedFile,
+    chunks: &[crate::indexer::PendingChunk],
+) -> AppResult<()> {
+    let transaction = conn.unchecked_transaction()?;
+    delete_chunks_for_exact_path(&transaction, &file.file_path)?;
+    for chunk in chunks {
+        insert_chunk(
+            &transaction,
+            &chunk.id,
+            &chunk.file_path,
+            &chunk.title,
+            &chunk.content,
+            chunk.start,
+            chunk.end,
+        )?;
+    }
+    transaction.execute(
+        "INSERT INTO indexed_files
+         (file_path, content_hash, size_bytes, modified_ns, chunker_version, embedding_version)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+         ON CONFLICT(file_path) DO UPDATE SET
+           content_hash = excluded.content_hash,
+           size_bytes = excluded.size_bytes,
+           modified_ns = excluded.modified_ns,
+           chunker_version = excluded.chunker_version,
+           embedding_version = excluded.embedding_version",
+        params![
+            file.file_path,
+            file.content_hash,
+            file.size_bytes as i64,
+            file.modified_ns as i64,
+            file.chunker_version as i64,
+            file.embedding_version,
+        ],
+    )?;
+    transaction.commit()?;
+    Ok(())
+}
+
+fn delete_chunks_for_exact_path(conn: &Connection, path: &str) -> AppResult<()> {
+    conn.execute(
+        "DELETE FROM chunks_fts WHERE chunk_id IN (SELECT id FROM chunks WHERE file_path = ?1)",
+        params![path],
+    )?;
+    conn.execute("DELETE FROM chunks WHERE file_path = ?1", params![path])?;
+    Ok(())
+}
+
+pub fn remove_indexed_file(conn: &Connection, path: &str) -> AppResult<()> {
+    let transaction = conn.unchecked_transaction()?;
+    delete_chunks_for_exact_path(&transaction, path)?;
+    transaction.execute(
+        "DELETE FROM indexed_files WHERE file_path = ?1",
+        params![path],
+    )?;
+    transaction.commit()?;
+    Ok(())
+}
+
+pub fn recount_index(conn: &Connection) -> AppResult<(u32, u32)> {
+    recount_index_meta(conn)?;
+    let files = conn.query_row("SELECT COUNT(*) FROM indexed_files", [], |row| {
+        row.get::<_, i64>(0)
+    })? as u32;
+    let chunks = conn.query_row("SELECT COUNT(*) FROM chunks", [], |row| {
+        row.get::<_, i64>(0)
+    })? as u32;
+    Ok((files, chunks))
 }
 
 fn tokenize(query: &str) -> Vec<String> {

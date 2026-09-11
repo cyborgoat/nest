@@ -16,6 +16,7 @@ struct IndexingState {
     index_generation: AtomicU64,
     indexed_generation: AtomicU64,
     successful_generation: AtomicU64,
+    force_reindex: AtomicBool,
 }
 
 impl IndexingState {
@@ -25,6 +26,7 @@ impl IndexingState {
             index_generation: AtomicU64::new(0),
             indexed_generation: AtomicU64::new(0),
             successful_generation: AtomicU64::new(0),
+            force_reindex: AtomicBool::new(false),
         }
     }
 }
@@ -34,6 +36,7 @@ pub struct AppState {
     pub app_data_dir: PathBuf,
     vault_root: Mutex<PathBuf>,
     indexing: IndexingState,
+    embedding_model: tokio::sync::OnceCell<crate::embeddings::EmbeddingModel>,
     chat_cancel: watch::Sender<bool>,
     claude_cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
     pub claude_connection: Mutex<Option<crate::db::ClaudeConnectionReport>>,
@@ -106,6 +109,7 @@ impl AppState {
             app_data_dir,
             vault_root: Mutex::new(vault_root),
             indexing: IndexingState::new(),
+            embedding_model: tokio::sync::OnceCell::new(),
             chat_cancel: watch::channel(false).0,
             claude_cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             claude_connection: Mutex::new(None),
@@ -208,11 +212,18 @@ impl AppState {
         self.indexing.is_indexing.load(Ordering::SeqCst)
     }
 
-    pub fn request_index_rebuild(&self) -> u64 {
+    pub fn request_index_rebuild(&self, force: bool) -> u64 {
+        if force {
+            self.indexing.force_reindex.store(true, Ordering::SeqCst);
+        }
         self.indexing
             .index_generation
             .fetch_add(1, Ordering::SeqCst)
             + 1
+    }
+
+    pub fn take_force_reindex(&self) -> bool {
+        self.indexing.force_reindex.swap(false, Ordering::SeqCst)
     }
 
     pub fn requested_index_generation(&self) -> u64 {
@@ -236,6 +247,21 @@ impl AppState {
 
     pub fn successful_index_generation(&self) -> u64 {
         self.indexing.successful_generation.load(Ordering::SeqCst)
+    }
+
+    pub async fn embedding_model(&self) -> AppResult<crate::embeddings::EmbeddingModel> {
+        self.embedding_model
+            .get_or_try_init(|| async {
+                tokio::task::spawn_blocking(crate::embeddings::load_embedding_model)
+                    .await
+                    .map_err(|error| {
+                        crate::error::AppError::msg(format!(
+                            "Failed to initialize embedding worker: {error}"
+                        ))
+                    })?
+            })
+            .await
+            .cloned()
     }
 
     /// Begin a chat generation with a fresh cancellation receiver. A watch

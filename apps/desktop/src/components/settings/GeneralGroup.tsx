@@ -22,7 +22,7 @@ export function GeneralGroup({
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-2">
-        <h4 className="flex min-w-0 flex-1 items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        <h4 className="flex min-w-0 flex-1 items-center gap-2 text-xs font-semibold tracking-wide text-muted-foreground">
           <Icon className="size-4 text-primary" aria-hidden />
           {title}
           {help && (

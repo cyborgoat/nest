@@ -1,13 +1,19 @@
+#[cfg(test)]
 use crate::db;
+use crate::db::IndexedFile;
 use crate::error::AppResult;
 use crate::vault;
+#[cfg(test)]
 use rusqlite::Connection;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use uuid::Uuid;
+use std::time::UNIX_EPOCH;
 use walkdir::WalkDir;
 
 const TARGET_CHUNK_CHARS: usize = 1200;
 pub(crate) const OVERLAP_CHARS: usize = 150;
+pub const CHUNKER_VERSION: u32 = 1;
+pub const EMBEDDING_VERSION: &str = "all-minilm-l6-v2-q:384:v1";
 
 #[derive(Debug, Clone)]
 pub struct TextChunk {
@@ -25,6 +31,18 @@ pub struct PendingChunk {
     pub content: String,
     pub start: usize,
     pub end: usize,
+}
+
+#[derive(Debug)]
+pub struct PendingFile {
+    pub metadata: IndexedFile,
+    pub chunks: Vec<PendingChunk>,
+}
+
+#[derive(Debug)]
+pub struct IndexPlan {
+    pub changed: Vec<PendingFile>,
+    pub deleted: Vec<String>,
 }
 
 pub fn chunk_markdown(text: &str, fallback_title: &str) -> Vec<TextChunk> {
@@ -97,21 +115,38 @@ pub fn chunk_markdown(text: &str, fallback_title: &str) -> Vec<TextChunk> {
     chunks
 }
 
-/// Gather Markdown chunks from the vault (no DB / no network).
-pub fn collect_pending_chunks(vault_root: &Path) -> AppResult<Vec<PendingChunk>> {
-    let mut pending = Vec::new();
+fn stable_chunk_id(file_path: &str, chunk: &TextChunk) -> String {
+    let mut input =
+        String::with_capacity(file_path.len() + chunk.title.len() + chunk.content.len());
+    input.push_str(file_path);
+    input.push('\0');
+    input.push_str(&chunk.start.to_string());
+    input.push('\0');
+    input.push_str(&chunk.end.to_string());
+    input.push('\0');
+    input.push_str(&chunk.title);
+    input.push('\0');
+    input.push_str(&chunk.content);
+    blake3::hash(input.as_bytes()).to_hex().to_string()
+}
 
-    for entry in WalkDir::new(vault_root).into_iter().filter_map(|e| e.ok()) {
+/// Compare the vault with the last committed file metadata. Unchanged files
+/// are never read or chunked when size/mtime and index format versions match.
+pub fn collect_index_plan(
+    vault_root: &Path,
+    known_files: Vec<IndexedFile>,
+    force: bool,
+) -> AppResult<IndexPlan> {
+    let known = known_files
+        .into_iter()
+        .map(|file| (file.file_path.clone(), file))
+        .collect::<HashMap<_, _>>();
+    let mut seen = HashSet::new();
+    let mut changed = Vec::new();
+
+    for entry in WalkDir::new(vault_root).into_iter().filter_map(Result::ok) {
         let path = entry.path();
-        if !path.is_file() {
-            continue;
-        }
-        if !path
-            .extension()
-            .and_then(|e| e.to_str())
-            .map(|e| e.eq_ignore_ascii_case("md"))
-            .unwrap_or(false)
-        {
+        if !path.is_file() || !crate::vault::is_markdown_path(path) {
             continue;
         }
         let rel = path
@@ -119,30 +154,68 @@ pub fn collect_pending_chunks(vault_root: &Path) -> AppResult<Vec<PendingChunk>>
             .unwrap_or(path)
             .to_string_lossy()
             .replace('\\', "/");
+        seen.insert(rel.clone());
+        let fs_metadata = path.metadata()?;
+        let size_bytes = fs_metadata.len();
+        let modified_ns = fs_metadata
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+            .map(|duration| duration.as_nanos().min(u128::from(u64::MAX)) as u64)
+            .unwrap_or_default();
+        let unchanged = !force
+            && known.get(&rel).is_some_and(|old| {
+                old.size_bytes == size_bytes
+                    && old.modified_ns == modified_ns
+                    && old.chunker_version == CHUNKER_VERSION
+                    && old.embedding_version == EMBEDDING_VERSION
+            });
+        if unchanged {
+            continue;
+        }
+
         let content = match vault::read_file(vault_root, &rel) {
-            Ok(c) => c,
+            Ok(content) => content,
             Err(_) => continue,
         };
+        let content_hash = blake3::hash(content.as_bytes()).to_hex().to_string();
         let fallback = path
             .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("untitled")
-            .to_string();
-        for ch in chunk_markdown(&content, &fallback) {
-            pending.push(PendingChunk {
-                id: Uuid::new_v4().to_string(),
+            .and_then(|stem| stem.to_str())
+            .unwrap_or("untitled");
+        let chunks = chunk_markdown(&content, fallback)
+            .into_iter()
+            .map(|chunk| PendingChunk {
+                id: stable_chunk_id(&rel, &chunk),
                 file_path: rel.clone(),
-                title: ch.title,
-                content: ch.content,
-                start: ch.start,
-                end: ch.end,
-            });
-        }
+                title: chunk.title,
+                content: chunk.content,
+                start: chunk.start,
+                end: chunk.end,
+            })
+            .collect();
+        changed.push(PendingFile {
+            metadata: IndexedFile {
+                file_path: rel,
+                content_hash,
+                size_bytes,
+                modified_ns,
+                chunker_version: CHUNKER_VERSION,
+                embedding_version: EMBEDDING_VERSION.to_string(),
+            },
+            chunks,
+        });
     }
-    Ok(pending)
+
+    let deleted = known
+        .into_keys()
+        .filter(|path| !seen.contains(path))
+        .collect();
+    Ok(IndexPlan { changed, deleted })
 }
 
 /// Persist chunks into SQLite + FTS5.
+#[cfg(test)]
 pub fn persist_chunks(conn: &Connection, pending: &[PendingChunk]) -> AppResult<(u32, u32)> {
     db::clear_chunks(conn)?;
     let mut files = std::collections::HashSet::new();
@@ -166,6 +239,7 @@ pub fn persist_chunks(conn: &Connection, pending: &[PendingChunk]) -> AppResult<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uuid::Uuid;
 
     #[test]
     fn returns_empty_for_blank_text() {
@@ -245,6 +319,40 @@ mod tests {
         // Reaching here without panicking already proves the slice was
         // taken on a char boundary; content should still be valid text.
         assert!(chunks.iter().all(|c| !c.content.is_empty()));
+    }
+
+    #[test]
+    fn incremental_plan_skips_unchanged_files_and_reports_deletions() {
+        let root = std::env::temp_dir().join(format!("nest-index-plan-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("a.md"), "# A\nOne stable paragraph.\n").unwrap();
+
+        let first = collect_index_plan(&root, Vec::new(), false).unwrap();
+        assert_eq!(first.changed.len(), 1);
+        assert!(first.deleted.is_empty());
+        let metadata = first.changed[0].metadata.clone();
+        let first_ids = first.changed[0]
+            .chunks
+            .iter()
+            .map(|chunk| chunk.id.clone())
+            .collect::<Vec<_>>();
+
+        let second = collect_index_plan(&root, vec![metadata.clone()], false).unwrap();
+        assert!(second.changed.is_empty());
+        assert!(second.deleted.is_empty());
+
+        let forced = collect_index_plan(&root, vec![metadata.clone()], true).unwrap();
+        let forced_ids = forced.changed[0]
+            .chunks
+            .iter()
+            .map(|chunk| chunk.id.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(forced_ids, first_ids, "unchanged chunks keep stable IDs");
+
+        std::fs::remove_file(root.join("a.md")).unwrap();
+        let deleted = collect_index_plan(&root, vec![metadata], false).unwrap();
+        assert_eq!(deleted.deleted, vec!["a.md"]);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

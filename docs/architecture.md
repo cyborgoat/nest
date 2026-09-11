@@ -95,8 +95,9 @@ On first launch, desktop seeds a local bundled `getting-started` pack into the v
 - A bundled default `getting-started` pack is copied once into the vault on first launch, recorded in `sync_state`, and marked active by default.
 - **Import local pack** accepts a `.zip` with `pack.json` (`id`, `name`, `description`, `version`; `path` optional and must equal `id`).
 - Importing a ZIP or creating from a folder with an installed pack ID requires explicit replacement confirmation; Nest keeps exactly one installed version per ID.
-- **Remove pack** deletes the tree, purges SQLite/FTS rows, and rebuilds the vector index.
-- Pack mutations queue a coalesced background index rebuild. If another mutation occurs while indexing, one more generation runs after the active rebuild; install/import dialogs do not wait for model loading or embedding.
+- **Remove pack** deletes the tree and incrementally purges its SQLite/FTS/vector rows.
+- Pack mutations queue a debounced, coalesced background index sync. The sync fingerprints files and only chunks/embeds created or modified Markdown; a mutation during indexing produces one incremental trailing generation.
+- FastEmbed uses one shared bundled-model session, two ONNX inference threads, sequential 16-chunk batches, and short cooperative pauses so large imports remain background work instead of saturating the machine.
 
 The bundled pack can be deleted by the user; a first-run marker prevents reseeding on later launches.
 

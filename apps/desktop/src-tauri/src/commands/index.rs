@@ -16,5 +16,5 @@ pub async fn index_rebuild(state: State<'_, SharedState>) -> AppResult<IndexStat
     let _slot = state
         .inner()
         .begin_operation(crate::state::OperationKind::Reindex, "workspace")?;
-    indexing::schedule_and_wait(state.inner(), std::time::Duration::from_secs(300)).await
+    indexing::schedule_and_wait(state.inner(), std::time::Duration::from_secs(300), true).await
 }
