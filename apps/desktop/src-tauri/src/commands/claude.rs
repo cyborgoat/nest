@@ -92,13 +92,13 @@ pub fn claude_model_options(state: State<'_, SharedState>) -> AppResult<Vec<Clau
     Ok(db::claude_model_options(&settings.claude_custom_models)
         .into_iter()
         .filter(|option| {
-            !db::model_status_for_configured_path(
+            db::model_status_for_configured_path(
                 &statuses,
                 &settings.claude_cli_path,
                 &settings.claude_custom_args,
                 &option.model_id,
             )
-            .is_some_and(|entry| !entry.ok)
+            .is_none_or(|entry| entry.ok)
         })
         .map(|option| ClaudeModelOptionDto {
             model_id: option.model_id,

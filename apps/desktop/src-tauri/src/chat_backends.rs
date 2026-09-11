@@ -210,13 +210,13 @@ fn claude_descriptor(
             .filter(|option| option.source.as_str() != "default")
             .filter(|option| default_model_id.as_deref() != Some(option.model_id.as_str()))
             .filter(|option| {
-                !db::model_status_for_configured_path(
+                db::model_status_for_configured_path(
                     model_statuses,
                     &settings.claude_cli_path,
                     &settings.claude_custom_args,
                     &option.model_id,
                 )
-                .is_some_and(|entry| !entry.ok)
+                .is_none_or(|entry| entry.ok)
             })
             .map(|option| ModelDescriptor {
                 selection: ModelSelection {
