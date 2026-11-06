@@ -1,26 +1,93 @@
+<div align="center">
+
+<img src="apps/desktop/public/nest-logo-transparent.png" alt="Nest logo" width="120" height="120" />
+
 # Nest
 
-Local-first desktop knowledge workspace. Read and edit Markdown knowledge packs, and use retrieval-augmented chat through an OpenAI-compatible LLM.
+**A local-first desktop knowledge workspace. Read and edit Markdown knowledge packs, and chat with them using any OpenAI-compatible LLM.**
 
-Nest ships with a bundled default knowledge pack (`getting-started`) on first launch so users can learn the app immediately, even before connecting to a remote Hub.
+[![Release](https://img.shields.io/github/v/release/cyborgoat/nest?style=flat-square)](https://github.com/cyborgoat/nest/releases/latest)
+[![CI](https://img.shields.io/github/actions/workflow/status/cyborgoat/nest/ci.yml?style=flat-square&label=ci)](https://github.com/cyborgoat/nest/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/github/license/cyborgoat/nest?style=flat-square)](LICENSE)
+![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Windows-lightgrey?style=flat-square)
+[![Built with Tauri](https://img.shields.io/badge/built%20with-Tauri%20v2-24C8DB?style=flat-square)](https://tauri.app)
 
-## Layout
+[Download](https://github.com/cyborgoat/nest/releases/latest) ·
+[Documentation](#documentation) ·
+[Report a bug](https://github.com/cyborgoat/nest/issues)
 
-```
-apps/desktop      Tauri v2 + React (Nest desktop client)
+</div>
+
+---
+
+## What is Nest?
+
+Nest keeps your knowledge as plain Markdown in a local vault and lets you talk to
+it. Install **knowledge packs** (folders of Markdown), keep the ones you care
+about active, and ask questions: Nest retrieves the relevant passages with a
+hybrid full-text and vector search, then answers through the LLM you configure.
+
+It works from the first launch. A bundled **Getting Started** pack is preinstalled,
+and the embedding model ships inside the app, so retrieval works fully offline.
+Only the chat completion goes to your LLM provider.
+
+## Features
+
+- **Markdown knowledge packs.** Browse and edit packs in a built-in editor with
+  GitHub Flavored Markdown, syntax-highlighted code, Mermaid diagrams, and images
+  (including inline SVG).
+- **Retrieval-augmented chat.** Hybrid SQLite full-text and FastEmbed vector
+  search over your active packs, with streaming answers from any
+  OpenAI-compatible endpoint.
+- **Focus with `@`.** `@`-mention files or folders in chat to narrow what Nest
+  retrieves.
+- **Ask and Agent modes.** *Ask* is read-only. *Agent* proposes Markdown changes
+  you review as an inline diff, then **Approve** to write and index them or
+  **Reject** to discard.
+- **Multiple chat sessions.** Tabs for open chats, plus history with pin, archive,
+  rename, and delete. Titles are generated after the first reply.
+- **Optional Hub.** Browse a registry of packs, download them, and publish your
+  own. The desktop app never requires a login; an account is only needed to
+  publish or access restricted packs.
+- **Claude Agent (Windows, optional).** Use a signed-in local Claude CLI as the
+  chat backend. See the [Claude Agent guide](docs/claude-agent.md).
+
+## Install
+
+Download the installer for your platform from the
+[latest release](https://github.com/cyborgoat/nest/releases/latest).
+
+| Platform | Package |
+|----------|---------|
+| macOS (Apple silicon) | `.dmg` |
+| Windows (x64) | `.msi` or `.exe` |
+
+On first run:
+
+1. Open **Settings** and enter an OpenAI-compatible **Base URL**, **API key**, and
+   chat model.
+2. Open **Library**. The **Getting Started** pack is already installed and active.
+3. Go to **Chat** and ask a question about your active packs.
+
+Optional: start the [Hub service](#hub-service) and point **Settings → Hub URL** at
+it to browse, download, and import packs. You can also **Import** a local pack
+`.zip` that contains a `pack.json`.
+
+## Repository layout
+
+```text
+apps/desktop      Tauri v2 + React desktop client
 apps/hub          NestJS Hub API (accounts, publishing, registry, messages)
-apps/admin        React operations console served by Hub at /admin
+apps/admin        React operations console served by the Hub at /admin
 packages/shared   Shared TypeScript types
-examples/knowledge-packs  Example Markdown packs served by the Hub service
+examples/knowledge-packs  Example Markdown packs served by the Hub
 docs/             Architecture and development notes
 ```
 
-## Prerequisites
+## Build from source
 
-- Node.js 22+
-- Rust (stable) + Tauri [prerequisites](https://v2.tauri.app/start/prerequisites/)
-
-## Desktop app
+Requirements: Node.js 22+, and a stable Rust toolchain with the
+[Tauri prerequisites](https://v2.tauri.app/start/prerequisites/).
 
 ```bash
 cd apps/desktop
@@ -28,66 +95,63 @@ npm install
 npm run tauri dev
 ```
 
-### First-run tips
-
-1. Open **Library** and start with the bundled **Getting Started** pack. It is preinstalled on first run, active by default, and can be removed any time.
-2. Configure an OpenAI-compatible **Base URL**, **API key**, and chat model under **Settings**.
-3. (Optional) Start the Hub service (`apps/hub`), then open **Hub** in the desktop app. The **Browse** tab lists the remote registry for download; the **Installed** tab manages everything in your local vault. Use **Import** to add a local pack `.zip` (must include `pack.json`). Indexing is queued in the background after download, import, replacement, and removal.
-4. In **Library**, keep packs **Active** for chat retrieval (use **+/−** to deactivate). Inactive packs stay browsable under a collapsible section.
-5. In **Chat**, ask questions over all active packs, or `@`-mention files/folders under active packs to narrow focus.
-6. Chat supports **multiple sessions**: tabs for open chats, History for pin/archive/rename/delete. Session titles are generated after the first reply when still untitled.
-7. Choose **Ask** for read-only answers or **Agent** for permissioned Markdown proposals. Agent previews pending content immediately; review its unified inline diff in the Markdown editor, then **Approve** to write and index it or **Reject** to discard it. Unresolved proposals remain the effective workspace for follow-up Agent turns.
-8. (Optional, Windows) Enable **Claude Agent** in Settings to use a signed-in local Claude CLI as the chat backend. **Test connection** runs a live CLI round trip with a Nest knowledge-tool check before Claude becomes selectable; see the [Claude Agent guide](docs/claude-agent.md).
-
-### Markdown support in the app
-
-- GitHub Flavored Markdown (tables, task lists, strikethrough, autolinks)
-- Fenced code blocks with syntax highlighting (common languages)
-- Mermaid diagrams via fenced `mermaid` blocks
-- Relative and absolute image references, including inline SVG
-
 ## Hub service
 
-[NestJS](https://nestjs.com/) API served on `HOST`/`PORT` from `.env` (see `apps/hub/.env.example`). Configure the desktop app's **Settings → Hub URL** to point at this service.
+The Hub is a [NestJS](https://nestjs.com/) API that hosts the pack registry. Set
+`HOST` and `PORT` in `apps/hub/.env` (see `apps/hub/.env.example`), then point the
+desktop app's **Settings → Hub URL** at it.
 
 ```bash
 cd apps/admin
 npm install
 npm run build
 
-cd apps/hub
+cd ../hub
 cp .env.example .env
 npm install
 npm run start:dev
 ```
 
-Public catalog and download routes remain anonymous. Accounts are only needed to publish or access restricted packs. See the complete [Hub API reference](docs/hub-api.md).
+The catalog and downloads are anonymous. Accounts are only needed to publish or
+access restricted packs. Authors submit packs and new versions for administrator
+review, and an admin console at `/admin` handles reviews, roles, visibility,
+access grants, and releases. See the [Hub API reference](docs/hub-api.md).
 
-## Releases
+## How it works
 
-Desktop installers (macOS `.dmg` for Apple Silicon and Windows `.msi`/`.exe`) are built by GitHub Actions from version tags (`v*`) on `main`. Bump the app version in `apps/desktop` (all three of `src-tauri/tauri.conf.json`, `package.json`, `src-tauri/Cargo.toml`, plus their generated lockfiles) and push the matching tag `v{version}` to build installers and publish release `v{version}` automatically. See [Development → Releases](docs/development.md#releases).
+- **Local vault.** Packs, `nest.db`, and the vector database live in the OS app
+  data directory for `Nest`.
+- **Hybrid retrieval.** SQLite FTS plus FastEmbed vector search through
+  [Rig](https://github.com/0xPlaygrounds/rig) (`rig-fastembed` and `rig-sqlite`),
+  with the embedding model bundled in the binary.
+- **Active packs** define the default search domain. `@` focus paths narrow it and
+  load bounded Markdown directly while indexing catches up.
+- **Agent edits** go through a reviewable pending workspace, so nothing is written
+  until you approve it.
+- The bundled `getting-started` pack is seeded once per app data directory and is
+  not reinstalled automatically after you delete it.
 
 ## Documentation
 
-- [Architecture](docs/architecture.md) — vault, RAG, streaming
-- [Pack registry](docs/pack-registry.md) — PyPI-style multi-version registry
-- [Hub API](docs/hub-api.md) — authentication, publishing, messages, and administration
-- [Chat sessions](docs/chat-sessions.md) — tabs, history, titles
-- [Claude Agent](docs/claude-agent.md) — Windows setup, selectors, tools, review, and recovery
-- [Development](docs/development.md) — env vars, sanity checks, releases
+- [Architecture](docs/architecture.md): vault, RAG, streaming
+- [Pack registry](docs/pack-registry.md): PyPI-style multi-version registry
+- [Hub API](docs/hub-api.md): authentication, publishing, messages, administration
+- [Chat sessions](docs/chat-sessions.md): tabs, history, titles, Ask and Agent
+- [Claude Agent](docs/claude-agent.md): Windows setup, tools, review, recovery
+- [Development](docs/development.md): env vars, checks, and releases
 
-## Design notes
+## Releases
 
-- Markdown-only knowledge
-- Local vault + SQLite FTS **and** FastEmbed vector RAG via [Rig](https://github.com/0xPlaygrounds/rig) (`rig-fastembed` + `rig-sqlite`); the embedding model ships bundled in the binary, so retrieval works fully offline with no first-run download
-- Ask performs local hybrid retrieval before one Rig streaming completion. Agent adds permissioned Markdown tools and a reviewable pending-workspace overlay; completions go to your OpenAI-compatible LLM.
-- Active packs define the default RAG domain; `@` focus paths narrow retrieval and directly load bounded Markdown content (including folders) while indexing catches up
-- Desktop use remains login-free; an optional Hub account is used only for publishing and restricted packs.
-- Registered authors submit local packs and new versions for administrator review.
-- Hub serves an admin/superuser operations console at `/admin` for reviews, roles, visibility, access grants, and release management.
+Installers are built by GitHub Actions from version tags (`v*`) and published as a
+GitHub release. See [Development → Releases](docs/development.md#releases) for the
+version-bump checklist.
 
-The bundled `getting-started` pack is seeded once per app data directory and is not reinstalled automatically after deletion.
+## Contributing
 
-## Data locations
+Issues and pull requests are welcome. Please open an issue first for larger
+changes, and see [docs/development.md](docs/development.md) for environment setup
+and the checks to run.
 
-App data (vault + `nest.db` + vector DB) lives in the OS app data directory for `Nest`.
+## License
+
+MIT. See [LICENSE](LICENSE).
